@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attendify | Smart Student Attendance</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- NAVBAR -->
+  <header class="navbar">
+    <div class="brand">
+      <span>Attend<span>ify</span> 🎓</span>
+    </div>
+    <div style="display: flex; gap: 15px; align-items: center;">
+      <button id="logoutBtn" class="btn-outline hidden" style="padding: 6px 12px; font-size: 0.85rem; border-color: var(--danger); color: var(--danger);">Logout 🚪</button>
+      <button id="themeToggle" class="theme-btn" aria-label="Toggle theme">🌙</button>
+    </div>
+  </header>
+
+  <main class="container">
+    
+    <!-- AUTH WRAPPER (Hidden once logged in) -->
+    <div id="authContainer">
+      
+      <!-- SIGN UP CARD -->
+      <section id="signupCard" class="card">
+        <h2>Create Account 🚀</h2>
+        <p>Sign up to start managing or joining classes.</p>
+        
+        <form id="signupForm">
+          <div class="field">
+            <label for="signupName">Full Name</label>
+            <input type="text" id="signupName" required placeholder="John Doe">
+          </div>
+          <div class="field">
+            <label for="signupMatric">Matric Number</label>
+            <input type="text" id="signupMatric" required placeholder="e.g., UCH/2022/4092">
+          </div>
+          <div class="field">
+            <label for="signupEmail">Email Address</label>
+            <input type="email" id="signupEmail" required placeholder="student@university.edu">
+          </div>
+          <div class="field">
+            <label for="signupPassword">Create Password</label>
+            <input type="password" id="signupPassword" required placeholder="••••••••">
+            <small style="color: var(--muted); font-size: 0.75rem; display: block; margin-top: 4px;">💡 Use something you can remember—no need for rocket science passwords!</small>
+          </div>
+          <button type="submit" class="btn">Sign Up 📝</button>
+        </form>
+
+
+        <p style="text-align: center; margin-top: 15px; font-size: 0.85rem;">
+          Already have an account? <a href="#" id="showLogin" style="color: var(--teal); font-weight: 700; text-decoration: none;">Log In</a>
+        </p>
+      </section>
+
+      <!-- LOG IN CARD (Initially hidden) -->
+      <section id="loginCard" class="card hidden">
+        <h2>Welcome Back 👋</h2>
+        <p>Log in to access your course portals.</p>
+        
+        <form id="loginForm">
+          <div class="field">
+            <label for="loginEmail">Email Address</label>
+            <input type="email" id="loginEmail" required placeholder="student@university.edu">
+          </div>
+          <div class="field">
+            <label for="loginPassword">Password</label>
+            <input type="password" id="loginPassword" required placeholder="••••••••">
+          </div>
+          <button type="submit" class="btn">Log In 🔑</button>
+        </form>
+        <p style="text-align: center; margin-top: 15px; font-size: 0.85rem;">
+          Don't have an account? <a href="#" id="showSignup" style="color: var(--teal); font-weight: 700; text-decoration: none;">Sign Up</a>
+        </p>
+      </section>
+
+    </div>
+
+    <!-- MAIN DASHBOARD (Hidden until logged in) -->
+    <section id="dashboardSection" class="hidden">
+     <div class="dashboard-header">
+        <h2>Hey, <span id="displayName">Student</span>! 👋</h2>
+        <p>Matric No: <strong id="displayMatric">---</strong> | Manage your courses or check in below.</p>
+      </div>
+
+      <div class="action-buttons">
+        <button id="openCreateModal" class="btn btn-secondary">➕ Create Course</button>
+        <button id="openJoinModal" class="btn">🤝 Join Course</button>
+      </div>
+
+      <h3 class="section-title">Your Enrolled Courses 📚</h3>
+      <div id="courseGrid" class="course-grid">
+        <!-- Dynamic course cards will appear here -->
+      </div>
+
+      <div style="margin-top: 40px; text-align: center;">
+        <button id="deleteAccountBtn" style="background: transparent; border: none; color: var(--danger); text-decoration: underline; cursor: pointer; font-size: 0.85rem;">Delete My Account ⚠️</button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- MODALS -->
+  <div id="createModal" class="modal">
+    <div class="modal-card">
+      <h3>Create a New Course 🏫</h3>
+      <form id="createCourseForm">
+        <div class="field">
+          <label for="courseName">Course Title & Code</label>
+          <input type="text" id="courseName" required placeholder="e.g., MTH 301">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-outline close-modal">Cancel</button>
+          <button type="submit" class="btn">Create Class 🚀</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="joinModal" class="modal">
+    <div class="modal-card">
+      <h3>Join a Course 🤝</h3>
+      <form id="joinCourseForm">
+        <div class="field">
+          <label for="joinCode">Enter Course Code</label>
+          <input type="text" id="joinCode" required placeholder="e.g., MTH-6719">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-outline close-modal">Cancel</button>
+          <button type="submit" class="btn">Join Class 🏃‍♂️</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
