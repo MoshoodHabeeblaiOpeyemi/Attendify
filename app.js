@@ -19,7 +19,6 @@ const displayMatric = document.getElementById("displayMatric");
 const logoutBtn = document.getElementById("logoutBtn");
 const deleteAccountBtn = document.getElementById("deleteAccountBtn");
 
-// Toggle between Sign Up and Log In forms
 document.getElementById("showLogin").addEventListener("click", (e) => {
   e.preventDefault();
   signupCard.classList.add("hidden");
@@ -42,6 +41,17 @@ function checkAuth() {
     logoutBtn.classList.remove("hidden");
     displayName.textContent = currentUser.name;
     displayMatric.textContent = currentUser.matric;
+
+    // Show Create Course button ONLY if the logged-in user is a Course Rep
+    const openCreateModalBtn = document.getElementById("openCreateModal");
+    if (openCreateModalBtn) {
+      if (currentUser.isRep) {
+        openCreateModalBtn.classList.remove("hidden");
+      } else {
+        openCreateModalBtn.classList.add("hidden");
+      }
+    }
+
     renderCourses();
   } else {
     authContainer.classList.remove("hidden");
@@ -61,6 +71,7 @@ if (signupForm) {
     const matric = document.getElementById("signupMatric").value.trim().toUpperCase();
     const email = document.getElementById("signupEmail").value.trim().toLowerCase();
     const password = document.getElementById("signupPassword").value;
+    const isRep = document.getElementById("isRepCheckbox").checked; // Capture Rep role
 
     const existingUser = users.find(u => u.email === email || u.matric === matric);
     if (existingUser) {
@@ -68,7 +79,7 @@ if (signupForm) {
       return;
     }
 
-    const newUser = { name, matric, email, password };
+    const newUser = { name, matric, email, password, isRep };
     users.push(newUser);
     localStorage.setItem("attendify_users", JSON.stringify(users));
 
@@ -130,10 +141,7 @@ const joinModal = document.getElementById("joinModal");
 const openCreateModalBtn = document.getElementById("openCreateModal");
 if (openCreateModalBtn) {
   openCreateModalBtn.addEventListener("click", () => {
-    const confirmRep = confirm("👑 Are you registering as the Official Course Rep for this class?");
-    if (confirmRep && createModal) {
-      createModal.classList.add("show");
-    }
+    if (createModal) createModal.classList.add("show");
   });
 }
 
@@ -156,26 +164,43 @@ let courses = JSON.parse(localStorage.getItem("attendify_courses")) || [];
 const courseGrid = document.getElementById("courseGrid");
 const portalSection = document.getElementById("portalSection");
 
-let activeCourse = null; // Tracks which course portal we are currently viewing
+let activeCourse = null;
 
 function renderCourses() {
   if (!courseGrid) return;
   courseGrid.innerHTML = "";
-  if (courses.length === 0) {
+
+  // Filter courses: Show a course ONLY if the user is the Rep or is in the enrolled array
+  const myCourses = courses.filter(course => {
+    if (!currentUser) return false;
+    const isRep = course.rep.toLowerCase() === currentUser.name.toLowerCase();
+    const isEnrolled = course.enrolled && course.enrolled.includes(currentUser.matric);
+    return isRep || isEnrolled;
+  });
+
+  if (myCourses.length === 0) {
     courseGrid.innerHTML = `<p style="color: var(--muted);">No courses joined yet. Create or join one above! 🚀</p>`;
     return;
   }
 
-  courses.forEach((course, index) => {
+  myCourses.forEach((course) => {
+    // Find the actual index of this course in the main 'courses' array so buttons work correctly
+    const index = courses.findIndex(c => c.code === course.code);
+
     const card = document.createElement("div");
     card.className = "card";
     card.style.maxHeight = "none";
     card.style.position = "relative";
     
     const enrolledCount = course.enrolled ? course.enrolled.length : 1;
+    const isThisUserRep = currentUser && course.rep.toLowerCase() === currentUser.name.toLowerCase();
+
+    const actionIcon = isThisUserRep 
+      ? `<button onclick="deleteCourse(${index})" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; cursor: pointer; font-size: 1.2rem;" title="Delete Course (Rep Only)">🗑️</button>`
+      : `<button onclick="leaveCourse(${index})" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; cursor: pointer; font-size: 1.2rem;" title="Leave Course">🚪</button>`;
 
     card.innerHTML = `
-      <button onclick="deleteCourse(${index})" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; cursor: pointer; font-size: 1.2rem;" title="Leave Course">🗑️</button>
+      ${actionIcon}
       <h3 style="color: var(--navy); margin-bottom: 5px;">${course.name}</h3>
       <p style="font-size: 0.85rem; margin-bottom: 15px;">Code: <strong>${course.code}</strong> | Rep: ${course.rep}</p>
       
@@ -190,40 +215,52 @@ function renderCourses() {
   });
 }
 
+// Function for Reps to permanently delete a course
 window.deleteCourse = function(index) {
-  if (confirm(`⚠️ Remove course "${courses[index].name}"?`)) {
+  if (confirm(`⚠️ WARNING: As the Course Rep, deleting "${courses[index].name}" removes it entirely. Are you sure?`)) {
     courses.splice(index, 1);
     localStorage.setItem("attendify_courses", JSON.stringify(courses));
     renderCourses();
   }
 };
 
-// Open Portal Function (Handles Security & Role Check)
+// Function for Regular Students to safely leave a course (Only removes their enrollment, doesn't delete the course!)
+window.leaveCourse = function(index) {
+  const course = courses[index];
+  if (confirm(`⚠️ Do you want to leave "${course.name}"? You can rejoin anytime using code [${course.code}].`)) {
+    // Remove their matric number from the enrolled array
+    if (course.enrolled) {
+      course.enrolled = course.enrolled.filter(m => m !== currentUser.matric);
+    }
+    
+    // Save the updated courses list globally (Course remains intact for the Rep and other students!)
+    localStorage.setItem("attendify_courses", JSON.stringify(courses));
+    renderCourses();
+    alert(`You have left ${course.name}. 👋`);
+  }
+};
+
+// Open Portal Function with Security Guard
 window.openPortal = function(index) {
   const selectedCourse = courses[index];
   
-  // 1. Check if current user is the Rep or is enrolled in the course
   const isRep = currentUser && selectedCourse.rep.toLowerCase() === currentUser.name.toLowerCase();
   const isEnrolled = currentUser && selectedCourse.enrolled && selectedCourse.enrolled.includes(currentUser.matric);
 
-  // 2. If they are neither, block them!
   if (!isRep && !isEnrolled) {
-    alert(`⚠️ Access Denied! You are not enrolled in "${selectedCourse.name}". Please join the course using code [${selectedCourse.code}] first.`);
-    return; // Stop right here
+    alert(`⚠️ Access Denied! You are not enrolled in "${selectedCourse.name}". Please join using code [${selectedCourse.code}] first.`);
+    return;
   }
 
-  // 3. If they passed the check, open the portal workspace
   activeCourse = selectedCourse;
   
   if (dashboardSection) dashboardSection.classList.add("hidden");
   if (portalSection) portalSection.classList.remove("hidden");
 
-  // Populate portal header details
   document.getElementById("portalCourseTitle").textContent = activeCourse.name;
   document.getElementById("portalCourseCode").textContent = activeCourse.code;
   document.getElementById("portalCourseRep").textContent = activeCourse.rep;
 
-  // Show/Hide controls based on whether they are the Rep or a Student
   const repControls = document.getElementById("repControls");
   const studentControls = document.getElementById("studentControls");
 
@@ -236,17 +273,16 @@ window.openPortal = function(index) {
   }
 };
 
-// Back to Dashboard button logic
 const backToDashboardBtn = document.getElementById("backToDashboard");
 if (backToDashboardBtn) {
   backToDashboardBtn.addEventListener("click", () => {
-    portalSection.classList.add("hidden");
-    dashboardSection.classList.remove("hidden");
+    if (portalSection) portalSection.classList.add("hidden");
+    if (dashboardSection) dashboardSection.classList.remove("hidden");
     activeCourse = null;
   });
 }
 
-// Create Course Form
+// Create Course Form (Manual Title & Official Course Code)
 const createCourseForm = document.getElementById("createCourseForm");
 if (createCourseForm) {
   createCourseForm.addEventListener("submit", (e) => {
@@ -254,7 +290,6 @@ if (createCourseForm) {
     const name = document.getElementById("courseTitle").value.trim();
     const code = document.getElementById("courseCodeInput").value.trim().toUpperCase();
 
-    // Check if this course code already exists
     const codeExists = courses.find(c => c.code === code);
     if (codeExists) {
       alert(`⚠️ Course code "${code}" already exists in the system!`);
@@ -263,7 +298,7 @@ if (createCourseForm) {
 
     const newCourse = { 
       name, 
-      code, // Uses the exact official code provided by the Rep
+      code, 
       rep: currentUser ? currentUser.name : "Unknown",
       enrolled: currentUser ? [currentUser.matric] : []
     };
@@ -301,5 +336,4 @@ if (joinCourseForm) {
   });
 }
 
-// Initial check on load
 checkAuth();

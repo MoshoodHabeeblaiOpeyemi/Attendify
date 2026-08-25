@@ -47,6 +47,13 @@
             <input type="password" id="signupPassword" required placeholder="••••••••">
             <small style="color: var(--muted); font-size: 0.75rem; display: block; margin-top: 4px;">💡 Use something you can remember—no need for rocket science passwords!</small>
           </div>
+          
+          <!-- NEW: COURSE REP CHECKBOX -->
+          <div class="field" style="display: flex; align-items: center; gap: 10px; margin-bottom: 25px;">
+            <input type="checkbox" id="isRepCheckbox" style="width: 20px; height: 20px; accent-color: var(--teal); cursor: pointer;">
+            <label for="isRepCheckbox" style="margin-bottom: 0; cursor: pointer; font-size: 0.9rem;">Register as a Course Rep 👑</label>
+          </div>
+
           <button type="submit" class="btn">Sign Up 📝</button>
         </form>
 
@@ -88,7 +95,7 @@
       </div>
 
       <div class="action-buttons">
-        <button id="openCreateModal" class="btn btn-secondary">➕ Create Course</button>
+        <button id="openCreateModal" class="btn btn-secondary hidden">➕ Create Course</button>
         <button id="openJoinModal" class="btn">🤝 Join Course</button>
       </div>
 
