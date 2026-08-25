@@ -116,6 +116,12 @@ if (logoutBtn) {
   logoutBtn.addEventListener("click", () => {
     currentUser = null;
     localStorage.removeItem("attendify_current_user");
+    
+    // Clear portal view state on logout
+    if (portalSection) portalSection.classList.add("hidden");
+    activeCourse = null;
+    if (countdownInterval) clearInterval(countdownInterval);
+    
     checkAuth();
   });
 }
@@ -127,6 +133,11 @@ if (deleteAccountBtn) {
       localStorage.setItem("attendify_users", JSON.stringify(users));
       currentUser = null;
       localStorage.removeItem("attendify_current_user");
+      
+      if (portalSection) portalSection.classList.add("hidden");
+      activeCourse = null;
+      if (countdownInterval) clearInterval(countdownInterval);
+
       checkAuth();
       alert("Account deleted.");
     }
@@ -160,7 +171,6 @@ if (openForgotModalBtn) {
   });
 }
 
-// Universal close button handler for all modals (Cancel buttons)
 document.querySelectorAll(".close-modal").forEach(btn => {
   btn.addEventListener("click", () => {
     if (createModal) createModal.classList.remove("show");
@@ -244,7 +254,6 @@ window.leaveCourse = function(index) {
 };
 
 // Open Portal Function with Security Guard
-// Open Portal Function with Security Guard
 window.openPortal = function(index) {
   const selectedCourse = courses[index];
   
@@ -276,7 +285,6 @@ window.openPortal = function(index) {
     if (studentControls) studentControls.classList.remove("hidden");
   }
 
-  // CALL THIS TO LOAD THE TIMER & ROSTER STATE IMMEDIATELY
   renderPortalState();
 };
 
@@ -286,6 +294,7 @@ if (backToDashboardBtn) {
     if (portalSection) portalSection.classList.add("hidden");
     if (dashboardSection) dashboardSection.classList.remove("hidden");
     activeCourse = null;
+    if (countdownInterval) clearInterval(countdownInterval);
   });
 }
 
@@ -367,8 +376,6 @@ if (forgotPasswordForm) {
   });
 }
 
-checkAuth();
-
 // --- 60-SECOND ATTENDANCE ENGINE & TIMER LOGIC ---
 let countdownInterval = null;
 
@@ -381,7 +388,6 @@ const checkInForm = document.getElementById("checkInForm");
 const rosterList = document.getElementById("rosterList");
 const rosterCount = document.getElementById("rosterCount");
 
-// 1. REP GENERATES PIN
 if (generatePinBtn) {
   generatePinBtn.addEventListener("click", () => {
     if (!activeCourse) return;
@@ -391,6 +397,7 @@ if (generatePinBtn) {
     activeCourse.activeSession = {
       pin: randomPin,
       expiresAt: Date.now() + 60000, // 60 seconds
+      expired: false,
       attendees: []
     };
 
@@ -400,54 +407,60 @@ if (generatePinBtn) {
   });
 }
 
-// 2. START TIMER
 function startSessionTimer() {
   if (countdownInterval) clearInterval(countdownInterval);
 
   if (!activeCourse || !activeCourse.activeSession) return;
 
   countdownInterval = setInterval(() => {
-    const timeLeft = Math.floor((activeCourse.activeSession.expiresAt - Date.now()) / 1000);
+    const session = activeCourse.activeSession;
+    if (!session) {
+      clearInterval(countdownInterval);
+      return;
+    }
+
+    const timeLeft = Math.floor((session.expiresAt - Date.now()) / 1000);
+
+    // Grab the timer element dynamically inside the loop so it never misses it
+    const liveTimerElement = document.getElementById("countdownTimer");
 
     if (timeLeft <= 0) {
       clearInterval(countdownInterval);
-      activeCourse.activeSession = null;
+      session.expired = true;
       updateCourseInStorage();
       renderPortalState();
-      alert("⏰ Attendance session has ended!");
     } else {
-      if (countdownTimer) countdownTimer.textContent = `${timeLeft}s`;
+      if (liveTimerElement) {
+        liveTimerElement.textContent = `${timeLeft}s`;
+      }
     }
   }, 1000);
 }
 
-// 3. STUDENT SUBMITS PIN
+
 if (checkInForm) {
   checkInForm.addEventListener("submit", (e) => {
     e.preventDefault();
-    if (!activeCourse || !activeCourse.activeSession) {
-      alert("⚠️ No active attendance session is currently running for this course.");
+    const session = activeCourse ? activeCourse.activeSession : null;
+
+    if (!session || session.expired || Date.now() > session.expiresAt) {
+      alert("⏰ Time is up! The attendance session has expired.");
       return;
     }
 
     const enteredPin = document.getElementById("studentPinInput").value.trim();
 
-    if (Date.now() > activeCourse.activeSession.expiresAt) {
-      alert("⏰ Time is up! Session has expired.");
-      return;
-    }
-
-    if (enteredPin !== activeCourse.activeSession.pin) {
+    if (enteredPin !== session.pin) {
       alert("❌ Incorrect PIN! Check with your Course Rep.");
       return;
     }
 
-    if (activeCourse.activeSession.attendees.includes(currentUser.matric)) {
+    if (session.attendees.includes(currentUser.matric)) {
       alert("⚠️ You have already checked in for this session!");
       return;
     }
 
-    activeCourse.activeSession.attendees.push(currentUser.matric);
+    session.attendees.push(currentUser.matric);
     updateCourseInStorage();
     renderPortalState();
     checkInForm.reset();
@@ -455,7 +468,6 @@ if (checkInForm) {
   });
 }
 
-// 4. UPDATE STORAGE HELPER
 function updateCourseInStorage() {
   const index = courses.findIndex(c => c.code === activeCourse.code);
   if (index !== -1) {
@@ -464,36 +476,66 @@ function updateCourseInStorage() {
   }
 }
 
-// 5. RENDER PORTAL STATE
 function renderPortalState() {
   if (!activeCourse) return;
 
   const isRep = currentUser && activeCourse.rep.toLowerCase() === currentUser.name.toLowerCase();
-  const hasActiveSession = activeCourse.activeSession && Date.now() < activeCourse.activeSession.expiresAt;
+  const session = activeCourse.activeSession;
+  const isSessionActive = session && !session.expired && Date.now() < session.expiresAt;
 
-  if (hasActiveSession) {
-    if (sessionBanner) sessionBanner.classList.remove("hidden");
+  const bannerTitle = document.getElementById("bannerTitle");
+  const bannerText = document.getElementById("bannerText");
+
+  if (isSessionActive) {
+    if (sessionBanner) {
+      sessionBanner.classList.remove("hidden");
+      sessionBanner.style.borderColor = "#28a745";
+      sessionBanner.style.background = "rgba(40, 167, 69, 0.1)";
+      if (bannerTitle) {
+        bannerTitle.textContent = "🔴 ATTENDANCE SESSION LIVE";
+        bannerTitle.style.color = "#28a745";
+      }
+      if (bannerText) {
+        bannerText.innerHTML = `Time Remaining: <strong id="countdownTimer" style="font-size: 1.2rem;">60s</strong>`;
+      }
+    }
     if (isRep) {
       if (activePinDisplay) activePinDisplay.classList.remove("hidden");
-      if (pinCodeText) pinCodeText.textContent = activeCourse.activeSession.pin;
+      if (pinCodeText) pinCodeText.textContent = session.pin;
       if (generatePinBtn) generatePinBtn.textContent = "🔄 Regenerate PIN";
     }
-    // If there is an active session and it hasn't started ticking on screen yet, start the timer
     startSessionTimer();
   } else {
-    if (sessionBanner) sessionBanner.classList.add("hidden");
-    if (isRep && activePinDisplay) activePinDisplay.classList.add("hidden");
-    if (generatePinBtn) generatePinBtn.textContent = "Generate Attendance PIN ⏱️";
+    if (sessionBanner) {
+      if (session && session.expired) {
+        sessionBanner.classList.remove("hidden");
+        sessionBanner.style.borderColor = "#dc3545";
+        sessionBanner.style.background = "rgba(220, 53, 69, 0.1)";
+        if (bannerTitle) {
+          bannerTitle.textContent = "⏹️ ATTENDANCE SESSION CLOSED";
+          bannerTitle.style.color = "#dc3545";
+        }
+        if (bannerText) {
+          bannerText.textContent = "The 60-second window has expired. PIN is no longer valid.";
+        }
+      } else {
+        sessionBanner.classList.add("hidden");
+      }
+    }
+    if (isRep) {
+      if (activePinDisplay) activePinDisplay.classList.add("hidden");
+      if (generatePinBtn) generatePinBtn.textContent = "Generate Attendance PIN ⏱️";
+    }
   }
 
   if (!rosterList) return;
   rosterList.innerHTML = "";
 
-  const attendees = activeCourse.activeSession && activeCourse.activeSession.attendees ? activeCourse.activeSession.attendees : [];
+  const attendees = session && session.attendees ? session.attendees : [];
   if (rosterCount) rosterCount.textContent = attendees.length;
 
   if (attendees.length === 0) {
-    rosterList.innerHTML = `<li style="color: var(--muted); font-size: 0.9rem; text-align: center; padding: 10px;">No active check-ins yet. Waiting for students... ⏳</li>`;
+    rosterList.innerHTML = `<li style="color: var(--muted); font-size: 0.9rem; text-align: center; padding: 10px;">No check-ins recorded yet. ⏳</li>`;
     return;
   }
 
@@ -504,3 +546,4 @@ function renderPortalState() {
     rosterList.appendChild(li);
   });
 }
+checkAuth();
