@@ -79,9 +79,10 @@
 
     </div>
 
-    <!-- MAIN DASHBOARD (Hidden until logged in) -->
+  <!-- MAIN DASHBOARD (Hidden once inside portal) -->
     <section id="dashboardSection" class="hidden">
-     <div class="dashboard-header">
+      <!-- (Your existing dashboard content remains here) -->
+      <div class="dashboard-header">
         <h2>Hey, <span id="displayName">Student</span>! 👋</h2>
         <p>Matric No: <strong id="displayMatric">---</strong> | Manage your courses or check in below.</p>
       </div>
@@ -92,12 +93,52 @@
       </div>
 
       <h3 class="section-title">Your Enrolled Courses 📚</h3>
-      <div id="courseGrid" class="course-grid">
-        <!-- Dynamic course cards will appear here -->
-      </div>
+      <div id="courseGrid" class="course-grid"></div>
 
       <div style="margin-top: 40px; text-align: center;">
         <button id="deleteAccountBtn" style="background: transparent; border: none; color: var(--danger); text-decoration: underline; cursor: pointer; font-size: 0.85rem;">Delete My Account ⚠️</button>
+      </div>
+    </section>
+
+    <!-- NEW: COURSE PORTAL SECTION (Hidden by default) -->
+    <section id="portalSection" class="hidden">
+      <button id="backToDashboard" class="btn-outline" style="margin-bottom: 20px; width: auto; padding: 8px 16px; font-size: 0.85rem;">← Back to Dashboard</button>
+      
+      <div class="card" style="max-width: 100%;">
+        <h2 id="portalCourseTitle">Course Title</h2>
+        <p style="margin-bottom: 20px;">Course Code: <strong id="portalCourseCode">---</strong> | Rep: <span id="portalCourseRep">---</span></p>
+        
+        <hr style="border: 0; border-top: 1px solid var(--border); margin-bottom: 20px;">
+
+        <!-- DYNAMIC AREA: CHANGES BASED ON WHETHER USER IS REP OR STUDENT -->
+        <div id="repControls" class="hidden" style="background: var(--bg); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--border);">
+          <h3 style="color: var(--navy); margin-bottom: 10px;">👑 Course Rep Control Center</h3>
+          <p style="font-size: 0.9rem; margin-bottom: 15px;">Click below to capture your GPS location and generate the 60-second attendance PIN.</p>
+          <button id="generatePinBtn" class="btn">Generate Attendance PIN ⏱️</button>
+          <div id="activePinDisplay" style="margin-top: 15px; font-size: 1.5rem; font-weight: bold; color: var(--teal); text-align: center;"></div>
+        </div>
+
+        <div id="studentControls" class="hidden" style="background: var(--bg); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--border);">
+          <h3 style="color: var(--navy); margin-bottom: 10px;">📍 Student Check-In Portal</h3>
+          <p style="font-size: 0.9rem; margin-bottom: 15px;">Enter the 4-digit PIN given by your Rep before the timer runs out.</p>
+          
+          <form id="checkInForm">
+            <div class="field">
+              <label for="studentPinInput">Enter 4-Digit PIN</label>
+              <input type="text" id="studentPinInput" maxlength="4" required placeholder="e.g. 4892" style="font-size: 1.5rem; text-align: center; letter-spacing: 5px;">
+            </div>
+            <button type="submit" class="btn">Submit Attendance ✅</button>
+          </form>
+        </div>
+
+        <!-- LIVE ROSTER -->
+        <h3 style="margin-bottom: 10px; font-size: 1.1rem; color: var(--navy);">👥 Live Attendance Roster</h3>
+        <div style="background: var(--bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border); max-height: 200px; overflow-y: auto;">
+          <ul id="rosterList" style="list-style: none; padding-left: 0;">
+            <li style="color: var(--muted); font-size: 0.9rem;">No active check-ins yet. Waiting for session to start... ⏳</li>
+          </ul>
+        </div>
+
       </div>
     </section>
 
@@ -123,7 +164,7 @@
   <div id="joinModal" class="modal">
     <div class="modal-card">
       <h3>Join a Course 🤝</h3>
-      <form id="joinCourseForm">
+      <form id="joinCourseForm"> 
         <div class="field">
           <label for="joinCode">Enter Course Code</label>
           <input type="text" id="joinCode" required placeholder="e.g., MTH-6719">

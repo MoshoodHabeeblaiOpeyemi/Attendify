@@ -151,9 +151,12 @@ document.querySelectorAll(".close-modal").forEach(btn => {
   });
 });
 
-// --- COURSES ---
+// --- COURSES & PORTAL MANAGEMENT ---
 let courses = JSON.parse(localStorage.getItem("attendify_courses")) || [];
 const courseGrid = document.getElementById("courseGrid");
+const portalSection = document.getElementById("portalSection");
+
+let activeCourse = null; // Tracks which course portal we are currently viewing
 
 function renderCourses() {
   if (!courseGrid) return;
@@ -181,9 +184,7 @@ function renderCourses() {
         <strong>${enrolledCount}</strong>
       </div>
 
-      <p style="font-size: 0.8rem; color: var(--muted); margin-bottom: 15px; text-align: center;">⏳ Attendance tracking hasn't started yet.</p>
-
-      <button class="btn" style="padding: 10px; font-size: 0.9rem;" onclick="alert('Opening portal for ${course.name}!')">Open Portal 🚀</button>
+      <button class="btn" style="padding: 10px; font-size: 0.9rem;" onclick="openPortal(${index})">Open Portal 🚀</button>
     `;
     courseGrid.appendChild(card);
   });
@@ -196,6 +197,54 @@ window.deleteCourse = function(index) {
     renderCourses();
   }
 };
+
+// Open Portal Function (Handles Security & Role Check)
+window.openPortal = function(index) {
+  const selectedCourse = courses[index];
+  
+  // 1. Check if current user is the Rep or is enrolled in the course
+  const isRep = currentUser && selectedCourse.rep.toLowerCase() === currentUser.name.toLowerCase();
+  const isEnrolled = currentUser && selectedCourse.enrolled && selectedCourse.enrolled.includes(currentUser.matric);
+
+  // 2. If they are neither, block them!
+  if (!isRep && !isEnrolled) {
+    alert(`⚠️ Access Denied! You are not enrolled in "${selectedCourse.name}". Please join the course using code [${selectedCourse.code}] first.`);
+    return; // Stop right here
+  }
+
+  // 3. If they passed the check, open the portal workspace
+  activeCourse = selectedCourse;
+  
+  if (dashboardSection) dashboardSection.classList.add("hidden");
+  if (portalSection) portalSection.classList.remove("hidden");
+
+  // Populate portal header details
+  document.getElementById("portalCourseTitle").textContent = activeCourse.name;
+  document.getElementById("portalCourseCode").textContent = activeCourse.code;
+  document.getElementById("portalCourseRep").textContent = activeCourse.rep;
+
+  // Show/Hide controls based on whether they are the Rep or a Student
+  const repControls = document.getElementById("repControls");
+  const studentControls = document.getElementById("studentControls");
+
+  if (isRep) {
+    if (repControls) repControls.classList.remove("hidden");
+    if (studentControls) studentControls.classList.add("hidden");
+  } else {
+    if (repControls) repControls.classList.add("hidden");
+    if (studentControls) studentControls.classList.remove("hidden");
+  }
+};
+
+// Back to Dashboard button logic
+const backToDashboardBtn = document.getElementById("backToDashboard");
+if (backToDashboardBtn) {
+  backToDashboardBtn.addEventListener("click", () => {
+    portalSection.classList.add("hidden");
+    dashboardSection.classList.remove("hidden");
+    activeCourse = null;
+  });
+}
 
 // Create Course Form
 const createCourseForm = document.getElementById("createCourseForm");
