@@ -144,14 +144,18 @@
 
   </main>
 
-  <!-- MODALS -->
+  <!-- MODAL: CREATE COURSE -->
   <div id="createModal" class="modal">
     <div class="modal-card">
       <h3>Create a New Course 🏫</h3>
       <form id="createCourseForm">
         <div class="field">
-          <label for="courseName">Course Title & Code</label>
-          <input type="text" id="courseName" required placeholder="e.g., MTH 301">
+          <label for="courseTitle">Course Title (e.g., Geomorphology)</label>
+          <input type="text" id="courseTitle" required placeholder="e.g., Geomorphology">
+        </div>
+        <div class="field">
+          <label for="courseCodeInput">Official Course Code (e.g., GEY 204)</label>
+          <input type="text" id="courseCodeInput" required placeholder="e.g., GEY 204">
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-outline close-modal">Cancel</button>

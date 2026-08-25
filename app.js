@@ -251,12 +251,19 @@ const createCourseForm = document.getElementById("createCourseForm");
 if (createCourseForm) {
   createCourseForm.addEventListener("submit", (e) => {
     e.preventDefault();
-    const name = document.getElementById("courseName").value.trim();
-    const randomCode = name.substring(0, 3).toUpperCase() + "-" + Math.floor(1000 + Math.random() * 9000);
+    const name = document.getElementById("courseTitle").value.trim();
+    const code = document.getElementById("courseCodeInput").value.trim().toUpperCase();
+
+    // Check if this course code already exists
+    const codeExists = courses.find(c => c.code === code);
+    if (codeExists) {
+      alert(`⚠️ Course code "${code}" already exists in the system!`);
+      return;
+    }
 
     const newCourse = { 
       name, 
-      code: randomCode, 
+      code, // Uses the exact official code provided by the Rep
       rep: currentUser ? currentUser.name : "Unknown",
       enrolled: currentUser ? [currentUser.matric] : []
     };
