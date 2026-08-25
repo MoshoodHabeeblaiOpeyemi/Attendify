@@ -77,8 +77,13 @@
             <label for="loginPassword">Password</label>
             <input type="password" id="loginPassword" required placeholder="••••••••">
           </div>
-          <button type="submit" class="btn">Log In 🔑</button>
+          <!-- FORGOT PASSWORD LINK -->
+          <div style="text-align: right; margin-bottom: 15px;">
+            <a href="#" id="openForgotModal" style="color: var(--teal); font-size: 0.85rem; text-decoration: none;">Forgot password? 🔑</a>
+          </div>
+          <button type="submit" class="btn">Log In 🔓</button>
         </form>
+
         <p style="text-align: center; margin-top: 15px; font-size: 0.85rem;">
           Don't have an account? <a href="#" id="showSignup" style="color: var(--teal); font-weight: 700; text-decoration: none;">Sign Up</a>
         </p>
@@ -108,6 +113,7 @@
     </section>
 
     <!-- NEW: COURSE PORTAL SECTION (Hidden by default) -->
+    <!-- COURSE PORTAL SECTION -->
     <section id="portalSection" class="hidden">
       <button id="backToDashboard" class="btn-outline" style="margin-bottom: 20px; width: auto; padding: 8px 16px; font-size: 0.85rem;">← Back to Dashboard</button>
       
@@ -117,17 +123,28 @@
         
         <hr style="border: 0; border-top: 1px solid var(--border); margin-bottom: 20px;">
 
-        <!-- DYNAMIC AREA: CHANGES BASED ON WHETHER USER IS REP OR STUDENT -->
-        <div id="repControls" class="hidden" style="background: var(--bg); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--border);">
-          <h3 style="color: var(--navy); margin-bottom: 10px;">👑 Course Rep Control Center</h3>
-          <p style="font-size: 0.9rem; margin-bottom: 15px;">Click below to capture your GPS location and generate the 60-second attendance PIN.</p>
-          <button id="generatePinBtn" class="btn">Generate Attendance PIN ⏱️</button>
-          <div id="activePinDisplay" style="margin-top: 15px; font-size: 1.5rem; font-weight: bold; color: var(--teal); text-align: center;"></div>
+        <!-- ACTIVE SESSION TIMER BANNER (Shows when session is live) -->
+        <div id="sessionBanner" class="hidden" style="background: rgba(40, 167, 69, 0.1); border: 1px solid #28a745; padding: 15px; border-radius: 12px; margin-bottom: 20px; text-align: center;">
+          <h4 style="color: #28a745; margin-bottom: 5px;">🔴 ATTENDANCE SESSION LIVE</h4>
+          <p style="font-size: 0.9rem; margin-bottom: 5px;">Time Remaining: <strong id="countdownTimer" style="font-size: 1.2rem;">60s</strong></p>
         </div>
 
+        <!-- REP CONTROLS -->
+        <div id="repControls" class="hidden" style="background: var(--bg); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--border);">
+          <h3 style="color: var(--navy); margin-bottom: 10px;">👑 Course Rep Control Center</h3>
+          <p style="font-size: 0.9rem; margin-bottom: 15px;">Generate a 60-second secure PIN for today's lecture attendance.</p>
+          <button id="generatePinBtn" class="btn">Generate Attendance PIN ⏱️</button>
+          
+          <div id="activePinDisplay" class="hidden" style="margin-top: 15px; padding: 15px; background: var(--card-bg); border-radius: 8px; text-align: center; border: 2px dashed var(--teal);">
+            <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 5px;">ACTIVE ATTENDANCE PIN:</p>
+            <span id="pinCodeText" style="font-size: 2rem; font-weight: bold; color: var(--teal); letter-spacing: 8px;">----</span>
+          </div>
+        </div>
+
+        <!-- STUDENT CONTROLS -->
         <div id="studentControls" class="hidden" style="background: var(--bg); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--border);">
           <h3 style="color: var(--navy); margin-bottom: 10px;">📍 Student Check-In Portal</h3>
-          <p style="font-size: 0.9rem; margin-bottom: 15px;">Enter the 4-digit PIN given by your Rep before the timer runs out.</p>
+          <p style="font-size: 0.9rem; margin-bottom: 15px;">Enter the 4-digit PIN announced by your Course Rep before time runs out.</p>
           
           <form id="checkInForm">
             <div class="field">
@@ -139,10 +156,10 @@
         </div>
 
         <!-- LIVE ROSTER -->
-        <h3 style="margin-bottom: 10px; font-size: 1.1rem; color: var(--navy);">👥 Live Attendance Roster</h3>
-        <div style="background: var(--bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border); max-height: 200px; overflow-y: auto;">
+        <h3 style="margin-bottom: 10px; font-size: 1.1rem; color: var(--navy);">👥 Live Attendance Roster (<span id="rosterCount">0</span>)</h3>
+        <div style="background: var(--bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border); max-height: 250px; overflow-y: auto;">
           <ul id="rosterList" style="list-style: none; padding-left: 0;">
-            <li style="color: var(--muted); font-size: 0.9rem;">No active check-ins yet. Waiting for session to start... ⏳</li>
+            <li style="color: var(--muted); font-size: 0.9rem; text-align: center; padding: 10px;">No active check-ins yet. Waiting for session to start... ⏳</li>
           </ul>
         </div>
 
@@ -150,6 +167,35 @@
     </section>
 
   </main>
+
+
+
+  <!-- MODAL: FORGOT PASSWORD -->
+  <div id="forgotModal" class="modal">
+    <div class="modal-card">
+      <h3>Reset Password 🔑</h3>
+      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Enter your registered Email and Matric Number to reset your password.</p>
+      
+      <form id="forgotPasswordForm">
+        <div class="field">
+          <label for="forgotEmail">Email Address</label>
+          <input type="email" id="forgotEmail" required placeholder="student@university.edu">
+        </div>
+        <div class="field">
+          <label for="forgotMatric">Matric Number</label>
+          <input type="text" id="forgotMatric" required placeholder="e.g., UCH/2022/4092">
+        </div>
+        <div class="field">
+          <label for="newPassword">New Password</label>
+          <input type="password" id="newPassword" required placeholder="Enter new password">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-outline close-modal">Cancel</button>
+          <button type="submit" class="btn">Update Password 🔄</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- MODAL: CREATE COURSE -->
   <div id="createModal" class="modal">
