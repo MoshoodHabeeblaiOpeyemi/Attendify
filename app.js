@@ -421,6 +421,26 @@ if (generatePinBtn) {
   });
 }
 
+// REP ENDS SEMESTER & RESETS COURSE RECORDS
+const endSemesterBtn = document.getElementById("endSemesterBtn");
+
+if (endSemesterBtn) {
+  endSemesterBtn.addEventListener("click", () => {
+    if (!activeCourse) return;
+
+    if (confirm(`⚠️ WARNING: Are you sure you want to END THE SEMESTER for "${activeCourse.name}"? This will clear all class history and reset the total class count to 0. Enrolled students will remain.`)) {
+      // Reset history and active session
+      activeCourse.attendanceHistory = [];
+      activeCourse.activeSession = null;
+      if (countdownInterval) clearInterval(countdownInterval);
+
+      updateCourseInStorage();
+      renderPortalState();
+      alert("🎓 Semester ended successfully! All records have been reset for the new semester. 🚀");
+    }
+  });
+}
+
 
 // REP CLOSES CLASS & SAVES ATTENDANCE TO HISTORY
 const closeClassBtn = document.getElementById("closeClassBtn");
