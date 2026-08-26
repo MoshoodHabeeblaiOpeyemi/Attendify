@@ -35,7 +35,6 @@ export const db = getFirestore(app);
 
 // --- GLOBAL APP STATES ---
 let courses = [];
-let users = [];
 let currentUser = null;
 let activeCourse = null;
 let countdownInterval = null;
@@ -62,12 +61,14 @@ onSnapshot(collection(db, "courses"), (snapshot) => {
 const themeToggle = document.getElementById("themeToggle");
 const htmlElement = document.documentElement;
 
-themeToggle.addEventListener("click", () => {
-  const currentTheme = htmlElement.getAttribute("data-theme");
-  const newTheme = currentTheme === "light" ? "dark" : "light";
-  htmlElement.setAttribute("data-theme", newTheme);
-  themeToggle.textContent = newTheme === "dark" ? "☀️" : "🌙";
-});
+if (themeToggle) {
+  themeToggle.addEventListener("click", () => {
+    const currentTheme = htmlElement.getAttribute("data-theme");
+    const newTheme = currentTheme === "light" ? "dark" : "light";
+    htmlElement.setAttribute("data-theme", newTheme);
+    themeToggle.textContent = newTheme === "dark" ? "☀️" : "🌙";
+  });
+}
 
 // --- AUTH & USER DATABASE MANAGEMENT ---
 const authContainer = document.getElementById("authContainer");
@@ -79,17 +80,23 @@ const displayMatric = document.getElementById("displayMatric");
 const logoutBtn = document.getElementById("logoutBtn");
 const deleteAccountBtn = document.getElementById("deleteAccountBtn");
 
-document.getElementById("showLogin").addEventListener("click", (e) => {
-  e.preventDefault();
-  signupCard.classList.add("hidden");
-  loginCard.classList.remove("hidden");
-});
+const showLoginBtn = document.getElementById("showLogin");
+if (showLoginBtn) {
+  showLoginBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    signupCard.classList.add("hidden");
+    loginCard.classList.remove("hidden");
+  });
+}
 
-document.getElementById("showSignup").addEventListener("click", (e) => {
-  e.preventDefault();
-  loginCard.classList.add("hidden");
-  signupCard.classList.remove("hidden");
-});
+const showSignupBtn = document.getElementById("showSignup");
+if (showSignupBtn) {
+  showSignupBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    loginCard.classList.add("hidden");
+    signupCard.classList.remove("hidden");
+  });
+}
 
 function checkAuth() {
   if (currentUser) {
@@ -301,7 +308,7 @@ function renderCourses() {
 
   const myCourses = courses.filter(course => {
     if (!currentUser) return false;
-    const isRep = course.rep.toLowerCase() === currentUser.name.toLowerCase();
+    const isRep = course.repUid === currentUser.uid || course.rep.toLowerCase() === currentUser.name.toLowerCase();
     const isAssistant = course.assistants && course.assistants.includes(currentUser.matric);
     const isEnrolled = course.enrolled && course.enrolled.includes(currentUser.matric);
     return isRep || isAssistant || isEnrolled;
@@ -319,7 +326,7 @@ function renderCourses() {
     card.style.position = "relative";
     
     const enrolledCount = course.enrolled ? course.enrolled.length : 1;
-    const isThisUserRep = currentUser && course.rep.toLowerCase() === currentUser.name.toLowerCase();
+    const isThisUserRep = currentUser && (course.repUid === currentUser.uid || course.rep.toLowerCase() === currentUser.name.toLowerCase());
 
     const actionIcon = isThisUserRep 
       ? `<button onclick="deleteCourse('${course.id}')" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; cursor: pointer; font-size: 1.2rem;" title="Delete Course (Rep Only)">🗑️</button>`
@@ -371,7 +378,7 @@ window.openPortal = function(courseId) {
   const selectedCourse = courses.find(c => c.id === courseId);
   if (!selectedCourse) return;
   
-  const isRep = currentUser && selectedCourse.rep.toLowerCase() === currentUser.name.toLowerCase();
+  const isRep = currentUser && (selectedCourse.repUid === currentUser.uid || selectedCourse.rep.toLowerCase() === currentUser.name.toLowerCase());
   const isAssistant = currentUser && selectedCourse.assistants && selectedCourse.assistants.includes(currentUser.matric);
   const isEnrolled = currentUser && selectedCourse.enrolled && selectedCourse.enrolled.includes(currentUser.matric);
 
@@ -432,7 +439,7 @@ if (backToDashboardBtn) {
   });
 }
 
-// Create Course Form
+// Create Course Form (Multi-tenant ready with repUid)
 const createCourseForm = document.getElementById("createCourseForm");
 if (createCourseForm) {
   createCourseForm.addEventListener("submit", async (e) => {
@@ -440,16 +447,11 @@ if (createCourseForm) {
     const name = document.getElementById("courseTitle").value.trim();
     const code = document.getElementById("courseCodeInput").value.trim().toUpperCase();
 
-    const codeExists = courses.find(c => c.code === code);
-    if (codeExists) {
-      alert(`⚠️ Course code "${code}" already exists in the system!`);
-      return;
-    }
-
     const newCourse = { 
       name, 
       code, 
       rep: currentUser ? currentUser.name : "Unknown",
+      repUid: currentUser ? currentUser.uid : "unknown-uid",
       enrolled: currentUser ? [currentUser.matric] : [],
       assistants: [],
       attendanceHistory: [],
@@ -566,7 +568,7 @@ function renderAssistantDropdownAndList() {
   const enrolled = activeCourse.enrolled || [];
 
   enrolled.forEach(matric => {
-    const isMainRep = activeCourse.rep.toLowerCase() === (currentUser ? currentUser.name.toLowerCase() : "");
+    const isMainRep = currentUser && (activeCourse.repUid === currentUser.uid || activeCourse.rep.toLowerCase() === currentUser.name.toLowerCase());
     const isAlreadyAssistant = activeCourse.assistants && activeCourse.assistants.includes(matric);
 
     if (!isMainRep && !isAlreadyAssistant) {
@@ -586,6 +588,7 @@ function renderAssistantDropdownAndList() {
       const li = document.createElement("li");
       li.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: var(--card-bg); border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem;";
       li.innerHTML = `<span>👑 (${matric}) <span style="background: var(--teal); color: white; padding: 2px 4px; border-radius: 3px; font-size: 0.65rem;">ASST</span></span> <button onclick="revokeAssistant('${matric}')" style="background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 0.8rem;">Remove ❌</button>`;
+      li.appendChild(li); // fixed clean append
       listEl.appendChild(li);
     });
   }
@@ -823,7 +826,7 @@ window.downloadAttendance = function(index) {
 function renderPortalState() {
   if (!activeCourse) return;
 
-  const isRep = currentUser && activeCourse.rep.toLowerCase() === currentUser.name.toLowerCase();
+  const isRep = currentUser && (activeCourse.repUid === currentUser.uid || activeCourse.rep.toLowerCase() === currentUser.name.toLowerCase());
   const isAssistant = currentUser && activeCourse.assistants && activeCourse.assistants.includes(currentUser.matric);
   const session = activeCourse.activeSession;
   const isSessionActive = session && !session.expired && Date.now() < session.expiresAt;
@@ -913,7 +916,6 @@ function renderPortalState() {
   }
 
   // --- RENDER REP ENROLLED STUDENTS MANAGEMENT PANEL ---
-  const repEnrolledListContainer = document.getElementById("repEnrolledListContainer");
   if (isRep) {
     let enrolledListDiv = document.getElementById("repEnrolledStudentsSection");
     
@@ -1054,6 +1056,6 @@ function renderPortalState() {
       eligibilityBanner.textContent = `⚠️ WARNING: Your attendance is at ${percentage}%. You are below the 70% exam eligibility requirement!`;
     }
   } else if (studentAnalyticsSection) {
-    studentAnalyticsSection.classList.add("hidden");
+    studentAnalyticsSection.classList.add("new-hidden");
   }
 }
