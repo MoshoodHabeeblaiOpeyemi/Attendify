@@ -5,13 +5,18 @@ import {
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
   signOut, 
-  onAuthStateChanged
+  onAuthStateChanged 
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
 import { 
   getFirestore, 
+  collection, 
   doc, 
   setDoc, 
-  getDoc 
+  getDoc, 
+  getDocs, 
+  updateDoc, 
+  deleteDoc, 
+  onSnapshot 
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -34,6 +39,26 @@ let users = [];
 let currentUser = null;
 let activeCourse = null;
 let countdownInterval = null;
+
+// --- REAL-TIME FIRESTORE SYNC ---
+// Listen to courses collection in real-time
+onSnapshot(collection(db, "courses"), (snapshot) => {
+  courses = [];
+  snapshot.forEach((docSnap) => {
+    courses.push({ id: docSnap.id, ...docSnap.data() });
+  });
+  if (currentUser) {
+    renderCourses();
+    if (activeCourse) {
+      // Keep active course updated if open
+      const updated = courses.find(c => c.id === activeCourse.id);
+      if (updated) {
+        activeCourse = updated;
+        renderPortalState();
+      }
+    }
+  }
+});
 
 // --- THEME TOGGLE LOGIC ---
 const themeToggle = document.getElementById("themeToggle");
@@ -191,25 +216,34 @@ onAuthStateChanged(auth, async (user) => {
 });
 
 if (deleteAccountBtn) {
-  deleteAccountBtn.addEventListener("click", () => {
+  deleteAccountBtn.addEventListener("click", async () => {
     if (confirm("⚠️ Are you sure you want to delete your account? This cannot be undone.")) {
       const userMatric = currentUser.matric;
 
-      courses.forEach(course => {
-        if (course.enrolled) {
-          course.enrolled = course.enrolled.filter(m => m !== userMatric);
-        }
-        if (course.assistants) {
-          course.assistants = course.assistants.filter(m => m !== userMatric);
-        }
-      });
-      localStorage.setItem("attendify_courses", JSON.stringify(courses));
+      // Update courses in Firestore to remove user from enrolled/assistants
+      for (let course of courses) {
+        let updated = false;
+        let newEnrolled = course.enrolled || [];
+        let newAssistants = course.assistants || [];
 
-      users = users.filter(u => u.email !== currentUser.email);
-      localStorage.setItem("attendify_users", JSON.stringify(users));
-      
+        if (newEnrolled.includes(userMatric)) {
+          newEnrolled = newEnrolled.filter(m => m !== userMatric);
+          updated = true;
+        }
+        if (newAssistants.includes(userMatric)) {
+          newAssistants = newAssistants.filter(m => m !== userMatric);
+          updated = true;
+        }
+
+        if (updated) {
+          await updateDoc(doc(db, "courses", course.id), {
+            enrolled: newEnrolled,
+            assistants: newAssistants
+          });
+        }
+      }
+
       currentUser = null;
-      
       if (portalSection) portalSection.classList.add("hidden");
       const repArchiveSection = document.getElementById("repArchiveSection");
       if (repArchiveSection) repArchiveSection.classList.add("hidden");
@@ -220,7 +254,7 @@ if (deleteAccountBtn) {
       if (countdownInterval) clearInterval(countdownInterval);
 
       checkAuth();
-      alert("Account deleted and course records updated successfully.");
+      alert("Account references cleaned successfully.");
     }
   });
 }
@@ -282,8 +316,6 @@ function renderCourses() {
   }
 
   myCourses.forEach((course) => {
-    const index = courses.findIndex(c => c.code === course.code);
-
     const card = document.createElement("div");
     card.className = "card";
     card.style.maxHeight = "none";
@@ -293,8 +325,8 @@ function renderCourses() {
     const isThisUserRep = currentUser && course.rep.toLowerCase() === currentUser.name.toLowerCase();
 
     const actionIcon = isThisUserRep 
-      ? `<button onclick="deleteCourse(${index})" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; cursor: pointer; font-size: 1.2rem;" title="Delete Course (Rep Only)">🗑️</button>`
-      : `<button onclick="leaveCourse(${index})" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; cursor: pointer; font-size: 1.2rem;" title="Leave Course">🚪</button>`;
+      ? `<button onclick="deleteCourse('${course.id}')" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; cursor: pointer; font-size: 1.2rem;" title="Delete Course (Rep Only)">🗑️</button>`
+      : `<button onclick="leaveCourse('${course.id}')" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; cursor: pointer; font-size: 1.2rem;" title="Leave Course">🚪</button>`;
 
     card.innerHTML = `
       ${actionIcon}
@@ -306,37 +338,41 @@ function renderCourses() {
         <strong>${enrolledCount}</strong>
       </div>
 
-      <button class="btn" style="padding: 10px; font-size: 0.9rem;" onclick="openPortal(${index})">Open Portal 🚀</button>
+      <button class="btn" style="padding: 10px; font-size: 0.9rem;" onclick="openPortal('${course.id}')">Open Portal 🚀</button>
     `;
     courseGrid.appendChild(card);
   });
 }
 
-window.deleteCourse = function(index) {
-  if (confirm(`⚠️ WARNING: As the Course Rep, deleting "${courses[index].name}" removes it entirely. Are you sure?`)) {
-    courses.splice(index, 1);
-    localStorage.setItem("attendify_courses", JSON.stringify(courses));
+window.deleteCourse = async function(courseId) {
+  const course = courses.find(c => c.id === courseId);
+  if (confirm(`⚠️ WARNING: As the Course Rep, deleting "${course ? course.name : 'this course'}" removes it entirely. Are you sure?`)) {
+    await deleteDoc(doc(db, "courses", courseId));
     checkAuth();
   }
 };
 
-window.leaveCourse = function(index) {
-  const course = courses[index];
+window.leaveCourse = async function(courseId) {
+  const course = courses.find(c => c.id === courseId);
+  if (!course) return;
+
   if (confirm(`⚠️ Do you want to leave "${course.name}"? You can rejoin anytime using code [${course.code}].`)) {
-    if (course.enrolled) {
-      course.enrolled = course.enrolled.filter(m => m !== currentUser.matric);
-    }
-    if (course.assistants) {
-      course.assistants = course.assistants.filter(m => m !== currentUser.matric);
-    }
-    localStorage.setItem("attendify_courses", JSON.stringify(courses));
+    let newEnrolled = course.enrolled ? course.enrolled.filter(m => m !== currentUser.matric) : [];
+    let newAssistants = course.assistants ? course.assistants.filter(m => m !== currentUser.matric) : [];
+
+    await updateDoc(doc(db, "courses", courseId), {
+      enrolled: newEnrolled,
+      assistants: newAssistants
+    });
+
     checkAuth();
     alert(`You have left ${course.name}. 👋`);
   }
 };
 
-window.openPortal = function(index) {
-  const selectedCourse = courses[index];
+window.openPortal = function(courseId) {
+  const selectedCourse = courses.find(c => c.id === courseId);
+  if (!selectedCourse) return;
   
   const isRep = currentUser && selectedCourse.rep.toLowerCase() === currentUser.name.toLowerCase();
   const isAssistant = currentUser && selectedCourse.assistants && selectedCourse.assistants.includes(currentUser.matric);
@@ -402,7 +438,7 @@ if (backToDashboardBtn) {
 // Create Course Form
 const createCourseForm = document.getElementById("createCourseForm");
 if (createCourseForm) {
-  createCourseForm.addEventListener("submit", (e) => {
+  createCourseForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = document.getElementById("courseTitle").value.trim();
     const code = document.getElementById("courseCodeInput").value.trim().toUpperCase();
@@ -419,10 +455,12 @@ if (createCourseForm) {
       rep: currentUser ? currentUser.name : "Unknown",
       enrolled: currentUser ? [currentUser.matric] : [],
       assistants: [],
-      attendanceHistory: []
+      attendanceHistory: [],
+      activeSession: null
     };
-    courses.push(newCourse);
-    localStorage.setItem("attendify_courses", JSON.stringify(courses));
+
+    const newDocRef = doc(collection(db, "courses"));
+    await setDoc(newDocRef, newCourse);
 
     if (createModal) createModal.classList.remove("show");
     createCourseForm.reset();
@@ -433,16 +471,16 @@ if (createCourseForm) {
 // Join Course Form
 const joinCourseForm = document.getElementById("joinCourseForm");
 if (joinCourseForm) {
-  joinCourseForm.addEventListener("submit", (e) => {
+  joinCourseForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const code = document.getElementById("joinCode").value.trim().toUpperCase();
 
     const found = courses.find(c => c.code === code);
     if (found) {
-      if (!found.enrolled) found.enrolled = [];
-      if (currentUser && !found.enrolled.includes(currentUser.matric)) {
-        found.enrolled.push(currentUser.matric);
-        localStorage.setItem("attendify_courses", JSON.stringify(courses));
+      let enrolled = found.enrolled || [];
+      if (currentUser && !enrolled.includes(currentUser.matric)) {
+        enrolled.push(currentUser.matric);
+        await updateDoc(doc(db, "courses", found.id), { enrolled: enrolled });
       }
       alert(`Successfully joined ${found.name}! 🎉`);
       checkAuth();
@@ -455,34 +493,10 @@ if (joinCourseForm) {
   });
 }
 
-// Forgot Password Form Submission
-const forgotPasswordForm = document.getElementById("forgotPasswordForm");
-if (forgotPasswordForm) {
-  forgotPasswordForm.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const email = document.getElementById("forgotEmail").value.trim().toLowerCase();
-    const matric = document.getElementById("forgotMatric").value.trim().toUpperCase();
-    const newPassword = document.getElementById("newPassword").value;
-
-    const userIndex = users.findIndex(u => u.email === email && u.matric === matric);
-
-    if (userIndex !== -1) {
-      users[userIndex].password = newPassword;
-      localStorage.setItem("attendify_users", JSON.stringify(users));
-
-      alert("🎉 Password updated successfully! You can now log in with your new password.");
-      if (forgotModal) forgotModal.classList.remove("show");
-      forgotPasswordForm.reset();
-    } else {
-      alert("❌ No account found matching this Email and Matric Number combination.");
-    }
-  });
-}
-
 // --- ASSISTANT REPS MANAGEMENT LOGIC ---
 const appointAssistantBtn = document.getElementById("appointAssistantBtn");
 if (appointAssistantBtn) {
-  appointAssistantBtn.addEventListener("click", () => {
+  appointAssistantBtn.addEventListener("click", async () => {
     if (!activeCourse) return;
 
     const selectEl = document.getElementById("courseStudentSelect");
@@ -503,7 +517,7 @@ if (appointAssistantBtn) {
     }
 
     activeCourse.assistants.push(selectedMatric);
-    updateCourseInStorage();
+    await updateCourseInFirestore();
     
     renderPortalState();
     renderAssistantDropdownAndList();
@@ -512,12 +526,12 @@ if (appointAssistantBtn) {
   });
 }
 
-window.revokeAssistant = function(matric) {
+window.revokeAssistant = async function(matric) {
   if (!activeCourse || !activeCourse.assistants) return;
 
   if (confirm("⚠️ Do you want to remove this assistant's badge?")) {
     activeCourse.assistants = activeCourse.assistants.filter(m => m !== matric);
-    updateCourseInStorage();
+    await updateCourseInFirestore();
     
     renderPortalState();
     renderAssistantDropdownAndList();
@@ -537,15 +551,13 @@ function renderAssistantDropdownAndList() {
   const enrolled = activeCourse.enrolled || [];
 
   enrolled.forEach(matric => {
-    const userObj = users.find(u => u.matric === matric);
-    const name = userObj ? userObj.name : "Student";
-    const isMainRep = activeCourse.rep.toLowerCase() === name.toLowerCase();
+    const isMainRep = activeCourse.rep.toLowerCase() === (currentUser ? currentUser.name.toLowerCase() : "");
     const isAlreadyAssistant = activeCourse.assistants && activeCourse.assistants.includes(matric);
 
     if (!isMainRep && !isAlreadyAssistant) {
       const opt = document.createElement("option");
       opt.value = matric;
-      opt.textContent = `${name} (${matric})`;
+      opt.textContent = `Student (${matric})`;
       selectEl.appendChild(opt);
     }
   });
@@ -556,12 +568,9 @@ function renderAssistantDropdownAndList() {
   } else {
     listEl.innerHTML = "";
     assistants.forEach(matric => {
-      const userObj = users.find(u => u.matric === matric);
-      const name = userObj ? userObj.name : "Student";
-
       const li = document.createElement("li");
       li.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: var(--card-bg); border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem;";
-      li.innerHTML = `<span>👑 <strong>${name}</strong> (${matric}) <span style="background: var(--teal); color: white; padding: 2px 4px; border-radius: 3px; font-size: 0.65rem;">ASST</span></span> <button onclick="revokeAssistant('${matric}')" style="background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 0.8rem;">Remove ❌</button>`;
+      li.innerHTML = `<span>👑 (${matric}) <span style="background: var(--teal); color: white; padding: 2px 4px; border-radius: 3px; font-size: 0.65rem;">ASST</span></span> <button onclick="revokeAssistant('${matric}')" style="background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 0.8rem;">Remove ❌</button>`;
       listEl.appendChild(li);
     });
   }
@@ -616,7 +625,7 @@ if (generatePinBtn) {
   });
 }
 
-function createSession(pin, managerMatric, lat, lon) {
+async function createSession(pin, managerMatric, lat, lon) {
   activeCourse.activeSession = {
     pin: pin,
     expiresAt: Date.now() + 60000,
@@ -626,7 +635,7 @@ function createSession(pin, managerMatric, lat, lon) {
     lon: lon
   };
 
-  updateCourseInStorage();
+  await updateCourseInFirestore();
   startSessionTimer();
   renderPortalState();
 }
@@ -636,7 +645,7 @@ function startSessionTimer() {
 
   if (!activeCourse || !activeCourse.activeSession) return;
 
-  countdownInterval = setInterval(() => {
+  countdownInterval = setInterval(async () => {
     const session = activeCourse.activeSession;
     if (!session) {
       clearInterval(countdownInterval);
@@ -649,7 +658,7 @@ function startSessionTimer() {
     if (timeLeft <= 0) {
       clearInterval(countdownInterval);
       session.expired = true;
-      updateCourseInStorage();
+      await updateCourseInFirestore();
       renderPortalState();
     } else {
       if (liveTimerElement) {
@@ -689,7 +698,7 @@ if (checkInForm) {
     alert("📍 Verifying your location... Please allow location access.");
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         const studentLat = position.coords.latitude;
         const studentLon = position.coords.longitude;
         const repLat = session.lat || 6.5244;
@@ -704,7 +713,7 @@ if (checkInForm) {
         }
 
         session.attendees.push(currentUser.matric);
-        updateCourseInStorage();
+        await updateCourseInFirestore();
         renderPortalState();
         checkInForm.reset();
         alert("🎉 Attendance marked successfully with GPS Verification! ✅📍");
@@ -721,7 +730,7 @@ if (checkInForm) {
 const closeClassBtn = document.getElementById("closeClassBtn");
 
 if (closeClassBtn) {
-  closeClassBtn.addEventListener("click", () => {
+  closeClassBtn.addEventListener("click", async () => {
     if (!activeCourse) return;
 
     if (confirm("⚠️ Are you sure you want to close this attendance session and save the records?")) {
@@ -740,7 +749,7 @@ if (closeClassBtn) {
       activeCourse.activeSession = null;
       if (countdownInterval) clearInterval(countdownInterval);
 
-      updateCourseInStorage();
+      await updateCourseInFirestore();
       renderPortalState();
       alert("📁 Class closed successfully! Attendance has been archived.");
     }
@@ -750,27 +759,30 @@ if (closeClassBtn) {
 const endSemesterBtn = document.getElementById("endSemesterBtn");
 
 if (endSemesterBtn) {
-  endSemesterBtn.addEventListener("click", () => {
+  endSemesterBtn.addEventListener("click", async () => {
     if (!activeCourse) return;
 
-    if (confirm(`⚠️ WARNING: Are you sure you want to END THE SEMESTER for "${activeCourse.name}"? This will clear all class history and reset the total class count to 0. Enrolled students will remain.`)) {
+    if (confirm(`⚠️ WARNING: Are you sure you want to END THE SEMESTER for "${activeCourse.name}"? This will clear all class history and reset the total class count to 0.`)) {
       activeCourse.attendanceHistory = [];
       activeCourse.activeSession = null;
       if (countdownInterval) clearInterval(countdownInterval);
 
-      updateCourseInStorage();
+      await updateCourseInFirestore();
       renderPortalState();
-      alert("🎓 Semester ended successfully! All records have been reset for the new semester. 🚀");
+      alert("🎓 Semester ended successfully! All records have been reset.");
     }
   });
 }
 
-function updateCourseInStorage() {
-  const index = courses.findIndex(c => c.code === activeCourse.code);
-  if (index !== -1) {
-    courses[index] = activeCourse;
-    localStorage.setItem("attendify_courses", JSON.stringify(courses));
-  }
+async function updateCourseInFirestore() {
+  if (!activeCourse || !activeCourse.id) return;
+  const courseRef = doc(db, "courses", activeCourse.id);
+  await updateDoc(courseRef, {
+    activeSession: activeCourse.activeSession || null,
+    attendanceHistory: activeCourse.attendanceHistory || [],
+    assistants: activeCourse.assistants || [],
+    enrolled: activeCourse.enrolled || []
+  });
 }
 
 function renderPortalState() {
@@ -848,10 +860,7 @@ function renderPortalState() {
     rosterList.innerHTML = `<li style="color: var(--muted); font-size: 0.9rem; text-align: center; padding: 10px;">No check-ins recorded yet. ⏳</li>`;
   } else {
     attendees.forEach(matric => {
-      const foundUser = users.find(u => u.matric === matric);
-      const displayName = foundUser ? foundUser.name : "Student";
-      
-      const isMainRepUser = foundUser && activeCourse.rep.toLowerCase() === foundUser.name.toLowerCase();
+      const isMainRepUser = activeCourse.rep.toLowerCase() === (currentUser && currentUser.matric === matric ? currentUser.name.toLowerCase() : "");
       const isAssistantUser = activeCourse.assistants && activeCourse.assistants.includes(matric);
       
       let badgeHTML = "";
@@ -863,7 +872,7 @@ function renderPortalState() {
 
       const li = document.createElement("li");
       li.style.cssText = "display: flex; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem;";
-      li.innerHTML = `<span>🎓 <strong>${displayName}</strong> (${matric}) ${badgeHTML}</span> <span style="color: #28a745; font-weight: bold;">Present ✅</span>`;
+      li.innerHTML = `<span>🎓 <strong>Student</strong> (${matric}) ${badgeHTML}</span> <span style="color: #28a745; font-weight: bold;">Present ✅</span>`;
       rosterList.appendChild(li);
     });
   }
@@ -885,8 +894,7 @@ function renderPortalState() {
         archiveCard.style.cssText = "background: var(--card-bg); padding: 12px; border-radius: 8px; margin-bottom: 10px; border: 1px solid var(--border);";
         
         const attendeesListHTML = sessionRecord.attendees.map(m => {
-          const u = users.find(user => user.matric === m);
-          return `<li style="font-size: 0.85rem; padding: 2px 0;">🎓 ${u ? u.name : "Student"} (${m})</li>`;
+          return `<li style="font-size: 0.85rem; padding: 2px 0;">🎓 Student (${m})</li>`;
         }).join("");
 
         archiveCard.innerHTML = `
