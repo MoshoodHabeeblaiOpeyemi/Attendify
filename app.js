@@ -129,7 +129,7 @@ function checkAuth() {
 
 // --- FIREBASE AUTHENTICATION LOGIC ---
 
-// SIGN UP SUBMISSION
+// SIGN UP SUBMISSION (With Institution & Department Scoping)
 const signupForm = document.getElementById("signupForm");
 if (signupForm) {
   signupForm.addEventListener("submit", async (e) => {
@@ -139,6 +139,12 @@ if (signupForm) {
     const email = document.getElementById("signupEmail").value.trim().toLowerCase();
     const password = document.getElementById("signupPassword").value;
     const isRep = document.getElementById("isRepCheckbox").checked;
+    
+    const institutionInput = document.getElementById("signupInstitution");
+    const departmentInput = document.getElementById("signupDepartment");
+
+    const institution = institutionInput ? institutionInput.value.trim().toUpperCase() : "GENERAL";
+    const department = departmentInput ? departmentInput.value.trim() : "GENERAL";
 
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -149,7 +155,9 @@ if (signupForm) {
         name: name,
         matric: matric,
         email: email,
-        isRep: isRep
+        isRep: isRep,
+        institution: institution,
+        department: department
       });
 
       signupForm.reset();
@@ -211,7 +219,7 @@ onAuthStateChanged(auth, async (user) => {
     if (userDoc.exists()) {
       currentUser = userDoc.data();
     } else {
-      currentUser = { name: "User", matric: "---", email: user.email, isRep: false };
+      currentUser = { name: "User", matric: "---", email: user.email, isRep: false, institution: "GENERAL", department: "GENERAL" };
     }
     checkAuth();
   } else {
@@ -335,7 +343,8 @@ function renderCourses() {
     card.innerHTML = `
       ${actionIcon}
       <h3 style="color: var(--navy); margin-bottom: 5px;">${course.name}</h3>
-      <p style="font-size: 0.85rem; margin-bottom: 15px;">Code: <strong>${course.code}</strong> | Rep: ${course.rep}</p>
+      <p style="font-size: 0.85rem; margin-bottom: 5px;">Code: <strong>${course.code}</strong> | Rep: ${course.rep}</p>
+      <p style="font-size: 0.75rem; color: var(--muted); margin-bottom: 15px;">🏛️ ${course.institution || 'GEN'} • 📚 ${course.department || 'GEN'}</p>
       
       <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.85rem; display: flex; justify-content: space-between;">
         <span>👥 Enrolled Students:</span>
@@ -439,7 +448,7 @@ if (backToDashboardBtn) {
   });
 }
 
-// Create Course Form (Multi-tenant ready with repUid)
+// Create Course Form (With Institution & Department Metadata Tags)
 const createCourseForm = document.getElementById("createCourseForm");
 if (createCourseForm) {
   createCourseForm.addEventListener("submit", async (e) => {
@@ -452,6 +461,8 @@ if (createCourseForm) {
       code, 
       rep: currentUser ? currentUser.name : "Unknown",
       repUid: currentUser ? currentUser.uid : "unknown-uid",
+      institution: currentUser ? (currentUser.institution || "GENERAL") : "GENERAL",
+      department: currentUser ? (currentUser.department || "GENERAL") : "GENERAL",
       enrolled: currentUser ? [currentUser.matric] : [],
       assistants: [],
       attendanceHistory: [],
@@ -588,7 +599,6 @@ function renderAssistantDropdownAndList() {
       const li = document.createElement("li");
       li.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: var(--card-bg); border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem;";
       li.innerHTML = `<span>👑 (${matric}) <span style="background: var(--teal); color: white; padding: 2px 4px; border-radius: 3px; font-size: 0.65rem;">ASST</span></span> <button onclick="revokeAssistant('${matric}')" style="background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 0.8rem;">Remove ❌</button>`;
-      li.appendChild(li); // fixed clean append
       listEl.appendChild(li);
     });
   }
@@ -1056,6 +1066,6 @@ function renderPortalState() {
       eligibilityBanner.textContent = `⚠️ WARNING: Your attendance is at ${percentage}%. You are below the 70% exam eligibility requirement!`;
     }
   } else if (studentAnalyticsSection) {
-    studentAnalyticsSection.classList.add("new-hidden");
+    studentAnalyticsSection.classList.add("hidden");
   }
 }
