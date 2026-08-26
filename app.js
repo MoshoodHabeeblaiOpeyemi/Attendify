@@ -41,7 +41,6 @@ let activeCourse = null;
 let countdownInterval = null;
 
 // --- REAL-TIME FIRESTORE SYNC ---
-// Listen to courses collection in real-time
 onSnapshot(collection(db, "courses"), (snapshot) => {
   courses = [];
   snapshot.forEach((docSnap) => {
@@ -50,7 +49,6 @@ onSnapshot(collection(db, "courses"), (snapshot) => {
   if (currentUser) {
     renderCourses();
     if (activeCourse) {
-      // Keep active course updated if open
       const updated = courses.find(c => c.id === activeCourse.id);
       if (updated) {
         activeCourse = updated;
@@ -220,7 +218,6 @@ if (deleteAccountBtn) {
     if (confirm("⚠️ Are you sure you want to delete your account? This cannot be undone.")) {
       const userMatric = currentUser.matric;
 
-      // Update courses in Firestore to remove user from enrolled/assistants
       for (let course of courses) {
         let updated = false;
         let newEnrolled = course.enrolled || [];
@@ -540,6 +537,24 @@ window.revokeAssistant = async function(matric) {
   }
 };
 
+window.removeStudentFromCourse = async function(matric) {
+  if (!activeCourse) return;
+
+  if (confirm(`⚠️ Are you sure you want to remove student [${matric}] from ${activeCourse.name}?`)) {
+    if (activeCourse.enrolled) {
+      activeCourse.enrolled = activeCourse.enrolled.filter(m => m !== matric);
+    }
+    if (activeCourse.assistants) {
+      activeCourse.assistants = activeCourse.assistants.filter(m => m !== matric);
+    }
+
+    await updateCourseInFirestore();
+    renderPortalState();
+    renderAssistantDropdownAndList();
+    alert(`Student [${matric}] has been removed from the course.`);
+  }
+};
+
 function renderAssistantDropdownAndList() {
   if (!activeCourse) return;
 
@@ -785,6 +800,26 @@ async function updateCourseInFirestore() {
   });
 }
 
+// --- DOWNLOAD ATTENDANCE CSV FUNCTION ---
+window.downloadAttendance = function(index) {
+  if (!activeCourse || !activeCourse.attendanceHistory || !activeCourse.attendanceHistory[index]) return;
+
+  const sessionRecord = activeCourse.attendanceHistory[index];
+  let csvContent = "data:text/csv;charset=utf-8,Matric Number,Status\n";
+  
+  sessionRecord.attendees.forEach(matric => {
+    csvContent += `"${matric}","Present"\r\n`;
+  });
+
+  const encodedUri = encodeURI(csvContent);
+  const link = document.createElement("a");
+  link.setAttribute("href", encodedUri);
+  link.setAttribute("download", `${activeCourse.code}_Attendance_${sessionRecord.date.replace(/[/:\s]/g, "_")}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
 function renderPortalState() {
   if (!activeCourse) return;
 
@@ -877,6 +912,48 @@ function renderPortalState() {
     });
   }
 
+  // --- RENDER REP ENROLLED STUDENTS MANAGEMENT PANEL ---
+  const repEnrolledListContainer = document.getElementById("repEnrolledListContainer");
+  if (isRep) {
+    let enrolledListDiv = document.getElementById("repEnrolledStudentsSection");
+    
+    if (!enrolledListDiv && portalSection) {
+      enrolledListDiv = document.createElement("div");
+      enrolledListDiv.id = "repEnrolledStudentsSection";
+      enrolledListDiv.style.cssText = "background: var(--card-bg); padding: 15px; border-radius: 12px; margin-top: 20px; border: 1px solid var(--border);";
+      
+      const targetParent = document.getElementById("repControls") || portalSection;
+      targetParent.appendChild(enrolledListDiv);
+    }
+
+    if (enrolledListDiv) {
+      const enrolledMatrics = activeCourse.enrolled || [];
+      let studentRowsHTML = "";
+
+      if (enrolledMatrics.length === 0) {
+        studentRowsHTML = `<p style="color: var(--muted); font-size: 0.85rem;">No students enrolled yet.</p>`;
+      } else {
+        enrolledMatrics.forEach(matric => {
+          const isRepMatric = currentUser && currentUser.matric === matric;
+          studentRowsHTML += `
+            <li style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: var(--bg); border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem;">
+              <span>🎓 <strong>${matric}</strong> ${isRepMatric ? '(You - Rep)' : ''}</span>
+              ${!isRepMatric ? `<button onclick="removeStudentFromCourse('${matric}')" style="background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 0.8rem; font-weight: bold;">Remove 🚪❌</button>` : ''}
+            </li>
+          `;
+        });
+      }
+
+      enrolledListDiv.innerHTML = `
+        <h4 style="color: var(--navy); margin-bottom: 10px; font-size: 1rem;">👥 Manage Enrolled Students (${enrolledMatrics.length})</h4>
+        <p style="font-size: 0.8rem; color: var(--muted); margin-bottom: 10px;">Remove any unauthorized student who joined your course code.</p>
+        <ul style="list-style: none; padding: 0; max-height: 180px; overflow-y: auto;">
+          ${studentRowsHTML}
+        </ul>
+      `;
+    }
+  }
+
   const repArchiveSection = document.getElementById("repArchiveSection");
   if (isRep && repArchiveSection) {
     const totalClassesCount = document.getElementById("totalClassesCount");
@@ -889,7 +966,7 @@ function renderPortalState() {
       archiveListContainer.innerHTML = `<p style="font-size: 0.9rem; color: var(--muted); text-align: center; padding: 10px;">No archived classes yet. Close a live class to save records here! 🗂️</p>`;
     } else {
       archiveListContainer.innerHTML = "";
-      history.forEach((sessionRecord) => {
+      history.forEach((sessionRecord, archiveIndex) => {
         const archiveCard = document.createElement("div");
         archiveCard.style.cssText = "background: var(--card-bg); padding: 12px; border-radius: 8px; margin-bottom: 10px; border: 1px solid var(--border);";
         
@@ -900,7 +977,10 @@ function renderPortalState() {
         archiveCard.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
             <strong>📅 Session on ${sessionRecord.date}</strong>
-            <span style="font-size: 0.8rem; background: var(--teal); color: white; padding: 2px 6px; border-radius: 4px;">${sessionRecord.attendees.length} Present</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span style="font-size: 0.8rem; background: var(--teal); color: white; padding: 2px 6px; border-radius: 4px;">${sessionRecord.attendees.length} Present</span>
+              <button onclick="downloadAttendance(${archiveIndex})" class="btn" style="padding: 4px 10px; font-size: 0.75rem; width: auto;" title="Download CSV">📥 CSV</button>
+            </div>
           </div>
           <details style="font-size: 0.85rem; color: var(--muted); cursor: pointer; margin-top: 5px;">
             <summary>View Attendees List 👀</summary>
@@ -922,10 +1002,20 @@ function renderPortalState() {
     const totalClasses = history.length;
     
     let attendedCount = 0;
+    let historyListHTML = "";
+
     history.forEach(sessionRecord => {
-      if (sessionRecord.attendees && sessionRecord.attendees.includes(currentUser.matric)) {
-        attendedCount++;
-      }
+      const wasPresent = sessionRecord.attendees && sessionRecord.attendees.includes(currentUser.matric);
+      if (wasPresent) attendedCount++;
+
+      historyListHTML += `
+        <li style="display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 0.85rem;">
+          <span>📅 ${sessionRecord.date}</span>
+          <span style="font-weight: bold; color: ${wasPresent ? '#28a745' : '#dc3545'};">
+            ${wasPresent ? 'Present ✅' : 'Absent ❌'}
+          </span>
+        </li>
+      `;
     });
 
     const percentage = totalClasses > 0 ? Math.round((attendedCount / totalClasses) * 100) : 100;
@@ -933,6 +1023,21 @@ function renderPortalState() {
     document.getElementById("statAttendedCount").textContent = attendedCount;
     document.getElementById("statTotalClasses").textContent = totalClasses;
     document.getElementById("statPercentage").textContent = `${percentage}%`;
+
+    let personalLogContainer = document.getElementById("personalLogContainer");
+    if (!personalLogContainer) {
+      personalLogContainer = document.createElement("div");
+      personalLogContainer.id = "personalLogContainer";
+      personalLogContainer.style.cssText = "margin-top: 15px; background: var(--card-bg); padding: 10px; border-radius: 8px; border: 1px solid var(--border);";
+      studentAnalyticsSection.appendChild(personalLogContainer);
+    }
+
+    personalLogContainer.innerHTML = `
+      <p style="font-weight: bold; font-size: 0.9rem; margin-bottom: 8px;">📋 Your Class-by-Class Record:</p>
+      <ul style="list-style: none; padding: 0; max-height: 150px; overflow-y: auto;">
+        ${totalClasses === 0 ? '<li style="color: var(--muted); font-size: 0.85rem;">No classes held yet.</li>' : historyListHTML}
+      </ul>
+    `;
 
     const eligibilityBanner = document.getElementById("eligibilityBanner");
     if (totalClasses === 0) {
