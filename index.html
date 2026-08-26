@@ -129,7 +129,7 @@
           <p id="bannerText" style="font-size: 0.9rem; margin-bottom: 5px;">Time Remaining: <strong id="countdownTimer" style="font-size: 1.2rem;">60s</strong></p>
         </div>
         
-        <!-- REP CONTROLS -->
+ <!-- REP CONTROLS -->
         <div id="repControls" class="hidden" style="background: var(--bg); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--border);">
           <h3 style="color: var(--navy); margin-bottom: 10px;">👑 Course Rep Control Center</h3>
           <p style="font-size: 0.9rem; margin-bottom: 15px;">Generate a 60-second secure PIN for today's lecture attendance.</p>
@@ -139,7 +139,13 @@
             <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 5px;">ACTIVE ATTENDANCE PIN:</p>
             <span id="pinCodeText" style="font-size: 2rem; font-weight: bold; color: var(--teal); letter-spacing: 8px;">----</span>
           </div>
+
+          <!-- PERMANENT REP ACTION: CLOSE CLASS & SAVE -->
+          <div id="closeClassWrapper" class="hidden" style="margin-top: 15px; border-top: 1px solid var(--border); padding-top: 15px;">
+            <button id="closeClassBtn" class="btn" style="background: var(--danger); font-size: 0.85rem; padding: 10px 16px; width: 100%;">📁 Close Class & Save Attendance</button>
+          </div>
         </div>
+
 
         <!-- STUDENT CONTROLS -->
         <div id="studentControls" class="hidden" style="background: var(--bg); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--border);">
@@ -165,6 +171,16 @@
 
       </div>
     </section>
+    
+          <!-- REP ARCHIVE & HISTORY SECTION (Visible only to Reps) -->
+            <div id="repArchiveSection" class="hidden" style="margin-top: 30px; background: var(--bg); padding: 20px; border-radius: 12px; border: 1px solid var(--border);">
+              <h3 style="color: var(--navy); margin-bottom: 5px;">📁 Course Archive & Class History</h3>
+              <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Total Classes Held This Semester: <strong id="totalClassesCount" style="color: var(--teal);">0</strong></p>
+              
+              <div id="archiveListContainer">
+                <p style="font-size: 0.9rem; color: var(--muted); text-align: center; padding: 10px;">No archived classes yet. Close a live class to save records here! 🗂️</p>
+              </div>
+            </div>
 
   </main>
 

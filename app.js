@@ -78,6 +78,15 @@ if (signupForm) {
       return;
     }
 
+    // MILESTONE 1 CHECK: Enforce maximum of 2 Course Reps globally in the system
+    if (isRep) {
+      const currentRepCount = users.filter(u => u.isRep).length;
+      if (currentRepCount >= 2) {
+        alert("⚠️ Registration Error: The maximum limit of 2 Course Reps for this platform has already been reached! Please sign up as a regular student.");
+        return;
+      }
+    }
+
     const newUser = { name, matric, email, password, isRep };
     users.push(newUser);
     localStorage.setItem("attendify_users", JSON.stringify(users));
@@ -253,7 +262,6 @@ window.leaveCourse = function(index) {
   }
 };
 
-// Open Portal Function with Security Guard
 window.openPortal = function(index) {
   const selectedCourse = courses[index];
   
@@ -276,13 +284,16 @@ window.openPortal = function(index) {
 
   const repControls = document.getElementById("repControls");
   const studentControls = document.getElementById("studentControls");
+  const repArchiveSection = document.getElementById("repArchiveSection");
 
   if (isRep) {
     if (repControls) repControls.classList.remove("hidden");
     if (studentControls) studentControls.classList.add("hidden");
+    if (repArchiveSection) repArchiveSection.classList.remove("hidden"); // Show archive for Rep
   } else {
     if (repControls) repControls.classList.add("hidden");
     if (studentControls) studentControls.classList.remove("hidden");
+    if (repArchiveSection) repArchiveSection.classList.add("hidden"); // Hide archive for students
   }
 
   renderPortalState();
@@ -394,11 +405,14 @@ if (generatePinBtn) {
 
     const randomPin = Math.floor(1000 + Math.random() * 9000).toString();
     
+    // Automatically include the Course Rep's matric number so they are marked present by default!
+    const repMatric = currentUser ? currentUser.matric : "REP-001";
+
     activeCourse.activeSession = {
       pin: randomPin,
       expiresAt: Date.now() + 60000, // 60 seconds
       expired: false,
-      attendees: []
+      attendees: [repMatric] // Rep is automatically in attendance!
     };
 
     updateCourseInStorage();
@@ -406,6 +420,41 @@ if (generatePinBtn) {
     renderPortalState();
   });
 }
+
+
+// REP CLOSES CLASS & SAVES ATTENDANCE TO HISTORY
+const closeClassBtn = document.getElementById("closeClassBtn");
+
+if (closeClassBtn) {
+  closeClassBtn.addEventListener("click", () => {
+    if (!activeCourse) return;
+
+    if (confirm("⚠️ Are you sure you want to close this attendance session and save the records?")) {
+      // Initialize attendance history array if it doesn't exist yet
+      if (!activeCourse.attendanceHistory) {
+        activeCourse.attendanceHistory = [];
+      }
+
+      // Save current active session attendees into history with a timestamp
+      if (activeCourse.activeSession && activeCourse.activeSession.attendees.length > 0) {
+        const sessionRecord = {
+          date: new Date().toLocaleDateString() + " " + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          attendees: [...activeCourse.activeSession.attendees]
+        };
+        activeCourse.attendanceHistory.push(sessionRecord);
+      }
+
+      // Clear out the active session so the live roster goes fresh for the next class
+      activeCourse.activeSession = null;
+      if (countdownInterval) clearInterval(countdownInterval);
+
+      updateCourseInStorage();
+      renderPortalState();
+      alert("📁 Class closed successfully! Attendance has been archived.");
+    }
+  });
+}
+
 
 function startSessionTimer() {
   if (countdownInterval) clearInterval(countdownInterval);
@@ -485,6 +534,7 @@ function renderPortalState() {
 
   const bannerTitle = document.getElementById("bannerTitle");
   const bannerText = document.getElementById("bannerText");
+  const closeClassWrapper = document.getElementById("closeClassWrapper");
 
   if (isSessionActive) {
     if (sessionBanner) {
@@ -503,6 +553,7 @@ function renderPortalState() {
       if (activePinDisplay) activePinDisplay.classList.remove("hidden");
       if (pinCodeText) pinCodeText.textContent = session.pin;
       if (generatePinBtn) generatePinBtn.textContent = "🔄 Regenerate PIN";
+      if (closeClassWrapper) closeClassWrapper.classList.remove("hidden");
     }
     startSessionTimer();
   } else {
@@ -516,7 +567,11 @@ function renderPortalState() {
           bannerTitle.style.color = "#dc3545";
         }
         if (bannerText) {
-          bannerText.textContent = "The 60-second window has expired. PIN is no longer valid.";
+          if (isRep) {
+            bannerText.textContent = "The 60-second window has expired. PIN is no longer valid, but you can review and close class.";
+          } else {
+            bannerText.textContent = "The attendance window for this session has closed. PIN is no longer valid.";
+          }
         }
       } else {
         sessionBanner.classList.add("hidden");
@@ -525,9 +580,16 @@ function renderPortalState() {
     if (isRep) {
       if (activePinDisplay) activePinDisplay.classList.add("hidden");
       if (generatePinBtn) generatePinBtn.textContent = "Generate Attendance PIN ⏱️";
+      
+      if (session && session.attendees && session.attendees.length > 0) {
+        if (closeClassWrapper) closeClassWrapper.classList.remove("hidden");
+      } else {
+        if (closeClassWrapper) closeClassWrapper.classList.add("hidden");
+      }
     }
   }
 
+  // Render Roster List
   if (!rosterList) return;
   rosterList.innerHTML = "";
 
@@ -536,14 +598,56 @@ function renderPortalState() {
 
   if (attendees.length === 0) {
     rosterList.innerHTML = `<li style="color: var(--muted); font-size: 0.9rem; text-align: center; padding: 10px;">No check-ins recorded yet. ⏳</li>`;
-    return;
+  } else {
+    attendees.forEach(matric => {
+      const foundUser = users.find(u => u.matric === matric);
+      const displayName = foundUser ? foundUser.name : "Student";
+      const isThisRep = foundUser && foundUser.isRep;
+      const repBadge = isThisRep ? `<span style="background: var(--teal); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 6px;">👑 REP</span>` : "";
+
+      const li = document.createElement("li");
+      li.style.cssText = "display: flex; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem;";
+      li.innerHTML = `<span>🎓 <strong>${displayName}</strong> (${matric}) ${repBadge}</span> <span style="color: #28a745; font-weight: bold;">Present ✅</span>`;
+      rosterList.appendChild(li);
+    });
   }
 
-  attendees.forEach(matric => {
-    const li = document.createElement("li");
-    li.style.cssText = "display: flex; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem;";
-    li.innerHTML = `<span>🎓 <strong>${matric}</strong></span> <span style="color: #28a745; font-weight: bold;">Present ✅</span>`;
-    rosterList.appendChild(li);
-  });
+  // --- RENDER REP ARCHIVE HISTORY ---
+  const repArchiveSection = document.getElementById("repArchiveSection");
+  if (isRep && repArchiveSection) {
+    const totalClassesCount = document.getElementById("totalClassesCount");
+    const archiveListContainer = document.getElementById("archiveListContainer");
+
+    const history = activeCourse.attendanceHistory || [];
+    if (totalClassesCount) totalClassesCount.textContent = history.length;
+
+    if (history.length === 0) {
+      archiveListContainer.innerHTML = `<p style="font-size: 0.9rem; color: var(--muted); text-align: center; padding: 10px;">No archived classes yet. Close a live class to save records here! 🗂️</p>`;
+    } else {
+      archiveListContainer.innerHTML = "";
+      history.forEach((sessionRecord) => {
+        const archiveCard = document.createElement("div");
+        archiveCard.style.cssText = "background: var(--card-bg); padding: 12px; border-radius: 8px; margin-bottom: 10px; border: 1px solid var(--border);";
+        
+        const attendeesListHTML = sessionRecord.attendees.map(m => {
+          const u = users.find(user => user.matric === m);
+          return `<li style="font-size: 0.85rem; padding: 2px 0;">🎓 ${u ? u.name : "Student"} (${m})</li>`;
+        }).join("");
+
+        archiveCard.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+            <strong>📅 Session on ${sessionRecord.date}</strong>
+            <span style="font-size: 0.8rem; background: var(--teal); color: white; padding: 2px 6px; border-radius: 4px;">${sessionRecord.attendees.length} Present</span>
+          </div>
+          <details style="font-size: 0.85rem; color: var(--muted); cursor: pointer; margin-top: 5px;">
+            <summary>View Attendees List 👀</summary>
+            <ul style="list-style: none; padding-left: 10px; margin-top: 5px;">${attendeesListHTML}</ul>
+          </details>
+        `;
+        archiveListContainer.appendChild(archiveCard);
+      });
+    }
+  }
 }
+
 checkAuth();
