@@ -304,6 +304,11 @@ if (backToDashboardBtn) {
   backToDashboardBtn.addEventListener("click", () => {
     if (portalSection) portalSection.classList.add("hidden");
     if (dashboardSection) dashboardSection.classList.remove("hidden");
+    
+    // Hide archive section on exit
+    const repArchiveSection = document.getElementById("repArchiveSection");
+    if (repArchiveSection) repArchiveSection.classList.add("hidden");
+
     activeCourse = null;
     if (countdownInterval) clearInterval(countdownInterval);
   });
