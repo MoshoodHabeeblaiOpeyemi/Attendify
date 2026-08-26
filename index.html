@@ -48,7 +48,7 @@
             <small style="color: var(--muted); font-size: 0.75rem; display: block; margin-top: 4px;">💡 Use something you can remember—no need for rocket science passwords!</small>
           </div>
           
-          <!-- NEW: COURSE REP CHECKBOX -->
+          <!-- COURSE REP CHECKBOX -->
           <div class="field" style="display: flex; align-items: center; gap: 10px; margin-bottom: 25px;">
             <input type="checkbox" id="isRepCheckbox" style="width: 20px; height: 20px; accent-color: var(--teal); cursor: pointer;">
             <label for="isRepCheckbox" style="margin-bottom: 0; cursor: pointer; font-size: 0.9rem;">Register as a Course Rep 👑</label>
@@ -56,7 +56,6 @@
 
           <button type="submit" class="btn">Sign Up 📝</button>
         </form>
-
 
         <p style="text-align: center; margin-top: 15px; font-size: 0.85rem;">
           Already have an account? <a href="#" id="showLogin" style="color: var(--teal); font-weight: 700; text-decoration: none;">Log In</a>
@@ -91,9 +90,8 @@
 
     </div>
 
-  <!-- MAIN DASHBOARD (Hidden once inside portal) -->
+    <!-- MAIN DASHBOARD (Hidden once inside portal) -->
     <section id="dashboardSection" class="hidden">
-      <!-- (Your existing dashboard content remains here) -->
       <div class="dashboard-header">
         <h2>Hey, <span id="displayName">Student</span>! 👋</h2>
         <p>Matric No: <strong id="displayMatric">---</strong> | Manage your courses or check in below.</p>
@@ -112,7 +110,6 @@
       </div>
     </section>
 
-    <!-- NEW: COURSE PORTAL SECTION (Hidden by default) -->
     <!-- COURSE PORTAL SECTION -->
     <section id="portalSection" class="hidden">
       <button id="backToDashboard" class="btn-outline" style="margin-bottom: 20px; width: auto; padding: 8px 16px; font-size: 0.85rem;">← Back to Dashboard</button>
@@ -129,7 +126,7 @@
           <p id="bannerText" style="font-size: 0.9rem; margin-bottom: 5px;">Time Remaining: <strong id="countdownTimer" style="font-size: 1.2rem;">60s</strong></p>
         </div>
         
- <!-- REP CONTROLS -->
+        <!-- REP CONTROLS -->
         <div id="repControls" class="hidden" style="background: var(--bg); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--border);">
           <h3 style="color: var(--navy); margin-bottom: 10px;">👑 Course Rep Control Center</h3>
           <p style="font-size: 0.9rem; margin-bottom: 15px;">Generate a 60-second secure PIN for today's lecture attendance.</p>
@@ -146,6 +143,28 @@
           </div>
         </div>
 
+        <!-- REP ASSISTANT MANAGEMENT SECTION -->
+        <div id="assistantManagementSection" class="hidden" style="margin-top: 20px; background: var(--bg); padding: 20px; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 20px;">
+          <h3 style="color: var(--navy); margin-bottom: 5px;">👑 Assistant Reps & Group Leads</h3>
+          <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Appoint trusted students or team leads who can generate attendance PINs for this course.</p>
+          
+          <div class="field" style="margin-bottom: 15px;">
+            <label for="courseStudentSelect" style="font-size: 0.85rem; color: var(--muted);">Select Enrolled Student:</label>
+            <select id="courseStudentSelect" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text);">
+              <option value="">-- Choose student to appoint --</option>
+            </select>
+          </div>
+          
+          <button id="appointAssistantBtn" class="btn" style="font-size: 0.85rem; padding: 8px 14px;">Appoint as Assistant Rep ➕</button>
+
+          <!-- LIST OF CURRENT ASSISTANTS -->
+          <div style="margin-top: 20px;">
+            <h4 style="font-size: 0.9rem; color: var(--navy); margin-bottom: 8px;">Active Assistants for this Course:</h4>
+            <ul id="assistantsList" style="list-style: none; padding-left: 0;">
+              <li style="color: var(--muted); font-size: 0.85rem; padding: 5px;">No assistants appointed yet. ⏳</li>
+            </ul>
+          </div>
+        </div>
 
         <!-- STUDENT CONTROLS -->
         <div id="studentControls" class="hidden" style="background: var(--bg); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--border);">
@@ -159,8 +178,34 @@
             </div>
             <button type="submit" class="btn">Submit Attendance ✅</button>
           </form>
-        </div>
 
+          
+          <div id="eligibilityBanner" style="padding: 10px; border-radius: 6px; font-size: 0.85rem; text-align: center; font-weight: bold;">
+            <!-- Dynamic Status Message -->
+          </div>
+        </div>
+      </div>
+      
+      <!-- STUDENT ATTENDANCE ANALYTICS SECTION -->
+      <div id="studentAnalyticsSection" class="hidden" style="margin-top: 20px; background: var(--card-bg); padding: 20px; border-radius: 12px; border: 1px solid var(--border);">
+        <h3 style="color: var(--navy); margin-bottom: 5px;">📈 Your Course Attendance Analytics</h3>
+        <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Track your lecture presence against university eligibility requirements (Min: 70%).</p>
+        
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 15px;">
+          <div style="background: var(--bg); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid var(--border);">
+            <span style="font-size: 0.75rem; color: var(--muted);">Classes Attended</span>
+            <h4 id="statAttendedCount" style="font-size: 1.2rem; color: var(--navy); margin-top: 4px;">0</h4>
+          </div>
+          <div style="background: var(--bg); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid var(--border);">
+            <span style="font-size: 0.75rem; color: var(--muted);">Total Classes Held</span>
+            <h4 id="statTotalClasses" style="font-size: 1.2rem; color: var(--navy); margin-top: 4px;">0</h4>
+          </div>
+          <div style="background: var(--bg); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid var(--border);">
+            <span style="font-size: 0.75rem; color: var(--muted);">Attendance Rate</span>
+            <h4 id="statPercentage" style="font-size: 1.2rem; color: var(--teal); margin-top: 4px;">0%</h4>
+          </div>
+        </div>
+        
         <!-- LIVE ROSTER -->
         <h3 style="margin-bottom: 10px; font-size: 1.1rem; color: var(--navy);">👥 Live Attendance Roster (<span id="rosterCount">0</span>)</h3>
         <div style="background: var(--bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border); max-height: 250px; overflow-y: auto;">
@@ -172,24 +217,22 @@
       </div>
     </section>
     
-         <!-- REP ARCHIVE & HISTORY SECTION -->
-        <div id="repArchiveSection" class="hidden" style="margin-top: 30px; background: var(--bg); padding: 20px; border-radius: 12px; border: 1px solid var(--border);">
-          <h3 style="color: var(--navy); margin-bottom: 5px;">📁 Course Archive & Class History</h3>
-          <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Total Classes Held This Semester: <strong id="totalClassesCount" style="color: var(--teal);">0</strong></p>
-          
-          <div id="archiveListContainer">
-            <p style="font-size: 0.9rem; color: var(--muted); text-align: center; padding: 10px;">No archived classes yet. Close a live class to save records here! 🗂️</p>
-          </div>
+    <!-- REP ARCHIVE & HISTORY SECTION -->
+    <div id="repArchiveSection" class="hidden" style="margin-top: 30px; background: var(--bg); padding: 20px; border-radius: 12px; border: 1px solid var(--border);">
+      <h3 style="color: var(--navy); margin-bottom: 5px;">📁 Course Archive & Class History</h3>
+      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Total Classes Held This Semester: <strong id="totalClassesCount" style="color: var(--teal);">0</strong></p>
+      
+      <div id="archiveListContainer">
+        <p style="font-size: 0.9rem; color: var(--muted); text-align: center; padding: 10px;">No archived classes yet. Close a live class to save records here! 🗂️</p>
+      </div>
 
-          <!-- NEW: END SEMESTER BUTTON -->
-          <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border); text-align: right;">
-            <button id="endSemesterBtn" class="btn" style="background: var(--danger); font-size: 0.85rem; padding: 8px 14px;">🎓 End Semester & Reset Records</button>
-          </div>
-        </div>
+      <!-- END SEMESTER BUTTON -->
+      <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border); text-align: right;">
+        <button id="endSemesterBtn" class="btn" style="background: var(--danger); font-size: 0.85rem; padding: 8px 14px;">🎓 End Semester & Reset Records</button>
+      </div>
+    </div>
 
   </main>
-
-
 
   <!-- MODAL: FORGOT PASSWORD -->
   <div id="forgotModal" class="modal">
@@ -239,6 +282,7 @@
     </div>
   </div>
 
+  <!-- MODAL: JOIN COURSE -->
   <div id="joinModal" class="modal">
     <div class="modal-card">
       <h3>Join a Course 🤝</h3>

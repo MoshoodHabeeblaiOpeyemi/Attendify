@@ -9,6 +9,11 @@ themeToggle.addEventListener("click", () => {
   themeToggle.textContent = newTheme === "dark" ? "☀️" : "🌙";
 });
 
+// --- COURSES & STORAGE INITIALIZATION ---
+let courses = JSON.parse(localStorage.getItem("attendify_courses")) || [];
+let users = JSON.parse(localStorage.getItem("attendify_users")) || [];
+let currentUser = JSON.parse(localStorage.getItem("attendify_current_user")) || null;
+
 // --- AUTH & USER DATABASE MANAGEMENT ---
 const authContainer = document.getElementById("authContainer");
 const signupCard = document.getElementById("signupCard");
@@ -31,9 +36,6 @@ document.getElementById("showSignup").addEventListener("click", (e) => {
   signupCard.classList.remove("hidden");
 });
 
-let users = JSON.parse(localStorage.getItem("attendify_users")) || [];
-let currentUser = JSON.parse(localStorage.getItem("attendify_current_user")) || null;
-
 function checkAuth() {
   if (currentUser) {
     authContainer.classList.add("hidden");
@@ -44,7 +46,9 @@ function checkAuth() {
 
     const openCreateModalBtn = document.getElementById("openCreateModal");
     if (openCreateModalBtn) {
-      if (currentUser.isRep) {
+      const isAnywhereAssistant = courses.some(c => c.assistants && c.assistants.includes(currentUser.matric));
+      
+      if (currentUser.isRep || isAnywhereAssistant) {
         openCreateModalBtn.classList.remove("hidden");
       } else {
         openCreateModalBtn.classList.add("hidden");
@@ -78,11 +82,11 @@ if (signupForm) {
       return;
     }
 
-    // MILESTONE 1 CHECK: Enforce maximum of 2 Course Reps globally in the system
+    // MILESTONE 1 CHECK: Enforce maximum of 1 Course Rep globally in the system
     if (isRep) {
       const currentRepCount = users.filter(u => u.isRep).length;
-      if (currentRepCount >= 2) {
-        alert("⚠️ Registration Error: The maximum limit of 2 Course Reps for this platform has already been reached! Please sign up as a regular student.");
+      if (currentRepCount >= 1) {
+        alert("⚠️ Registration Error: The maximum limit of 1 Course Rep for this platform has already been reached! Please sign up as a regular student.");
         return;
       }
     }
@@ -126,8 +130,12 @@ if (logoutBtn) {
     currentUser = null;
     localStorage.removeItem("attendify_current_user");
     
-    // Clear portal view state on logout
     if (portalSection) portalSection.classList.add("hidden");
+    const repArchiveSection = document.getElementById("repArchiveSection");
+    if (repArchiveSection) repArchiveSection.classList.add("hidden");
+    const assistantManagementSection = document.getElementById("assistantManagementSection");
+    if (assistantManagementSection) assistantManagementSection.classList.add("hidden");
+
     activeCourse = null;
     if (countdownInterval) clearInterval(countdownInterval);
     
@@ -137,18 +145,37 @@ if (logoutBtn) {
 
 if (deleteAccountBtn) {
   deleteAccountBtn.addEventListener("click", () => {
-    if (confirm("⚠️ Are you sure you want to delete your account?")) {
+    if (confirm("⚠️ Are you sure you want to delete your account? This cannot be undone.")) {
+      const userMatric = currentUser.matric;
+
+      // CLEANUP: Remove user from enrolled and assistant lists in all courses
+      courses.forEach(course => {
+        if (course.enrolled) {
+          course.enrolled = course.enrolled.filter(m => m !== userMatric);
+        }
+        if (course.assistants) {
+          course.assistants = course.assistants.filter(m => m !== userMatric);
+        }
+      });
+      localStorage.setItem("attendify_courses", JSON.stringify(courses));
+
       users = users.filter(u => u.email !== currentUser.email);
       localStorage.setItem("attendify_users", JSON.stringify(users));
+      
       currentUser = null;
       localStorage.removeItem("attendify_current_user");
       
       if (portalSection) portalSection.classList.add("hidden");
+      const repArchiveSection = document.getElementById("repArchiveSection");
+      if (repArchiveSection) repArchiveSection.classList.add("hidden");
+      const assistantManagementSection = document.getElementById("assistantManagementSection");
+      if (assistantManagementSection) assistantManagementSection.classList.add("hidden");
+
       activeCourse = null;
       if (countdownInterval) clearInterval(countdownInterval);
 
       checkAuth();
-      alert("Account deleted.");
+      alert("Account deleted and course records updated successfully.");
     }
   });
 }
@@ -189,7 +216,6 @@ document.querySelectorAll(".close-modal").forEach(btn => {
 });
 
 // --- COURSES & PORTAL MANAGEMENT ---
-let courses = JSON.parse(localStorage.getItem("attendify_courses")) || [];
 const courseGrid = document.getElementById("courseGrid");
 const portalSection = document.getElementById("portalSection");
 
@@ -202,8 +228,9 @@ function renderCourses() {
   const myCourses = courses.filter(course => {
     if (!currentUser) return false;
     const isRep = course.rep.toLowerCase() === currentUser.name.toLowerCase();
+    const isAssistant = course.assistants && course.assistants.includes(currentUser.matric);
     const isEnrolled = course.enrolled && course.enrolled.includes(currentUser.matric);
-    return isRep || isEnrolled;
+    return isRep || isAssistant || isEnrolled;
   });
 
   if (myCourses.length === 0) {
@@ -246,7 +273,7 @@ window.deleteCourse = function(index) {
   if (confirm(`⚠️ WARNING: As the Course Rep, deleting "${courses[index].name}" removes it entirely. Are you sure?`)) {
     courses.splice(index, 1);
     localStorage.setItem("attendify_courses", JSON.stringify(courses));
-    renderCourses();
+    checkAuth();
   }
 };
 
@@ -256,19 +283,24 @@ window.leaveCourse = function(index) {
     if (course.enrolled) {
       course.enrolled = course.enrolled.filter(m => m !== currentUser.matric);
     }
+    if (course.assistants) {
+      course.assistants = course.assistants.filter(m => m !== currentUser.matric);
+    }
     localStorage.setItem("attendify_courses", JSON.stringify(courses));
-    renderCourses();
+    checkAuth();
     alert(`You have left ${course.name}. 👋`);
   }
 };
 
+// Open Portal Function
 window.openPortal = function(index) {
   const selectedCourse = courses[index];
   
   const isRep = currentUser && selectedCourse.rep.toLowerCase() === currentUser.name.toLowerCase();
+  const isAssistant = currentUser && selectedCourse.assistants && selectedCourse.assistants.includes(currentUser.matric);
   const isEnrolled = currentUser && selectedCourse.enrolled && selectedCourse.enrolled.includes(currentUser.matric);
 
-  if (!isRep && !isEnrolled) {
+  if (!isRep && !isAssistant && !isEnrolled) {
     alert(`⚠️ Access Denied! You are not enrolled in "${selectedCourse.name}". Please join using code [${selectedCourse.code}] first.`);
     return;
   }
@@ -285,15 +317,25 @@ window.openPortal = function(index) {
   const repControls = document.getElementById("repControls");
   const studentControls = document.getElementById("studentControls");
   const repArchiveSection = document.getElementById("repArchiveSection");
+  const assistantManagementSection = document.getElementById("assistantManagementSection");
 
-  if (isRep) {
+  if (isRep || isAssistant) {
     if (repControls) repControls.classList.remove("hidden");
     if (studentControls) studentControls.classList.add("hidden");
-    if (repArchiveSection) repArchiveSection.classList.remove("hidden"); // Show archive for Rep
+    
+    if (isRep) {
+      if (repArchiveSection) repArchiveSection.classList.remove("hidden");
+      if (assistantManagementSection) assistantManagementSection.classList.remove("hidden");
+      renderAssistantDropdownAndList();
+    } else {
+      if (repArchiveSection) repArchiveSection.classList.add("hidden");
+      if (assistantManagementSection) assistantManagementSection.classList.add("hidden");
+    }
   } else {
     if (repControls) repControls.classList.add("hidden");
     if (studentControls) studentControls.classList.remove("hidden");
-    if (repArchiveSection) repArchiveSection.classList.add("hidden"); // Hide archive for students
+    if (repArchiveSection) repArchiveSection.classList.add("hidden");
+    if (assistantManagementSection) assistantManagementSection.classList.add("hidden");
   }
 
   renderPortalState();
@@ -305,9 +347,10 @@ if (backToDashboardBtn) {
     if (portalSection) portalSection.classList.add("hidden");
     if (dashboardSection) dashboardSection.classList.remove("hidden");
     
-    // Hide archive section on exit
     const repArchiveSection = document.getElementById("repArchiveSection");
     if (repArchiveSection) repArchiveSection.classList.add("hidden");
+    const assistantManagementSection = document.getElementById("assistantManagementSection");
+    if (assistantManagementSection) assistantManagementSection.classList.add("hidden");
 
     activeCourse = null;
     if (countdownInterval) clearInterval(countdownInterval);
@@ -332,14 +375,16 @@ if (createCourseForm) {
       name, 
       code, 
       rep: currentUser ? currentUser.name : "Unknown",
-      enrolled: currentUser ? [currentUser.matric] : []
+      enrolled: currentUser ? [currentUser.matric] : [],
+      assistants: [],
+      attendanceHistory: []
     };
     courses.push(newCourse);
     localStorage.setItem("attendify_courses", JSON.stringify(courses));
 
     if (createModal) createModal.classList.remove("show");
     createCourseForm.reset();
-    renderCourses();
+    checkAuth();
   });
 }
 
@@ -358,7 +403,7 @@ if (joinCourseForm) {
         localStorage.setItem("attendify_courses", JSON.stringify(courses));
       }
       alert(`Successfully joined ${found.name}! 🎉`);
-      renderCourses();
+      checkAuth();
     } else {
       alert(`⚠️ Course code "${code}" not found.`);
     }
@@ -392,6 +437,111 @@ if (forgotPasswordForm) {
   });
 }
 
+// --- ASSISTANT REPS MANAGEMENT LOGIC ---
+const appointAssistantBtn = document.getElementById("appointAssistantBtn");
+if (appointAssistantBtn) {
+  appointAssistantBtn.addEventListener("click", () => {
+    if (!activeCourse) return;
+
+    const selectEl = document.getElementById("courseStudentSelect");
+    const selectedMatric = selectEl ? selectEl.value : "";
+
+    if (!selectedMatric) {
+      alert("⚠️ Please select an enrolled student to appoint.");
+      return;
+    }
+
+    if (!activeCourse.assistants) {
+      activeCourse.assistants = [];
+    }
+
+    if (activeCourse.assistants.includes(selectedMatric)) {
+      alert("⚠️ This student is already an appointed assistant!");
+      return;
+    }
+
+    activeCourse.assistants.push(selectedMatric);
+    updateCourseInStorage();
+    
+    // Clean UI refresh without clashing with dashboard container
+    renderPortalState();
+    renderAssistantDropdownAndList();
+    
+    alert("🎉 Assistant badge assigned successfully! 👑 ASST");
+  });
+}
+
+window.revokeAssistant = function(matric) {
+  if (!activeCourse || !activeCourse.assistants) return;
+
+  if (confirm("⚠️ Do you want to remove this assistant's badge?")) {
+    activeCourse.assistants = activeCourse.assistants.filter(m => m !== matric);
+    updateCourseInStorage();
+    
+    renderPortalState();
+    renderAssistantDropdownAndList();
+    
+    alert("Assistant badge removed.");
+  }
+};
+
+function renderAssistantDropdownAndList() {
+  if (!activeCourse) return;
+
+  const selectEl = document.getElementById("courseStudentSelect");
+  const listEl = document.getElementById("assistantsList");
+  if (!selectEl || !listEl) return;
+
+  selectEl.innerHTML = `<option value="">-- Choose student to appoint --</option>`;
+  const enrolled = activeCourse.enrolled || [];
+
+  enrolled.forEach(matric => {
+    const userObj = users.find(u => u.matric === matric);
+    const name = userObj ? userObj.name : "Student";
+    const isMainRep = activeCourse.rep.toLowerCase() === name.toLowerCase();
+    const isAlreadyAssistant = activeCourse.assistants && activeCourse.assistants.includes(matric);
+
+    if (!isMainRep && !isAlreadyAssistant) {
+      const opt = document.createElement("option");
+      opt.value = matric;
+      opt.textContent = `${name} (${matric})`;
+      selectEl.appendChild(opt);
+    }
+  });
+
+  const assistants = activeCourse.assistants || [];
+  if (assistants.length === 0) {
+    listEl.innerHTML = `<li style="color: var(--muted); font-size: 0.85rem; padding: 5px;">No assistants appointed yet. ⏳</li>`;
+  } else {
+    listEl.innerHTML = "";
+    assistants.forEach(matric => {
+      const userObj = users.find(u => u.matric === matric);
+      const name = userObj ? userObj.name : "Student";
+
+      const li = document.createElement("li");
+      li.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: var(--card-bg); border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem;";
+      li.innerHTML = `<span>👑 <strong>${name}</strong> (${matric}) <span style="background: var(--teal); color: white; padding: 2px 4px; border-radius: 3px; font-size: 0.65rem;">ASST</span></span> <button onclick="revokeAssistant('${matric}')" style="background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 0.8rem;">Remove ❌</button>`;
+      listEl.appendChild(li);
+    });
+  }
+}
+
+// Helper: Calculate distance in meters between two lat/lng points (Haversine formula)
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3; // Earth radius in meters
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c; // Distance in meters
+}
+
 // --- 60-SECOND ATTENDANCE ENGINE & TIMER LOGIC ---
 let countdownInterval = null;
 
@@ -409,77 +559,40 @@ if (generatePinBtn) {
     if (!activeCourse) return;
 
     const randomPin = Math.floor(1000 + Math.random() * 9000).toString();
-    
-    // Automatically include the Course Rep's matric number so they are marked present by default!
-    const repMatric = currentUser ? currentUser.matric : "REP-001";
+    const managerMatric = currentUser ? currentUser.matric : "REP-001";
 
-    activeCourse.activeSession = {
-      pin: randomPin,
-      expiresAt: Date.now() + 60000, // 60 seconds
-      expired: false,
-      attendees: [repMatric] // Rep is automatically in attendance!
-    };
-
-    updateCourseInStorage();
-    startSessionTimer();
-    renderPortalState();
-  });
-}
-
-// REP ENDS SEMESTER & RESETS COURSE RECORDS
-const endSemesterBtn = document.getElementById("endSemesterBtn");
-
-if (endSemesterBtn) {
-  endSemesterBtn.addEventListener("click", () => {
-    if (!activeCourse) return;
-
-    if (confirm(`⚠️ WARNING: Are you sure you want to END THE SEMESTER for "${activeCourse.name}"? This will clear all class history and reset the total class count to 0. Enrolled students will remain.`)) {
-      // Reset history and active session
-      activeCourse.attendanceHistory = [];
-      activeCourse.activeSession = null;
-      if (countdownInterval) clearInterval(countdownInterval);
-
-      updateCourseInStorage();
-      renderPortalState();
-      alert("🎓 Semester ended successfully! All records have been reset for the new semester. 🚀");
+    // Attempt to capture Rep's current location as lecture hall center
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          createSession(randomPin, managerMatric, position.coords.latitude, position.coords.longitude);
+        },
+        (error) => {
+          console.warn("Could not capture Rep GPS, using default campus coordinates.");
+          createSession(randomPin, managerMatric, 6.5244, 3.3792);
+        },
+        { enableHighAccuracy: true }
+      );
+    } else {
+      createSession(randomPin, managerMatric, 6.5244, 3.3792);
     }
   });
 }
 
+function createSession(pin, managerMatric, lat, lon) {
+  activeCourse.activeSession = {
+    pin: pin,
+    expiresAt: Date.now() + 60000,
+    expired: false,
+    attendees: [managerMatric],
+    lat: lat,
+    lon: lon
+  };
 
-// REP CLOSES CLASS & SAVES ATTENDANCE TO HISTORY
-const closeClassBtn = document.getElementById("closeClassBtn");
-
-if (closeClassBtn) {
-  closeClassBtn.addEventListener("click", () => {
-    if (!activeCourse) return;
-
-    if (confirm("⚠️ Are you sure you want to close this attendance session and save the records?")) {
-      // Initialize attendance history array if it doesn't exist yet
-      if (!activeCourse.attendanceHistory) {
-        activeCourse.attendanceHistory = [];
-      }
-
-      // Save current active session attendees into history with a timestamp
-      if (activeCourse.activeSession && activeCourse.activeSession.attendees.length > 0) {
-        const sessionRecord = {
-          date: new Date().toLocaleDateString() + " " + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          attendees: [...activeCourse.activeSession.attendees]
-        };
-        activeCourse.attendanceHistory.push(sessionRecord);
-      }
-
-      // Clear out the active session so the live roster goes fresh for the next class
-      activeCourse.activeSession = null;
-      if (countdownInterval) clearInterval(countdownInterval);
-
-      updateCourseInStorage();
-      renderPortalState();
-      alert("📁 Class closed successfully! Attendance has been archived.");
-    }
-  });
+  updateCourseInStorage();
+  startSessionTimer();
+  renderPortalState();
 }
-
 
 function startSessionTimer() {
   if (countdownInterval) clearInterval(countdownInterval);
@@ -494,8 +607,6 @@ function startSessionTimer() {
     }
 
     const timeLeft = Math.floor((session.expiresAt - Date.now()) / 1000);
-
-    // Grab the timer element dynamically inside the loop so it never misses it
     const liveTimerElement = document.getElementById("countdownTimer");
 
     if (timeLeft <= 0) {
@@ -510,7 +621,6 @@ function startSessionTimer() {
     }
   }, 1000);
 }
-
 
 if (checkInForm) {
   checkInForm.addEventListener("submit", (e) => {
@@ -534,11 +644,95 @@ if (checkInForm) {
       return;
     }
 
-    session.attendees.push(currentUser.matric);
-    updateCourseInStorage();
-    renderPortalState();
-    checkInForm.reset();
-    alert("🎉 Attendance marked successfully!");
+    // --- GPS GEOFENCING VALIDATION ---
+    if (!navigator.geolocation) {
+      alert("⚠️ Geolocation is not supported by your browser.");
+      return;
+    }
+
+    alert("📍 Verifying your location... Please allow location access.");
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const studentLat = position.coords.latitude;
+        const studentLon = position.coords.longitude;
+
+        // If session has rep coordinates, use them. Otherwise, fallback or mock a center point.
+        const repLat = session.lat || 6.5244; // Default fallback (e.g., campus latitude)
+        const repLon = session.lon || 3.3792; // Default fallback (e.g., campus longitude)
+
+        const distanceMeters = calculateDistance(studentLat, studentLon, repLat, repLon);
+        const ALLOWED_RADIUS = 150; // Maximum allowed distance in meters (e.g., 150 meters around lecture hall)
+
+        console.log(`Student distance from lecture hall: ${Math.round(distanceMeters)}m`);
+
+        if (distanceMeters > ALLOWED_RADIUS) {
+          alert(`🚨 Geofencing Block: You are too far from the lecture hall (~${Math.round(distanceMeters)}m away). You must be within ${ALLOWED_RADIUS}m to check in!`);
+          return;
+        }
+
+        // Passed Geofencing! Mark attendance
+        session.attendees.push(currentUser.matric);
+        updateCourseInStorage();
+        renderPortalState();
+        checkInForm.reset();
+        alert("🎉 Attendance marked successfully with GPS Verification! ✅📍");
+      },
+      (error) => {
+        alert("❌ GPS Error: Unable to retrieve your location. Please ensure location services are enabled on your device.");
+        console.error(error);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  });
+}
+
+// REP CLOSES CLASS & SAVES ATTENDANCE TO HISTORY
+const closeClassBtn = document.getElementById("closeClassBtn");
+
+if (closeClassBtn) {
+  closeClassBtn.addEventListener("click", () => {
+    if (!activeCourse) return;
+
+    if (confirm("⚠️ Are you sure you want to close this attendance session and save the records?")) {
+      if (!activeCourse.attendanceHistory) {
+        activeCourse.attendanceHistory = [];
+      }
+
+      if (activeCourse.activeSession && activeCourse.activeSession.attendees.length > 0) {
+        const sessionRecord = {
+          date: new Date().toLocaleDateString() + " " + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          attendees: [...activeCourse.activeSession.attendees]
+        };
+        activeCourse.attendanceHistory.push(sessionRecord);
+      }
+
+      activeCourse.activeSession = null;
+      if (countdownInterval) clearInterval(countdownInterval);
+
+      updateCourseInStorage();
+      renderPortalState();
+      alert("📁 Class closed successfully! Attendance has been archived.");
+    }
+  });
+}
+
+// REP ENDS SEMESTER & RESETS COURSE RECORDS
+const endSemesterBtn = document.getElementById("endSemesterBtn");
+
+if (endSemesterBtn) {
+  endSemesterBtn.addEventListener("click", () => {
+    if (!activeCourse) return;
+
+    if (confirm(`⚠️ WARNING: Are you sure you want to END THE SEMESTER for "${activeCourse.name}"? This will clear all class history and reset the total class count to 0. Enrolled students will remain.`)) {
+      activeCourse.attendanceHistory = [];
+      activeCourse.activeSession = null;
+      if (countdownInterval) clearInterval(countdownInterval);
+
+      updateCourseInStorage();
+      renderPortalState();
+      alert("🎓 Semester ended successfully! All records have been reset for the new semester. 🚀");
+    }
   });
 }
 
@@ -554,6 +748,7 @@ function renderPortalState() {
   if (!activeCourse) return;
 
   const isRep = currentUser && activeCourse.rep.toLowerCase() === currentUser.name.toLowerCase();
+  const isAssistant = currentUser && activeCourse.assistants && activeCourse.assistants.includes(currentUser.matric);
   const session = activeCourse.activeSession;
   const isSessionActive = session && !session.expired && Date.now() < session.expiresAt;
 
@@ -574,7 +769,7 @@ function renderPortalState() {
         bannerText.innerHTML = `Time Remaining: <strong id="countdownTimer" style="font-size: 1.2rem;">60s</strong>`;
       }
     }
-    if (isRep) {
+    if (isRep || isAssistant) {
       if (activePinDisplay) activePinDisplay.classList.remove("hidden");
       if (pinCodeText) pinCodeText.textContent = session.pin;
       if (generatePinBtn) generatePinBtn.textContent = "🔄 Regenerate PIN";
@@ -592,7 +787,7 @@ function renderPortalState() {
           bannerTitle.style.color = "#dc3545";
         }
         if (bannerText) {
-          if (isRep) {
+          if (isRep || isAssistant) {
             bannerText.textContent = "The 60-second window has expired. PIN is no longer valid, but you can review and close class.";
           } else {
             bannerText.textContent = "The attendance window for this session has closed. PIN is no longer valid.";
@@ -602,7 +797,7 @@ function renderPortalState() {
         sessionBanner.classList.add("hidden");
       }
     }
-    if (isRep) {
+    if (isRep || isAssistant) {
       if (activePinDisplay) activePinDisplay.classList.add("hidden");
       if (generatePinBtn) generatePinBtn.textContent = "Generate Attendance PIN ⏱️";
       
@@ -614,7 +809,7 @@ function renderPortalState() {
     }
   }
 
-  // Render Roster List
+  // Render Roster List with Rep & Assistant Badges
   if (!rosterList) return;
   rosterList.innerHTML = "";
 
@@ -627,12 +822,20 @@ function renderPortalState() {
     attendees.forEach(matric => {
       const foundUser = users.find(u => u.matric === matric);
       const displayName = foundUser ? foundUser.name : "Student";
-      const isThisRep = foundUser && foundUser.isRep;
-      const repBadge = isThisRep ? `<span style="background: var(--teal); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 6px;">👑 REP</span>` : "";
+      
+      const isMainRepUser = foundUser && activeCourse.rep.toLowerCase() === foundUser.name.toLowerCase();
+      const isAssistantUser = activeCourse.assistants && activeCourse.assistants.includes(matric);
+      
+      let badgeHTML = "";
+      if (isMainRepUser) {
+        badgeHTML = `<span style="background: var(--teal); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 6px;">👑 REP</span>`;
+      } else if (isAssistantUser) {
+        badgeHTML = `<span style="background: var(--teal); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 6px;">👑 ASST</span>`;
+      }
 
       const li = document.createElement("li");
       li.style.cssText = "display: flex; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem;";
-      li.innerHTML = `<span>🎓 <strong>${displayName}</strong> (${matric}) ${repBadge}</span> <span style="color: #28a745; font-weight: bold;">Present ✅</span>`;
+      li.innerHTML = `<span>🎓 <strong>${displayName}</strong> (${matric}) ${badgeHTML}</span> <span style="color: #28a745; font-weight: bold;">Present ✅</span>`;
       rosterList.appendChild(li);
     });
   }
@@ -672,6 +875,46 @@ function renderPortalState() {
         archiveListContainer.appendChild(archiveCard);
       });
     }
+  }
+  // --- RENDER STUDENT ATTENDANCE ANALYTICS (Available for ALL Enrolled Users, including Reps & Assistants) ---
+  const studentAnalyticsSection = document.getElementById("studentAnalyticsSection");
+  const isEnrolled = currentUser && activeCourse.enrolled && activeCourse.enrolled.includes(currentUser.matric);
+
+  if (isEnrolled && studentAnalyticsSection) {
+    studentAnalyticsSection.classList.remove("hidden");
+
+    const history = activeCourse.attendanceHistory || [];
+    const totalClasses = history.length;
+    
+    let attendedCount = 0;
+    history.forEach(sessionRecord => {
+      if (sessionRecord.attendees && sessionRecord.attendees.includes(currentUser.matric)) {
+        attendedCount++;
+      }
+    });
+
+    const percentage = totalClasses > 0 ? Math.round((attendedCount / totalClasses) * 100) : 100;
+
+    document.getElementById("statAttendedCount").textContent = attendedCount;
+    document.getElementById("statTotalClasses").textContent = totalClasses;
+    document.getElementById("statPercentage").textContent = `${percentage}%`;
+
+    const eligibilityBanner = document.getElementById("eligibilityBanner");
+    if (totalClasses === 0) {
+      eligibilityBanner.style.background = "rgba(108, 117, 125, 0.1)";
+      eligibilityBanner.style.color = "var(--muted)";
+      eligibilityBanner.textContent = "⏳ No archived classes yet. Analytics will update as classes are held.";
+    } else if (percentage >= 70) {
+      eligibilityBanner.style.background = "rgba(40, 167, 69, 0.1)";
+      eligibilityBanner.style.color = "#28a745";
+      eligibilityBanner.textContent = `✅ ELIGIBLE: You meet the 70% attendance threshold (${percentage}%).`;
+    } else {
+      eligibilityBanner.style.background = "rgba(220, 53, 69, 0.1)";
+      eligibilityBanner.style.color = "#dc3545";
+      eligibilityBanner.textContent = `⚠️ WARNING: Your attendance is at ${percentage}%. You are below the 70% exam eligibility requirement!`;
+    }
+  } else if (studentAnalyticsSection) {
+    studentAnalyticsSection.classList.add("hidden");
   }
 }
 

@@ -1,126 +1,508 @@
+/* ==========================================================================
+   ATTENDIFY — "Presence Field" design system
+   Signature idea: the app's whole job is turning people into visible,
+   connected points on a live roster. The background echoes that literally —
+   drifting glowing nodes with faint orbit rings — instead of decorative
+   blobs. Everything else stays quiet so that idea reads clearly.
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+/* --- DESIGN TOKENS --- */
 :root {
-  --bg: #F6FAFC;
-  --card-bg: #FFFFFF;
-  --text: #18324D;
-  --muted: #6B7C8F;
-  --navy: #0A2540;
-  --teal: #00C2A8;
-  --border: #D9E4EC;
-  --danger: #DC3545;
+  /* surfaces */
+  --bg-base: #EEF1FC;
+  --bg-base-2: #E2E7FA;
+  --bg: #E9ECF8;                 /* flat panel fill used by inline styles */
+  --card-bg: rgba(255, 255, 255, 0.62);
+  --card-border: rgba(255, 255, 255, 0.75);
+  --border: rgba(15, 23, 42, 0.10);
+
+  /* text */
+  --text-primary: #0B1120;
+  --text-muted: #5B6478;
+  --muted: #5B6478;              /* alias — inline styles/app.js expect this name */
+  --navy: #221B6B;
+
+  /* accents */
+  --violet: #6D5EF5;
+  --violet-2: #8F7BFF;
+  --teal: #16C4D9;
+  --teal-glow: rgba(22, 196, 217, 0.28);
+  --accent-glow: rgba(109, 94, 245, 0.30);
+  --danger: #E1435A;
+  --success: #22C58C;
+
+  --shadow: 0 20px 45px -18px rgba(31, 22, 90, 0.22);
+  --glass-blur: blur(18px);
+
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
 [data-theme="dark"] {
-  --bg: #0B131E;
-  --card-bg: #132235;
-  --text: #F6FAFC;
-  --muted: #94A3B8;
-  --navy: #00C2A8;
-  --teal: #00C2A8;
-  --border: #1E334D;
+  --bg-base: #05060F;
+  --bg-base-2: #090B18;
+  --bg: #0D0F1F;
+  --card-bg: rgba(16, 19, 38, 0.60);
+  --card-border: rgba(139, 148, 255, 0.16);
+  --border: rgba(148, 163, 184, 0.14);
+
+  --text-primary: #EEF1FF;
+  --text-muted: #8C93B4;
+  --muted: #8C93B4;
+  --navy: #B9C0FF;
+
+  --violet: #8B7CFF;
+  --violet-2: #A594FF;
+  --teal: #2DE0C9;
+  --teal-glow: rgba(45, 224, 201, 0.24);
+  --accent-glow: rgba(139, 124, 255, 0.32);
+  --danger: #FF6B7F;
+  --success: #3CE7A6;
+
+  --shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.65);
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; font-family: Arial, sans-serif; }
+/* --- RESET & BASE --- */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-body);
+}
+
+html { color-scheme: light; }
+[data-theme="dark"] { color-scheme: dark; }
 
 body {
-  background-color: var(--bg);
-  color: var(--text);
+  position: relative;
+  background: radial-gradient(120% 140% at 15% -10%, var(--bg-base-2) 0%, var(--bg-base) 55%);
+  color: var(--text-primary);
   min-height: 100vh;
-  transition: background 0.3s ease, color 0.3s ease;
+  overflow-x: hidden;
+  transition: background 0.5s ease, color 0.4s ease;
+  isolation: isolate; /* keep the atom field's z-index scoped to <body> */
 }
 
+/* --- PRESENCE FIELD (pure-CSS animated atom background) --- */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: -10%;
+  z-index: -2;
+  pointer-events: none;
+  background-repeat: no-repeat;
+  will-change: transform, background-position;
+}
+
+/* Layer 1 — small glowing "atoms" drifting on a slow diagonal */
+body::before {
+  background-image:
+    radial-gradient(circle, var(--teal) 0%, transparent 70%),
+    radial-gradient(circle, var(--violet) 0%, transparent 70%),
+    radial-gradient(circle, var(--teal) 0%, transparent 70%),
+    radial-gradient(circle, var(--violet-2) 0%, transparent 70%),
+    radial-gradient(circle, var(--teal) 0%, transparent 70%),
+    radial-gradient(circle, var(--violet) 0%, transparent 70%);
+  background-size: 5px 5px, 7px 7px, 4px 4px, 6px 6px, 5px 5px, 8px 8px;
+  background-position:
+    12% 18%, 78% 12%, 34% 62%, 88% 70%, 55% 85%, 20% 45%;
+  opacity: 0.55;
+  filter: blur(0.3px) drop-shadow(0 0 6px var(--accent-glow));
+  animation: driftAtoms 34s ease-in-out infinite alternate;
+}
+
+/* Layer 2 — larger soft orbit halos, slower + offset for parallax depth */
+body::after {
+  background-image:
+    radial-gradient(circle, var(--accent-glow) 0%, transparent 65%),
+    radial-gradient(circle, var(--teal-glow) 0%, transparent 65%),
+    radial-gradient(circle, var(--accent-glow) 0%, transparent 65%);
+  background-size: 46vmax 46vmax, 38vmax 38vmax, 30vmax 30vmax;
+  background-position: -10% 10%, 90% 20%, 40% 95%;
+  opacity: 0.65;
+  animation: driftHalos 46s ease-in-out infinite alternate;
+}
+
+@keyframes driftAtoms {
+  0%   { transform: translate3d(0, 0, 0) rotate(0deg); }
+  50%  { transform: translate3d(-1.5%, 2%, 0) rotate(1.2deg); }
+  100% { transform: translate3d(2%, -1.5%, 0) rotate(-1deg); }
+}
+
+@keyframes driftHalos {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  50%  { transform: translate3d(1.5%, -2%, 0) scale(1.05); }
+  100% { transform: translate3d(-2%, 1.5%, 0) scale(0.98); }
+}
+
+/* --- ANIMATIONS --- */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulseGlow {
+  0%   { box-shadow: 0 0 0 0 rgba(34, 197, 140, 0.45); }
+  70%  { box-shadow: 0 0 0 14px rgba(34, 197, 140, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 197, 140, 0); }
+}
+
+@keyframes spinOrbit {
+  to { transform: rotate(360deg); }
+}
+
+.card, section {
+  animation: fadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* --- NAVBAR --- */
 .navbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 5%;
+  padding: 18px 6%;
   background: var(--card-bg);
-  border-bottom: 1px solid var(--border);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-bottom: 1px solid var(--card-border);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  box-shadow: 0 4px 24px rgba(15, 12, 60, 0.06);
 }
 
-.brand { font-size: 1.4rem; font-weight: 800; color: var(--navy); }
-.brand span { color: var(--teal); }
+.brand {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.brand-word {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+}
+
+/* "ify" carries the gradient — the suffix that turns a noun into a system */
+.brand-suffix {
+  position: relative;
+  background: linear-gradient(135deg, var(--teal), var(--violet));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* dotless ı + a floating node standing in for its dot — the same lit-up
+   "you're present" signal as the background field and #sessionBanner pulse,
+   shrunk down into the wordmark itself */
+.brand-node {
+  position: absolute;
+  top: -0.6em;
+  left: 0.36em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--teal);
+  box-shadow: 0 0 6px var(--teal-glow), 0 0 3px var(--teal);
+  animation: pulseGlow 2.4s ease-in-out infinite;
+}
+
+.brand:hover .brand-node {
+  background: var(--violet);
+  box-shadow: 0 0 8px var(--accent-glow), 0 0 3px var(--violet);
+}
 
 .theme-btn {
-  background: none;
-  border: 1px solid var(--border);
+  background: var(--card-bg);
+  border: 1.5px solid var(--card-border);
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: 12px;
   cursor: pointer;
-  font-size: 1.2rem;
+  font-size: 1.1rem;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, box-shadow 0.25s ease;
 }
 
+.theme-btn:hover {
+  transform: scale(1.08) rotate(-8deg);
+  border-color: var(--teal);
+  box-shadow: 0 6px 18px var(--teal-glow);
+}
+
+/* --- CONTAINER & GLASS CARDS --- */
 .container {
-  width: min(92%, 900px);
+  width: min(92%, 850px);
   margin: 40px auto;
+  position: relative;
+  z-index: 1;
 }
 
 .card {
   background: var(--card-bg);
-  padding: 35px 30px;
-  border-radius: 20px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.08);
-  border: 1px solid var(--border);
-  max-width: 450px;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  padding: 40px 35px;
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+  border: 1.5px solid var(--card-border);
+  max-width: 460px;
   margin: 0 auto;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.35s ease, border-color 0.35s ease;
 }
 
-.card h2 { margin-bottom: 8px; color: var(--navy); }
-.card p { color: var(--muted); margin-bottom: 25px; font-size: 0.95rem; }
+/* thin rotating conic "orbit ring" sweeps the top edge on hover — a quiet
+   nod to the atom motif, not a repeat of it */
+.card::before {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from 0deg, var(--teal), var(--violet), transparent 35%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  animation: spinOrbit 6s linear infinite;
+  pointer-events: none;
+}
 
-.field { margin-bottom: 20px; }
-label { display: block; margin-bottom: 8px; font-weight: 700; font-size: 0.9rem; }
-input {
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 30px 60px -18px var(--accent-glow);
+}
+
+.card:hover::before {
+  opacity: 1;
+}
+
+.card h2 {
+  font-family: var(--font-display);
+  margin-bottom: 8px;
+  font-size: 1.8rem;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  color: var(--text-primary);
+}
+
+.card p {
+  color: var(--text-muted);
+  margin-bottom: 25px;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+/* --- FORM FIELDS & INPUTS --- */
+.field {
+  margin-bottom: 20px;
+}
+
+label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  letter-spacing: 0.3px;
+}
+
+input, select {
   width: 100%;
-  padding: 14px;
-  border-radius: 10px;
+  padding: 15px;
+  border-radius: 14px;
   border: 1.5px solid var(--border);
-  background: var(--bg);
-  color: var(--text);
+  background: rgba(127, 127, 127, 0.06);
+  color: var(--text-primary);
   outline: none;
+  font-size: 0.95rem;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
 }
-input:focus { border-color: var(--teal); }
 
+input::placeholder { color: var(--text-muted); opacity: 0.7; }
+
+input:focus, select:focus {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 4px var(--teal-glow);
+  background: var(--card-bg);
+}
+
+/* --- BUTTONS --- */
 .btn {
   width: 100%;
   padding: 15px;
   border: none;
-  border-radius: 10px;
-  background: var(--teal);
-  color: #0A2540;
-  font-weight: 800;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--violet), var(--teal));
+  background-size: 160% 160%;
+  background-position: 0% 50%;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.2px;
   cursor: pointer;
-  transition: transform 0.1s ease;
+  box-shadow: 0 10px 24px var(--accent-glow);
+  transition: background-position 0.5s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease, filter 0.25s ease;
 }
-.btn:hover { filter: brightness(0.95); transform: translateY(-1px); }
-.btn-secondary { background: var(--navy); color: #fff; margin-bottom: 10px; }
-.btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+
+.btn:hover {
+  background-position: 100% 50%;
+  filter: brightness(1.06);
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px var(--accent-glow);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.btn-secondary {
+  background: var(--text-primary);
+  color: var(--bg-base);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+  margin-bottom: 10px;
+}
+
+.btn-secondary:hover {
+  background: var(--text-primary);
+  filter: brightness(1.15);
+}
+
+.btn-outline {
+  background: transparent;
+  border: 1.5px solid var(--border);
+  color: var(--text-primary);
+  box-shadow: none;
+}
+
+.btn-outline:hover {
+  background: var(--teal-glow);
+  border-color: var(--teal);
+  transform: translateY(-1px);
+}
 
 .hidden { display: none !important; }
 
-.dashboard-header { margin-bottom: 25px; }
-.action-buttons { display: flex; gap: 15px; margin-bottom: 35px; }
-.section-title { margin-bottom: 15px; font-size: 1.2rem; color: var(--navy); }
+/* --- DASHBOARD & GRIDS --- */
+.dashboard-header {
+  margin-bottom: 30px;
+}
+
+.dashboard-header h2 {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.8px;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 40px;
+}
+
+.section-title {
+  font-family: var(--font-display);
+  margin-bottom: 20px;
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
 
 .course-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
 }
 
-/* Modal styling */
-.modal {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.6);
-  display: flex; align-items: center; justify-content: center;
-  opacity: 0; visibility: hidden; transition: 0.2s ease;
-  padding: 20px; z-index: 100;
+.course-grid .card {
+  max-width: 100%;
+  margin: 0;
+  padding: 30px;
 }
-.modal.show { opacity: 1; visibility: visible; }
+
+/* --- LIVE SESSION BANNER PULSE --- */
+#sessionBanner {
+  animation: pulseGlow 2.2s infinite;
+  backdrop-filter: var(--glass-blur);
+}
+
+/* --- MODALS --- */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 6, 15, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.35s;
+  padding: 20px;
+  z-index: 100;
+}
+
+.modal.show {
+  opacity: 1;
+  visibility: visible;
+}
+
 .modal-card {
   background: var(--card-bg);
-  width: 100%; max-width: 400px;
-  padding: 30px; border-radius: 16px;
-  border: 1px solid var(--border);
+  backdrop-filter: var(--glass-blur);
+  width: 100%;
+  max-width: 420px;
+  padding: 35px;
+  border-radius: 22px;
+  border: 1.5px solid var(--card-border);
+  box-shadow: var(--shadow);
+  transform: scale(0.94) translateY(8px);
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.modal-card h3 { margin-bottom: 20px; color: var(--navy); }
-.modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+
+.modal.show .modal-card {
+  transform: scale(1) translateY(0);
+}
+
+.modal-card h3 {
+  font-family: var(--font-display);
+  margin-bottom: 20px;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 25px;
+}
+
+/* --- ACCESSIBILITY / QUALITY FLOOR --- */
+:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  body::before, body::after { display: none; }
+}
+
+@media (max-width: 600px) {
+  .card { padding: 30px 22px; }
+  .action-buttons { flex-direction: column; }
+}
