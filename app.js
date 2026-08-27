@@ -39,6 +39,15 @@ let currentUser = null;
 let activeCourse = null;
 let countdownInterval = null;
 
+// --- DEFAULT THEME ICON SYNC ---
+document.addEventListener("DOMContentLoaded", () => {
+  const themeToggle = document.getElementById("themeToggle");
+  const htmlElement = document.documentElement;
+  if (themeToggle && htmlElement.getAttribute("data-theme") === "dark") {
+    themeToggle.textContent = "☀️";
+  }
+});
+
 // --- REAL-TIME FIRESTORE SYNC ---
 onSnapshot(collection(db, "courses"), (snapshot) => {
   courses = [];
