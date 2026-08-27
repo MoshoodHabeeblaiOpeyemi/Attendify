@@ -129,7 +129,7 @@ function checkAuth() {
 
 // --- FIREBASE AUTHENTICATION LOGIC ---
 
-// SIGN UP SUBMISSION (Optimized with instant debounce/lock)
+// SIGN UP SUBMISSION (With Level, Dept, School Scoping & Rep Locking)
 const signupForm = document.getElementById("signupForm");
 if (signupForm) {
   signupForm.addEventListener("submit", async (e) => {
@@ -143,13 +143,46 @@ if (signupForm) {
     
     const institutionInput = document.getElementById("signupInstitution");
     const departmentInput = document.getElementById("signupDepartment");
+    const levelInput = document.getElementById("signupLevel");
 
     const institution = institutionInput ? institutionInput.value.trim().toUpperCase() : "GENERAL";
     const department = departmentInput ? departmentInput.value.trim() : "GENERAL";
+    const level = levelInput ? levelInput.value.trim().toUpperCase() : "GENERAL";
 
     try {
       if (submitBtn) {
         submitBtn.disabled = true;
+        submitBtn.textContent = "Validating... ⏳";
+      }
+
+      // 🛡️ REPQ CHECK: If trying to register as Rep, check if one already exists for this exact School + Dept + Level
+      if (isRep) {
+        const usersSnapshot = await getDocs(collection(db, "users"));
+        let existingRepFound = false;
+
+        usersSnapshot.forEach((docSnap) => {
+          const userData = docSnap.data();
+          if (
+            userData.isRep === true &&
+            userData.institution === institution &&
+            userData.department.toLowerCase() === department.toLowerCase() &&
+            userData.level === level
+          ) {
+            existingRepFound = true;
+          }
+        });
+
+        if (existingRepFound) {
+          alert(`⚠️ Registration Blocked: A Department Rep is already registered for ${institution} - ${department} (${level}). Only one main rep is allowed per level/department!`);
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Sign Up 📝";
+          }
+          return; // Stop execution
+        }
+      }
+
+      if (submitBtn) {
         submitBtn.textContent = "Creating Account... ⏳";
       }
 
@@ -163,7 +196,8 @@ if (signupForm) {
         email: email,
         isRep: isRep,
         institution: institution,
-        department: department
+        department: department,
+        level: level
       });
 
       signupForm.reset();
@@ -322,8 +356,20 @@ document.querySelectorAll(".close-modal").forEach(btn => {
     if (createModal) createModal.classList.remove("show");
     if (joinModal) joinModal.classList.remove("show");
     if (forgotModal) forgotModal.classList.remove("show");
+    if (guideModal) guideModal.classList.remove("show"); // 👈 Added this line!
   });
 });
+
+// --- GUIDE MODAL HANDLER ---
+const guideModal = document.getElementById("guideModal");
+const openGuideBtn = document.getElementById("openGuideBtn");
+
+if (openGuideBtn && guideModal) {
+  openGuideBtn.addEventListener("click", () => {
+    guideModal.classList.add("show");
+  });
+}
+
 
 // --- COURSES & PORTAL MANAGEMENT ---
 const courseGrid = document.getElementById("courseGrid");
@@ -467,7 +513,7 @@ if (backToDashboardBtn) {
   });
 }
 
-// Create Course Form (With Institution & Department Metadata Tags)
+// Create Course Form (With Department-Scoped Course Code Uniqueness)
 const createCourseForm = document.getElementById("createCourseForm");
 if (createCourseForm) {
   createCourseForm.addEventListener("submit", async (e) => {
@@ -475,13 +521,31 @@ if (createCourseForm) {
     const name = document.getElementById("courseTitle").value.trim();
     const code = document.getElementById("courseCodeInput").value.trim().toUpperCase();
 
+    const repInstitution = currentUser ? (currentUser.institution || "GENERAL") : "GENERAL";
+    const repDepartment = currentUser ? (currentUser.department || "GENERAL") : "GENERAL";
+    const repLevel = currentUser ? (currentUser.level || "GENERAL") : "GENERAL";
+
+    // 🛡️ UNIQUE CODE CHECK: Ensure this course code doesn't already exist in the same Dept/School/Level
+    const duplicateExists = courses.some(c => 
+      c.code === code && 
+      c.institution === repInstitution && 
+      c.department.toLowerCase() === repDepartment.toLowerCase() && 
+      c.level === repLevel
+    );
+
+    if (duplicateExists) {
+      alert(`⚠️ Course Creation Blocked: Course code "${code}" already exists in your department (${repDepartment} - ${repLevel}). Each course code must be unique per level!`);
+      return;
+    }
+
     const newCourse = { 
       name, 
       code, 
       rep: currentUser ? currentUser.name : "Unknown",
       repUid: currentUser ? currentUser.uid : "unknown-uid",
-      institution: currentUser ? (currentUser.institution || "GENERAL") : "GENERAL",
-      department: currentUser ? (currentUser.department || "GENERAL") : "GENERAL",
+      institution: repInstitution,
+      department: repDepartment,
+      level: repLevel,
       enrolled: currentUser ? [currentUser.matric] : [],
       assistants: [],
       attendanceHistory: [],
@@ -494,6 +558,7 @@ if (createCourseForm) {
     if (createModal) createModal.classList.remove("show");
     createCourseForm.reset();
     checkAuth();
+    alert(`Course "${name}" created successfully! 🚀`);
   });
 }
 
