@@ -5,7 +5,8 @@ import {
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
   signOut, 
-  onAuthStateChanged 
+  onAuthStateChanged,
+  sendPasswordResetEmail 
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
 import { 
   getFirestore, 
@@ -164,31 +165,29 @@ if (signupForm) {
         submitBtn.textContent = "Validating... ⏳";
       }
 
-      // 🛡️ REPQ CHECK: If trying to register as Rep, check if one already exists for this exact School + Dept + Level
+      // 🛡️ REPQ CHECK: Enforce single rep per department/level at the database level
       if (isRep) {
-        const usersSnapshot = await getDocs(collection(db, "users"));
-        let existingRepFound = false;
+        // Create a clean sanitized ID string for this department/level
+        const cleanInst = institution.replace(/[^a-zA-Z0-9]/g, "_");
+        const cleanDept = department.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
+        const cleanLevel = level.replace(/[^a-zA-Z0-9]/g, "_");
+        const repSlotId = `rep_${cleanInst}_${cleanDept}_${cleanLevel}`;
 
-        usersSnapshot.forEach((docSnap) => {
-          const userData = docSnap.data();
-          if (
-            userData.isRep === true &&
-            userData.institution === institution &&
-            userData.department.toLowerCase() === department.toLowerCase() &&
-            userData.level === level
-          ) {
-            existingRepFound = true;
-          }
-        });
+        const repSlotRef = doc(db, "departmentReps", repSlotId);
+        const repSlotSnap = await getDoc(repSlotRef);
 
-        if (existingRepFound) {
+        if (repSlotSnap.exists()) {
           alert(`⚠️ Registration Blocked: A Department Rep is already registered for ${institution} - ${department} (${level}). Only one main rep is allowed per level/department!`);
           if (submitBtn) {
             submitBtn.disabled = false;
             submitBtn.textContent = "Sign Up 📝";
           }
-          return; // Stop execution
+          return;
         }
+
+        // Reserve the slot immediately inside the transaction/check
+        // (We will also save this slot reference right after auth success)
+        window._pendingRepSlotRef = repSlotRef;
       }
 
       if (submitBtn) {
@@ -208,6 +207,11 @@ if (signupForm) {
         department: department,
         level: level
       });
+
+      // 🛡️ Lock the department rep slot if registration was as a rep
+      if (isRep && window._pendingRepSlotRef) {
+        await setDoc(window._pendingRepSlotRef, { repUid: uid, registeredAt: Date.now() });
+      }
 
       signupForm.reset();
       alert("Account created successfully in the cloud! 🎉");
@@ -375,6 +379,38 @@ document.querySelectorAll(".close-modal").forEach(btn => {
 if (openGuideBtn && guideModal) {
   openGuideBtn.addEventListener("click", () => {
     guideModal.classList.add("show");
+  });
+}
+
+// FORGOT PASSWORD SUBMISSION
+const forgotPasswordForm = document.getElementById("forgotPasswordForm");
+if (forgotPasswordForm) {
+  forgotPasswordForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const submitBtn = forgotPasswordForm.querySelector("button[type='submit']");
+    const email = document.getElementById("forgotEmail").value.trim().toLowerCase();
+
+    try {
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Sending Link... ⏳";
+      }
+
+      await sendPasswordResetEmail(auth, email);
+      
+      alert("Password reset email sent! Check your inbox or spam folder. 📧✨");
+      forgotPasswordForm.reset();
+      
+      if (forgotModal) forgotModal.classList.remove("show");
+    } catch (error) {
+      console.error("Password reset error:", error);
+      alert("⚠️ Error: " + error.message);
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Update Password 🔄";
+      }
+    }
   });
 }
 
@@ -824,16 +860,49 @@ if (checkInForm) {
         const repLat = session.lat || 6.5244;
         const repLon = session.lon || 3.3792;
 
+        navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const studentLat = position.coords.latitude;
+        const studentLon = position.coords.longitude;
+        const accuracy = position.coords.accuracy || 999;
+        const repLat = session.lat || 6.5244;
+        const repLon = session.lon || 3.3792;
+
+        // 🛡️ ACCURACY CHECK: Reject weak/spoofed GPS signals (> 50m error margin)
+        if (accuracy > 50) {
+          alert(`⚠️ GPS Accuracy Warning: Your location accuracy is ±${Math.round(accuracy)}m. Please move closer to an open window or disable mock locations!`);
+          return;
+        }
+
         const distanceMeters = calculateDistance(studentLat, studentLon, repLat, repLon);
         const ALLOWED_RADIUS = 30;
 
         if (distanceMeters > ALLOWED_RADIUS) {
-          alert(`🚨 Geofencing Block: You are too far from the lecture hall (~${Math.round(distanceMeters)}m away). You must be within ${ALLOWED_RADIUS}m to check in!`);
+          alert(`🚨 Geofencing Block: You are too far from the lecture hall (~${Math.round(distanceMeters)}m away). Allowed radius is ${ALLOWED_RADIUS}m.`);
           return;
         }
 
-        session.attendees.push(currentUser.matric);
-        await updateCourseInFirestore();
+        if (Date.now() > session.expiresAt) {
+          alert("⏰ Time is up! This session has expired.");
+          return;
+        }
+
+        if (!session.attendees.includes(currentUser.matric)) {
+          session.attendees.push(currentUser.matric);
+          await updateCourseInFirestore();
+          renderPortalState();
+          checkInForm.reset();
+          alert("🎉 Attendance marked successfully with GPS & Accuracy Verification! ✅📍");
+        } else {
+          alert("⚠️ You have already checked in for this session!");
+        }
+      },
+      (error) => {
+        alert("❌ GPS Error: Unable to retrieve your precise location. Please ensure location services are enabled.");
+        console.error(error);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
         renderPortalState();
         checkInForm.reset();
         alert("🎉 Attendance marked successfully with GPS Verification! ✅📍");
