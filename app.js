@@ -325,9 +325,12 @@ if (deleteAccountBtn) {
 }
 
 // --- MODALS & CLOSE HANDLERS ---
+// --- GUIDE MODAL HANDLER ---
 const createModal = document.getElementById("createModal");
 const joinModal = document.getElementById("joinModal");
 const forgotModal = document.getElementById("forgotModal");
+const guideModal = document.getElementById("guideModal");
+const openGuideBtn = document.getElementById("openGuideBtn");
 
 const openCreateModalBtn = document.getElementById("openCreateModal");
 if (openCreateModalBtn) {
@@ -356,13 +359,9 @@ document.querySelectorAll(".close-modal").forEach(btn => {
     if (createModal) createModal.classList.remove("show");
     if (joinModal) joinModal.classList.remove("show");
     if (forgotModal) forgotModal.classList.remove("show");
-    if (guideModal) guideModal.classList.remove("show"); // 👈 Added this line!
+    if (guideModal) guideModal.classList.remove("show");
   });
 });
-
-// --- GUIDE MODAL HANDLER ---
-const guideModal = document.getElementById("guideModal");
-const openGuideBtn = document.getElementById("openGuideBtn");
 
 if (openGuideBtn && guideModal) {
   openGuideBtn.addEventListener("click", () => {
