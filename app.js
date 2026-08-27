@@ -817,7 +817,7 @@ if (checkInForm) {
         const repLon = session.lon || 3.3792;
 
         const distanceMeters = calculateDistance(studentLat, studentLon, repLat, repLon);
-        const ALLOWED_RADIUS = 150;
+        const ALLOWED_RADIUS = 30;
 
         if (distanceMeters > ALLOWED_RADIUS) {
           alert(`🚨 Geofencing Block: You are too far from the lecture hall (~${Math.round(distanceMeters)}m away). You must be within ${ALLOWED_RADIUS}m to check in!`);
