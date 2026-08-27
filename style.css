@@ -69,72 +69,33 @@
 html { color-scheme: light; }
 [data-theme="dark"] { color-scheme: dark; }
 
+/* --- RESET & BASE --- */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-body);
+}
+
+html { color-scheme: light; }
+[data-theme="dark"] { color-scheme: dark; }
+
 body {
   position: relative;
-  background: radial-gradient(120% 140% at 15% -10%, var(--bg-base-2) 0%, var(--bg-base) 55%);
+  background: var(--bg-base);
   color: var(--text-primary);
   min-height: 100vh;
   overflow-x: hidden;
-  transition: background 0.5s ease, color 0.4s ease;
-  isolation: isolate; /* keep the atom field's z-index scoped to <body> */
+  transition: background 0.3s ease, color 0.3s ease;
 }
 
-/* --- PRESENCE FIELD (pure-CSS animated atom background) --- */
-body::before,
-body::after {
-  content: "";
-  position: fixed;
-  inset: -10%;
-  z-index: -2;
-  pointer-events: none;
-  background-repeat: no-repeat;
-  will-change: transform, background-position;
+/* --- LIGHTWEIGHT GLASS CARDS & BUTTONS --- */
+.card, section {
+  animation: fadeIn 0.3s ease forwards;
 }
 
-/* Layer 1 — small glowing "atoms" drifting on a slow diagonal */
-body::before {
-  background-image:
-    radial-gradient(circle, var(--teal) 0%, transparent 70%),
-    radial-gradient(circle, var(--violet) 0%, transparent 70%),
-    radial-gradient(circle, var(--teal) 0%, transparent 70%),
-    radial-gradient(circle, var(--violet-2) 0%, transparent 70%),
-    radial-gradient(circle, var(--teal) 0%, transparent 70%),
-    radial-gradient(circle, var(--violet) 0%, transparent 70%);
-  background-size: 5px 5px, 7px 7px, 4px 4px, 6px 6px, 5px 5px, 8px 8px;
-  background-position:
-    12% 18%, 78% 12%, 34% 62%, 88% 70%, 55% 85%, 20% 45%;
-  opacity: 0.55;
-  filter: blur(0.3px) drop-shadow(0 0 6px var(--accent-glow));
-  animation: driftAtoms 34s ease-in-out infinite alternate;
-}
-
-/* Layer 2 — larger soft orbit halos, slower + offset for parallax depth */
-body::after {
-  background-image:
-    radial-gradient(circle, var(--accent-glow) 0%, transparent 65%),
-    radial-gradient(circle, var(--teal-glow) 0%, transparent 65%),
-    radial-gradient(circle, var(--accent-glow) 0%, transparent 65%);
-  background-size: 46vmax 46vmax, 38vmax 38vmax, 30vmax 30vmax;
-  background-position: -10% 10%, 90% 20%, 40% 95%;
-  opacity: 0.65;
-  animation: driftHalos 46s ease-in-out infinite alternate;
-}
-
-@keyframes driftAtoms {
-  0%   { transform: translate3d(0, 0, 0) rotate(0deg); }
-  50%  { transform: translate3d(-1.5%, 2%, 0) rotate(1.2deg); }
-  100% { transform: translate3d(2%, -1.5%, 0) rotate(-1deg); }
-}
-
-@keyframes driftHalos {
-  0%   { transform: translate3d(0, 0, 0) scale(1); }
-  50%  { transform: translate3d(1.5%, -2%, 0) scale(1.05); }
-  100% { transform: translate3d(-2%, 1.5%, 0) scale(0.98); }
-}
-
-/* --- ANIMATIONS --- */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(12px); }
+  from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 

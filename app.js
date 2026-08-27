@@ -129,11 +129,12 @@ function checkAuth() {
 
 // --- FIREBASE AUTHENTICATION LOGIC ---
 
-// SIGN UP SUBMISSION (With Institution & Department Scoping)
+// SIGN UP SUBMISSION (Optimized with instant debounce/lock)
 const signupForm = document.getElementById("signupForm");
 if (signupForm) {
   signupForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const submitBtn = signupForm.querySelector("button[type='submit']");
     const name = document.getElementById("signupName").value.trim();
     const matric = document.getElementById("signupMatric").value.trim().toUpperCase();
     const email = document.getElementById("signupEmail").value.trim().toLowerCase();
@@ -147,6 +148,11 @@ if (signupForm) {
     const department = departmentInput ? departmentInput.value.trim() : "GENERAL";
 
     try {
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Creating Account... ⏳";
+      }
+
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const uid = userCredential.user.uid;
 
@@ -165,25 +171,38 @@ if (signupForm) {
     } catch (error) {
       console.error("Signup error:", error);
       alert("⚠️ Error: " + error.message);
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Sign Up 📝";
+      }
     }
   });
 }
 
-// LOG IN SUBMISSION
+// LOG IN SUBMISSION (Optimized with instant debounce/lock)
 const loginForm = document.getElementById("loginForm");
 if (loginForm) {
   loginForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const submitBtn = loginForm.querySelector("button[type='submit']");
     const email = document.getElementById("loginEmail").value.trim().toLowerCase();
     const password = document.getElementById("loginPassword").value;
 
     try {
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Logging in... ⏳";
+      }
+
       await signInWithEmailAndPassword(auth, email, password);
       loginForm.reset();
-      alert("Logged in successfully! 🚀");
     } catch (error) {
       console.error("Login error:", error);
       alert("❌ Invalid email or password. Please check your credentials.");
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Log In 🔓";
+      }
     }
   });
 }
