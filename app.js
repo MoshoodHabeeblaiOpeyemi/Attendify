@@ -782,16 +782,34 @@ if (generatePinBtn) {
 }
 
 async function createSession(pin, managerMatric, lat, lon) {
+  if (!activeCourse || !activeCourse.id) return;
+
+  const expiresAt = Date.now() + 60000;
+
+  // 1. Write public live state (students can read this for the countdown banner)
+  await setDoc(doc(db, "courses", activeCourse.id, "session", "live"), {
+    active: true,
+    expiresAt: expiresAt
+  });
+
+  // 2. Write secret state (ONLY staff can read this — contains PIN, GPS, and attendees)
+  await setDoc(doc(db, "courses", activeCourse.id, "session", "secret"), {
+    pin: pin,
+    lat: lat,
+    lon: lon,
+    attendees: [managerMatric]
+  });
+
+  // Keep local state in sync for the rep's view
   activeCourse.activeSession = {
     pin: pin,
-    expiresAt: Date.now() + 60000,
+    expiresAt: expiresAt,
     expired: false,
     attendees: [managerMatric],
     lat: lat,
     lon: lon
   };
 
-  await updateCourseInFirestore();
   startSessionTimer();
   renderPortalState();
 }
@@ -827,88 +845,56 @@ function startSessionTimer() {
 if (checkInForm) {
   checkInForm.addEventListener("submit", (e) => {
     e.preventDefault();
-    const session = activeCourse ? activeCourse.activeSession : null;
-
-    if (!session || session.expired || Date.now() > session.expiresAt) {
-      alert("⏰ Time is up! The attendance session has expired.");
-      return;
-    }
-
     const enteredPin = document.getElementById("studentPinInput").value.trim();
-
-    if (enteredPin !== session.pin) {
-      alert("❌ Incorrect PIN! Check with your Course Rep.");
-      return;
-    }
-
-    if (session.attendees.includes(currentUser.matric)) {
-      alert("⚠️ You have already checked in for this session!");
-      return;
-    }
 
     if (!navigator.geolocation) {
       alert("⚠️ Geolocation is not supported by your browser.");
       return;
     }
 
-    alert("📍 Verifying your location... Please allow location access.");
+    alert("📍 Verifying secure location with server... Please allow GPS access.");
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const studentLat = position.coords.latitude;
         const studentLon = position.coords.longitude;
-        const repLat = session.lat || 6.5244;
-        const repLon = session.lon || 3.3792;
-
-        navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const studentLat = position.coords.latitude;
-        const studentLon = position.coords.longitude;
         const accuracy = position.coords.accuracy || 999;
-        const repLat = session.lat || 6.5244;
-        const repLon = session.lon || 3.3792;
 
-        // 🛡️ ACCURACY CHECK: Reject weak/spoofed GPS signals (> 50m error margin)
         if (accuracy > 50) {
-          alert(`⚠️ GPS Accuracy Warning: Your location accuracy is ±${Math.round(accuracy)}m. Please move closer to an open window or disable mock locations!`);
+          alert(`⚠️ GPS Accuracy Warning: Your location accuracy is ±${Math.round(accuracy)}m. Move closer to a window!`);
           return;
         }
 
-        const distanceMeters = calculateDistance(studentLat, studentLon, repLat, repLon);
-        const ALLOWED_RADIUS = 30;
+        try {
+          // Send data securely to your deployed Firebase Cloud Function endpoint
+          const response = await fetch("https://submitAttendance-5912075322838.us-central1.run.app", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              courseId: activeCourse.id,
+              pin: enteredPin,
+              lat: studentLat,
+              lon: studentLon,
+              uid: auth.currentUser.uid,
+              matric: currentUser.matric
+            })
+          });
 
-        if (distanceMeters > ALLOWED_RADIUS) {
-          alert(`🚨 Geofencing Block: You are too far from the lecture hall (~${Math.round(distanceMeters)}m away). Allowed radius is ${ALLOWED_RADIUS}m.`);
-          return;
-        }
+          const result = await response.json();
 
-        if (Date.now() > session.expiresAt) {
-          alert("⏰ Time is up! This session has expired.");
-          return;
-        }
+          if (!response.ok) {
+            throw new Error(result.error || "Check-in failed.");
+          }
 
-        if (!session.attendees.includes(currentUser.matric)) {
-          session.attendees.push(currentUser.matric);
-          await updateCourseInFirestore();
-          renderPortalState();
+          alert("🎉 Attendance marked successfully via secure server-side GPS verification! ✅📍");
           checkInForm.reset();
-          alert("🎉 Attendance marked successfully with GPS & Accuracy Verification! ✅📍");
-        } else {
-          alert("⚠️ You have already checked in for this session!");
+        } catch (error) {
+          alert("❌ " + error.message);
+          console.error(error);
         }
       },
       (error) => {
-        alert("❌ GPS Error: Unable to retrieve your precise location. Please ensure location services are enabled.");
-        console.error(error);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
-        renderPortalState();
-        checkInForm.reset();
-        alert("🎉 Attendance marked successfully with GPS Verification! ✅📍");
-      },
-      (error) => {
-        alert("❌ GPS Error: Unable to retrieve your location. Please ensure location services are enabled on your device.");
+        alert("❌ GPS Error: Unable to retrieve your precise location.");
         console.error(error);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
