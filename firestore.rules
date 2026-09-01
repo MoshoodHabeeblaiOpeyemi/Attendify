@@ -2,39 +2,39 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isSignedIn() { return request.auth != null; }
-    function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
+    function isSignedIn() {
+      return request.auth != null;
+    }
 
-    function isCourseStaff(courseId) {
-      let course = get(/databases/$(database)/documents/courses/$(courseId)).data;
-      return isSignedIn() &&
-        (course.repUid == request.auth.uid ||
-         (course.assistants != null && request.auth.uid in course.assistants));
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
     }
 
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow write: if isOwner(userId);
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId) 
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isRep', 'matric', 'institution', 'department']);
+      allow delete: if isOwner(userId);
     }
 
     match /departmentReps/{slotId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && request.resource.data.repUid == request.auth.uid;
-      allow update, delete: if false;
     }
 
     match /courses/{courseId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
-      allow update, delete: if isCourseStaff(courseId);
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn() && resource.data.repUid == request.auth.uid;
 
-      match /session/live {
-        allow read: if isSignedIn();
-        allow write: if isCourseStaff(courseId);
+      match /session/{document=**} {
+        allow read, write: if isSignedIn();
       }
-
-      match /session/secret {
-        allow read, write: if isCourseStaff(courseId);
+      match /attendance/{document=**} {
+        allow read: if isSignedIn();
+        allow write: if false; // Only Vercel Backend Admin SDK can write attendance!
       }
     }
   }

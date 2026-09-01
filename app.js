@@ -167,7 +167,6 @@ if (signupForm) {
 
       // 🛡️ REPQ CHECK: Enforce single rep per department/level at the database level
       if (isRep) {
-        // Create a clean sanitized ID string for this department/level
         const cleanInst = institution.replace(/[^a-zA-Z0-9]/g, "_");
         const cleanDept = department.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
         const cleanLevel = level.replace(/[^a-zA-Z0-9]/g, "_");
@@ -185,8 +184,6 @@ if (signupForm) {
           return;
         }
 
-        // Reserve the slot immediately inside the transaction/check
-        // (We will also save this slot reference right after auth success)
         window._pendingRepSlotRef = repSlotRef;
       }
 
@@ -208,7 +205,6 @@ if (signupForm) {
         level: level
       });
 
-      // 🛡️ Lock the department rep slot if registration was as a rep
       if (isRep && window._pendingRepSlotRef) {
         await setDoc(window._pendingRepSlotRef, { repUid: uid, registeredAt: Date.now() });
       }
@@ -226,7 +222,7 @@ if (signupForm) {
   });
 }
 
-// LOG IN SUBMISSION (Optimized with instant debounce/lock)
+// LOG IN SUBMISSION
 const loginForm = document.getElementById("loginForm");
 if (loginForm) {
   loginForm.addEventListener("submit", async (e) => {
@@ -338,7 +334,6 @@ if (deleteAccountBtn) {
 }
 
 // --- MODALS & CLOSE HANDLERS ---
-// --- GUIDE MODAL HANDLER ---
 const createModal = document.getElementById("createModal");
 const joinModal = document.getElementById("joinModal");
 const forgotModal = document.getElementById("forgotModal");
@@ -413,7 +408,6 @@ if (forgotPasswordForm) {
     }
   });
 }
-
 
 // --- COURSES & PORTAL MANAGEMENT ---
 const courseGrid = document.getElementById("courseGrid");
@@ -557,7 +551,7 @@ if (backToDashboardBtn) {
   });
 }
 
-// Create Course Form (With Department-Scoped Course Code Uniqueness)
+// Create Course Form
 const createCourseForm = document.getElementById("createCourseForm");
 if (createCourseForm) {
   createCourseForm.addEventListener("submit", async (e) => {
@@ -569,7 +563,6 @@ if (createCourseForm) {
     const repDepartment = currentUser ? (currentUser.department || "GENERAL") : "GENERAL";
     const repLevel = currentUser ? (currentUser.level || "GENERAL") : "GENERAL";
 
-    // 🛡️ UNIQUE CODE CHECK: Ensure this course code doesn't already exist in the same Dept/School/Level
     const duplicateExists = courses.some(c => 
       c.code === code && 
       c.institution === repInstitution && 
@@ -732,22 +725,6 @@ function renderAssistantDropdownAndList() {
   }
 }
 
-// Helper: Calculate distance in meters between two lat/lng points (Haversine formula)
-function calculateDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371e3;
-  const φ1 = lat1 * Math.PI / 180;
-  const φ2 = lat2 * Math.PI / 180;
-  const Δφ = (lat2 - lat1) * Math.PI / 180;
-  const Δλ = (lon2 - lon1) * Math.PI / 180;
-
-  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-            Math.cos(φ1) * Math.cos(φ2) *
-            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return R * c;
-}
-
 // --- 60-SECOND ATTENDANCE ENGINE & TIMER LOGIC ---
 const generatePinBtn = document.getElementById("generatePinBtn");
 const activePinDisplay = document.getElementById("activePinDisplay");
@@ -786,13 +763,11 @@ async function createSession(pin, managerMatric, lat, lon) {
 
   const expiresAt = Date.now() + 60000;
 
-  // 1. Write public live state (students can read this for the countdown banner)
   await setDoc(doc(db, "courses", activeCourse.id, "session", "live"), {
     active: true,
     expiresAt: expiresAt
   });
 
-  // 2. Write secret state (ONLY staff can read this — contains PIN, GPS, and attendees)
   await setDoc(doc(db, "courses", activeCourse.id, "session", "secret"), {
     pin: pin,
     lat: lat,
@@ -800,7 +775,6 @@ async function createSession(pin, managerMatric, lat, lon) {
     attendees: [managerMatric]
   });
 
-  // Keep local state in sync for the rep's view
   activeCourse.activeSession = {
     pin: pin,
     expiresAt: expiresAt,
@@ -842,6 +816,7 @@ function startSessionTimer() {
   }, 1000);
 }
 
+// 🛡️ UPDATED SECURE CHECK-IN FUNCTION
 if (checkInForm) {
   checkInForm.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -866,17 +841,22 @@ if (checkInForm) {
         }
 
         try {
-          // Send data securely to your deployed Firebase Cloud Function endpoint
+          // 🔑 Get current user's encrypted Firebase Auth Token
+          const idToken = await auth.currentUser.getIdToken();
+
+          // Send data securely to the Vercel backend using the Bearer Token
           const response = await fetch("/api/submitAttendance", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { 
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${idToken}`
+            },
             body: JSON.stringify({
               courseId: activeCourse.id,
               pin: enteredPin,
               lat: studentLat,
               lon: studentLon,
-              uid: auth.currentUser.uid,
-              matric: currentUser.matric
+              accuracy: accuracy
             })
           });
 
@@ -886,7 +866,7 @@ if (checkInForm) {
             throw new Error(result.error || "Check-in failed.");
           }
 
-          alert("🎉 Attendance marked successfully via secure server-side GPS verification! ✅📍");
+          alert("🎉 Attendance marked successfully via secure token & GPS verification! ✅📍");
           checkInForm.reset();
         } catch (error) {
           alert("❌ " + error.message);
@@ -960,7 +940,6 @@ async function updateCourseInFirestore() {
   });
 }
 
-// --- DOWNLOAD ATTENDANCE CSV FUNCTION ---
 window.downloadAttendance = function(index) {
   if (!activeCourse || !activeCourse.attendanceHistory || !activeCourse.attendanceHistory[index]) return;
 
@@ -1072,7 +1051,6 @@ function renderPortalState() {
     });
   }
 
-  // --- RENDER REP ENROLLED STUDENTS MANAGEMENT PANEL ---
   if (isRep) {
     let enrolledListDiv = document.getElementById("repEnrolledStudentsSection");
     
