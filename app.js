@@ -50,22 +50,34 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // --- REAL-TIME FIRESTORE SYNC ---
-onSnapshot(collection(db, "courses"), (snapshot) => {
-  courses = [];
-  snapshot.forEach((docSnap) => {
-    courses.push({ id: docSnap.id, ...docSnap.data() });
-  });
-  if (currentUser) {
-    renderCourses();
-    if (activeCourse) {
-      const updated = courses.find(c => c.id === activeCourse.id);
-      if (updated) {
-        activeCourse = updated;
-        renderPortalState();
+let unsubscribeCourses = null;
+
+function startCourseListener() {
+  if (unsubscribeCourses) return; // Don't start if already running
+  unsubscribeCourses = onSnapshot(collection(db, "courses"), (snapshot) => {
+    courses = [];
+    snapshot.forEach((docSnap) => {
+      courses.push({ id: docSnap.id, ...docSnap.data() });
+    });
+    if (currentUser) {
+      renderCourses();
+      if (activeCourse) {
+        const updated = courses.find(c => c.id === activeCourse.id);
+        if (updated) {
+          activeCourse = updated;
+          renderPortalState();
+        }
       }
     }
+  });
+}
+
+function stopCourseListener() {
+  if (unsubscribeCourses) {
+    unsubscribeCourses();
+    unsubscribeCourses = null;
   }
-});
+}
 
 // --- THEME TOGGLE LOGIC ---
 const themeToggle = document.getElementById("themeToggle");
@@ -283,9 +295,13 @@ onAuthStateChanged(auth, async (user) => {
     } else {
       currentUser = { name: "User", matric: "---", email: user.email, isRep: false, institution: "GENERAL", department: "GENERAL" };
     }
+    
+    startCourseListener(); // ✅ Start listening for courses NOW
     checkAuth();
   } else {
     currentUser = null;
+    
+    stopCourseListener(); // ✅ Stop listening when logged out
     checkAuth();
   }
 });
