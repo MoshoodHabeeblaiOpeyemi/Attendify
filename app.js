@@ -867,7 +867,7 @@ if (checkInForm) {
 
         try {
           // Send data securely to your deployed Firebase Cloud Function endpoint
-          const response = await fetch("https://submitAttendance-5912075322838.us-central1.run.app", {
+          const response = await fetch("/api/submitAttendance", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
