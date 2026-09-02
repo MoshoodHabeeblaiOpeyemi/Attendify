@@ -4,14 +4,54 @@ service cloud.firestore {
 
     function isSignedIn() { return request.auth != null; }
     function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
+    
+    function getUserMatric() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.matric;
+    }
 
     function isCourseStaff(courseId) {
       let course = get(/databases/$(database)/documents/courses/$(courseId)).data;
-      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let userMatric = getUserMatric();
       return isSignedIn() && (
         course.repUid == request.auth.uid ||
-        (course.assistants != null && userDoc.matric in course.assistants)
+        (course.assistants != null && userMatric in course.assistants)
       );
+    }
+    
+    // Students can ONLY add/remove themselves from enrolled[],
+    // or remove themselves from assistants[].
+    // No if-statements allowed — pure boolean logic only.
+    function isSelfManagingEnrollment() {
+      let userMatric = getUserMatric();
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
+      
+      return affected.hasOnly(['enrolled', 'assistants'])
+        && (
+          resource.data.enrolled == request.resource.data.enrolled
+          || (
+            resource.data.enrolled != null
+            && request.resource.data.enrolled != null
+            && (
+              (request.resource.data.enrolled.size() == resource.data.enrolled.size() + 1
+               && !(userMatric in resource.data.enrolled)
+               && userMatric in request.resource.data.enrolled)
+              ||
+              (request.resource.data.enrolled.size() == resource.data.enrolled.size() - 1
+               && userMatric in resource.data.enrolled
+               && !(userMatric in request.resource.data.enrolled))
+            )
+          )
+        )
+        && (
+          resource.data.assistants == request.resource.data.assistants
+          || (
+            resource.data.assistants != null
+            && request.resource.data.assistants != null
+            && request.resource.data.assistants.size() == resource.data.assistants.size() - 1
+            && userMatric in resource.data.assistants
+            && !(userMatric in request.resource.data.assistants)
+          )
+        );
     }
 
     match /users/{userId} {
@@ -30,7 +70,8 @@ service cloud.firestore {
     match /courses/{courseId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
-      allow update, delete: if isCourseStaff(courseId);
+      allow update: if isCourseStaff(courseId) || isSelfManagingEnrollment();
+      allow delete: if isCourseStaff(courseId);
 
       match /session/live {
         allow read: if isSignedIn();
@@ -42,7 +83,7 @@ service cloud.firestore {
       }
 
       match /attendance/{document=**} {
-        allow read: if isCourseStaff(courseId); // 🔒 FIXED: Scoped strictly to Course Staff!
+        allow read: if isCourseStaff(courseId);
         allow write: if false; 
       }
     }

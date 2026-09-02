@@ -55,7 +55,7 @@ document.addEventListener("DOMContentLoaded", () => {
 let unsubscribeCourses = null;
 
 function startCourseListener() {
-  if (unsubscribeCourses) return; // Don't start if already running
+  if (unsubscribeCourses) return; 
   unsubscribeCourses = onSnapshot(
     collection(db, "courses"),
     (snapshot) => {
@@ -75,9 +75,6 @@ function startCourseListener() {
       }
     },
     (error) => {
-      // Previously any failure here (a rules hiccup, a dropped connection)
-      // failed completely silently — the dashboard just stayed blank
-      // forever with zero clue why. This surfaces it instead of hiding it.
       console.error("Course listener error:", error);
       if (courseGrid) {
         courseGrid.innerHTML = `<p style="color: var(--danger);">⚠️ Couldn't load your courses. Check your connection and try refreshing.</p>`;
@@ -106,12 +103,7 @@ if (themeToggle) {
   });
 }
 
-// --- AUTH & USER DATABASE MANAGEMENT ---
-// --- AUTOCOMPLETE DATA & LOGIC (Institution / Department / Level) ---
-// Note: these lists cover common Nigerian tertiary institutions and
-// departments, not an exhaustive national registry. Typing something not
-// on the list still works fine as free text — these only *suggest*, they
-// never block or force a selection.
+// --- AUTOCOMPLETE DATA & LOGIC ---
 const NIGERIAN_INSTITUTIONS = [
   "University of Ilorin (UNILORIN)", "University of Ibadan (UI)", "University of Lagos (UNILAG)",
   "Obafemi Awolowo University (OAU)", "Ahmadu Bello University (ABU)", "University of Nigeria, Nsukka (UNN)",
@@ -190,8 +182,6 @@ function setupAutocomplete(inputId, suggestionsId, dataList) {
       item.className = "suggestion-item";
       item.textContent = match;
       item.addEventListener("mousedown", (e) => {
-        // mousedown (not click) fires before the input's blur event,
-        // so the value gets set before the box hides itself
         e.preventDefault();
         input.value = match;
         box.classList.add("hidden");
@@ -238,7 +228,9 @@ function maskMatricInput(id) {
   });
 }
 
+// 🐛 FIX #1: Added missing mask for Join Course input!
 maskCourseCodeInput("courseCodeInput");
+maskCourseCodeInput("joinCode");
 maskMatricInput("signupMatric");
 maskMatricInput("settingsMatric");
 
@@ -302,8 +294,6 @@ function checkAuth() {
 }
 
 // --- FIREBASE AUTHENTICATION LOGIC ---
-
-// SIGN UP SUBMISSION (With Level, Dept, School Scoping & Rep Locking)
 const signupForm = document.getElementById("signupForm");
 if (signupForm) {
   signupForm.addEventListener("submit", async (e) => {
@@ -329,7 +319,6 @@ if (signupForm) {
         submitBtn.textContent = "Validating... ⏳";
       }
 
-      // 🛡️ REPQ CHECK: Enforce single rep per department/level at the database level
       if (isRep) {
         const cleanInst = institution.replace(/[^a-zA-Z0-9]/g, "_");
         const cleanDept = department.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
@@ -386,7 +375,6 @@ if (signupForm) {
   });
 }
 
-// LOG IN SUBMISSION
 const loginForm = document.getElementById("loginForm");
 if (loginForm) {
   loginForm.addEventListener("submit", async (e) => {
@@ -414,7 +402,6 @@ if (loginForm) {
   });
 }
 
-// LOGOUT & SESSION CLEANUP
 if (logoutBtn) {
   logoutBtn.addEventListener("click", async () => {
     try {
@@ -438,7 +425,6 @@ if (logoutBtn) {
   });
 }
 
-// PERSISTENT AUTH STATE LISTENER
 onAuthStateChanged(auth, async (user) => {
   if (user) {
     const userDoc = await getDoc(doc(db, "users", user.uid));
@@ -448,12 +434,12 @@ onAuthStateChanged(auth, async (user) => {
       currentUser = { name: "User", matric: "---", email: user.email, isRep: false, institution: "GENERAL", department: "GENERAL" };
     }
     
-    startCourseListener(); // ✅ Start listening for courses NOW
+    startCourseListener(); 
     checkAuth();
   } else {
     currentUser = null;
     
-    stopCourseListener(); // ✅ Stop listening when logged out
+    stopCourseListener(); 
     checkAuth();
   }
 });
@@ -531,10 +517,6 @@ if (openForgotModalBtn) {
   });
 }
 
-// Generic close handler — works for every modal, including any added later,
-// instead of a hardcoded list that silently misses new ones (that's exactly
-// what was happening to createModal/joinModal/forgotModal/guideModal before:
-// a 5th modal like Settings would never have closed via its Cancel button).
 document.querySelectorAll(".close-modal").forEach(btn => {
   btn.addEventListener("click", () => {
     const parentModal = btn.closest(".modal");
@@ -542,8 +524,6 @@ document.querySelectorAll(".close-modal").forEach(btn => {
   });
 });
 
-// Tap/click anywhere on the dark backdrop (outside the modal-card) closes it —
-// applies to every .modal automatically, no per-modal wiring needed.
 document.querySelectorAll(".modal").forEach(modal => {
   modal.addEventListener("click", (e) => {
     if (e.target === modal) modal.classList.remove("show");
@@ -590,10 +570,6 @@ if (settingsForm) {
 
       await updateDoc(doc(db, "users", uid), { name: newName, matric: newMatric });
 
-      // Matric is used as the identifier in enrolled[]/assistants[] arrays on
-      // every course document (not uid) — if it changed, those references
-      // would otherwise silently point at a matric number that no longer
-      // exists, quietly breaking enrollment/assistant status everywhere.
       if (oldMatric && newMatric !== oldMatric) {
         for (const course of courses) {
           let updated = false;
@@ -636,7 +612,6 @@ if (settingsForm) {
   });
 }
 
-// FORGOT PASSWORD SUBMISSION
 const forgotPasswordForm = document.getElementById("forgotPasswordForm");
 if (forgotPasswordForm) {
   forgotPasswordForm.addEventListener("submit", async (e) => {
@@ -810,13 +785,19 @@ if (backToDashboardBtn) {
   });
 }
 
-// Create Course Form
+// 🐛 FIX #2: Updated Create Course Handler
 const createCourseForm = document.getElementById("createCourseForm");
 if (createCourseForm) {
   createCourseForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = document.getElementById("courseTitle").value.trim();
-    const code = document.getElementById("courseCodeInput").value.trim().toUpperCase();
+    let code = document.getElementById("courseCodeInput").value.trim().toUpperCase();
+
+    // Bulletproof formatting to force "XXX 000" spacing just in case
+    const rawCode = code.replace(/[^A-Z0-9]/g, "");
+    const letters = rawCode.slice(0, 3).replace(/[0-9]/g, "");
+    const numbers = rawCode.slice(letters.length).replace(/[^0-9]/g, "").slice(0, 3);
+    code = numbers ? `${letters} ${numbers}` : letters;
 
     const repInstitution = currentUser ? (currentUser.institution || "GENERAL") : "GENERAL";
     const repDepartment = currentUser ? (currentUser.department || "GENERAL") : "GENERAL";
@@ -850,26 +831,26 @@ if (createCourseForm) {
 
     const newDocRef = doc(collection(db, "courses"));
     await setDoc(newDocRef, newCourse);
-
-    // Update local state immediately rather than waiting on the background
-    // listener's next snapshot round-trip — this is what was causing
-    // "created course doesn't show until I refresh."
-    courses.push({ id: newDocRef.id, ...newCourse });
-
+    
     if (createModal) createModal.classList.remove("show");
     createCourseForm.reset();
-    checkAuth();
     alert(`Course "${name}" created successfully! 🚀`);
   });
 }
 
-// Join Course Form
+// 🐛 FIX #3: Updated Join Course Handler
 const joinCourseForm = document.getElementById("joinCourseForm");
 if (joinCourseForm) {
   joinCourseForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const submitBtn = joinCourseForm.querySelector("button[type='submit']");
-    const code = document.getElementById("joinCode").value.trim().toUpperCase();
+    let code = document.getElementById("joinCode").value.trim().toUpperCase();
+
+    // Bulletproof formatting to force "XXX 000" spacing
+    const rawCode = code.replace(/[^A-Z0-9]/g, "");
+    const letters = rawCode.slice(0, 3).replace(/[0-9]/g, "");
+    const numbers = rawCode.slice(letters.length).replace(/[^0-9]/g, "").slice(0, 3);
+    code = numbers ? `${letters} ${numbers}` : letters;
 
     try {
       if (submitBtn) {
@@ -877,11 +858,6 @@ if (joinCourseForm) {
         submitBtn.textContent = "Checking... ⏳";
       }
 
-      // Query Firestore directly instead of searching the in-memory
-      // `courses` array — that array is filled in by a background listener
-      // that may not have delivered its first snapshot yet. That gap is
-      // exactly what was causing real, existing course codes to come back
-      // "not found," and silently skip enrolling the student entirely.
       const codeQuery = query(collection(db, "courses"), where("code", "==", code));
       const querySnap = await getDocs(codeQuery);
 
@@ -900,7 +876,7 @@ if (joinCourseForm) {
       }
 
       alert(`Successfully joined ${found.name}! 🎉`);
-      checkAuth();
+      
     } catch (error) {
       console.error("Join course error:", error);
       alert("⚠️ Something went wrong while joining. Please check your connection and try again.");
@@ -1107,7 +1083,6 @@ function startSessionTimer() {
   }, 1000);
 }
 
-// 🛡️ UPDATED SECURE CHECK-IN FUNCTION
 if (checkInForm) {
   checkInForm.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -1132,10 +1107,8 @@ if (checkInForm) {
         }
 
         try {
-          // 🔑 Get current user's encrypted Firebase Auth Token
           const idToken = await auth.currentUser.getIdToken();
 
-          // Send data securely to the Vercel backend using the Bearer Token
           const response = await fetch("/api/submitAttendance", {
             method: "POST",
             headers: { 
