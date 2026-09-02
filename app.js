@@ -42,6 +42,20 @@ let currentUser = null;
 let activeCourse = null;
 let countdownInterval = null;
 
+// --- DATA NORMALIZERS (v0 Fixes) ---
+function normalizeMatric(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function normalizeCourseCode(value) {
+  const raw = String(value || "")
+    .toUpperCase()
+    .trim()
+    .replace(/[^A-Z0-9]/g, "");
+  const match = raw.match(/^([A-Z]{2,5})(\d{3,4})$/);
+  return match ? `${match[1]} ${match[2]}` : raw;
+}
+
 // --- DEFAULT THEME ICON SYNC ---
 document.addEventListener("DOMContentLoaded", () => {
   const themeToggle = document.getElementById("themeToggle");
@@ -206,7 +220,7 @@ setupAutocomplete("signupInstitution", "institutionSuggestions", NIGERIAN_INSTIT
 setupAutocomplete("signupDepartment", "departmentSuggestions", NIGERIAN_DEPARTMENTS);
 setupAutocomplete("signupLevel", "levelSuggestions", ACADEMIC_LEVELS);
 
-// --- INPUT MASKS: Course Code (XXX 000) & Matric (live uppercase) ---
+// --- INPUT MASKS ---
 function maskCourseCodeInput(id) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -228,7 +242,6 @@ function maskMatricInput(id) {
   });
 }
 
-// 🐛 FIX #1: Added missing mask for Join Course input!
 maskCourseCodeInput("courseCodeInput");
 maskCourseCodeInput("joinCode");
 maskMatricInput("signupMatric");
@@ -273,7 +286,8 @@ function checkAuth() {
 
     const openCreateModalBtn = document.getElementById("openCreateModal");
     if (openCreateModalBtn) {
-      const isAnywhereAssistant = courses.some(c => c.assistants && c.assistants.includes(currentUser.matric));
+      const userMatric = normalizeMatric(currentUser.matric);
+      const isAnywhereAssistant = courses.some(c => (c.assistants || []).map(normalizeMatric).includes(userMatric));
       
       if (currentUser.isRep || isAnywhereAssistant) {
         openCreateModalBtn.classList.remove("hidden");
@@ -300,7 +314,7 @@ if (signupForm) {
     e.preventDefault();
     const submitBtn = signupForm.querySelector("button[type='submit']");
     const name = document.getElementById("signupName").value.trim();
-    const matric = document.getElementById("signupMatric").value.trim().toUpperCase();
+    const matric = normalizeMatric(document.getElementById("signupMatric").value);
     const email = document.getElementById("signupEmail").value.trim().toLowerCase();
     const password = document.getElementById("signupPassword").value;
     const isRep = document.getElementById("isRepCheckbox").checked;
@@ -402,25 +416,14 @@ if (loginForm) {
   });
 }
 
+// 🛡️ v0 Logout Fix: Let onAuthStateChanged handle UI updates cleanly
 if (logoutBtn) {
   logoutBtn.addEventListener("click", async () => {
     try {
       await signOut(auth);
-      currentUser = null;
-      
-      if (portalSection) portalSection.classList.add("hidden");
-      const repArchiveSection = document.getElementById("repArchiveSection");
-      if (repArchiveSection) repArchiveSection.classList.add("hidden");
-      const assistantManagementSection = document.getElementById("assistantManagementSection");
-      if (assistantManagementSection) assistantManagementSection.classList.add("hidden");
-
-      activeCourse = null;
-      if (countdownInterval) clearInterval(countdownInterval);
-      
-      checkAuth();
-      alert("Logged out successfully! 👋");
     } catch (error) {
       console.error("Logout error:", error);
+      alert("Unable to log out. Please try again.");
     }
   });
 }
@@ -438,7 +441,15 @@ onAuthStateChanged(auth, async (user) => {
     checkAuth();
   } else {
     currentUser = null;
-    
+    if (portalSection) portalSection.classList.add("hidden");
+    const repArchiveSection = document.getElementById("repArchiveSection");
+    if (repArchiveSection) repArchiveSection.classList.add("hidden");
+    const assistantManagementSection = document.getElementById("assistantManagementSection");
+    if (assistantManagementSection) assistantManagementSection.classList.add("hidden");
+
+    activeCourse = null;
+    if (countdownInterval) clearInterval(countdownInterval);
+
     stopCourseListener(); 
     checkAuth();
   }
@@ -447,12 +458,12 @@ onAuthStateChanged(auth, async (user) => {
 if (deleteAccountBtn) {
   deleteAccountBtn.addEventListener("click", async () => {
     if (confirm("⚠️ Are you sure you want to delete your account? This cannot be undone.")) {
-      const userMatric = currentUser.matric;
+      const userMatric = normalizeMatric(currentUser.matric);
 
       for (let course of courses) {
         let updated = false;
-        let newEnrolled = course.enrolled || [];
-        let newAssistants = course.assistants || [];
+        let newEnrolled = (course.enrolled || []).map(normalizeMatric);
+        let newAssistants = (course.assistants || []).map(normalizeMatric);
 
         if (newEnrolled.includes(userMatric)) {
           newEnrolled = newEnrolled.filter(m => m !== userMatric);
@@ -555,7 +566,7 @@ if (settingsForm) {
     e.preventDefault();
     const submitBtn = settingsForm.querySelector("button[type='submit']");
     const newName = document.getElementById("settingsName").value.trim();
-    const newMatric = document.getElementById("settingsMatric").value.trim().toUpperCase();
+    const newMatric = normalizeMatric(document.getElementById("settingsMatric").value);
 
     if (!newName || !newMatric || !currentUser || !auth.currentUser) return;
 
@@ -565,7 +576,7 @@ if (settingsForm) {
         submitBtn.textContent = "Saving... ⏳";
       }
 
-      const oldMatric = currentUser.matric;
+      const oldMatric = normalizeMatric(currentUser.matric);
       const uid = auth.currentUser.uid;
 
       await updateDoc(doc(db, "users", uid), { name: newName, matric: newMatric });
@@ -573,8 +584,8 @@ if (settingsForm) {
       if (oldMatric && newMatric !== oldMatric) {
         for (const course of courses) {
           let updated = false;
-          let newEnrolled = course.enrolled || [];
-          let newAssistants = course.assistants || [];
+          let newEnrolled = (course.enrolled || []).map(normalizeMatric);
+          let newAssistants = (course.assistants || []).map(normalizeMatric);
 
           if (newEnrolled.includes(oldMatric)) {
             newEnrolled = newEnrolled.map(m => (m === oldMatric ? newMatric : m));
@@ -626,10 +637,8 @@ if (forgotPasswordForm) {
       }
 
       await sendPasswordResetEmail(auth, email);
-      
       alert("Password reset email sent! Check your inbox or spam folder. 📧✨");
       forgotPasswordForm.reset();
-      
       if (forgotModal) forgotModal.classList.remove("show");
     } catch (error) {
       console.error("Password reset error:", error);
@@ -651,11 +660,13 @@ function renderCourses() {
   if (!courseGrid) return;
   courseGrid.innerHTML = "";
 
+  const userMatric = normalizeMatric(currentUser ? currentUser.matric : "");
+
   const myCourses = courses.filter(course => {
     if (!currentUser) return false;
-    const isRep = course.repUid === currentUser.uid || course.rep.toLowerCase() === currentUser.name.toLowerCase();
-    const isAssistant = course.assistants && course.assistants.includes(currentUser.matric);
-    const isEnrolled = course.enrolled && course.enrolled.includes(currentUser.matric);
+    const isRep = course.repUid === currentUser.uid; // Strict UID check
+    const isAssistant = (course.assistants || []).map(normalizeMatric).includes(userMatric);
+    const isEnrolled = (course.enrolled || []).map(normalizeMatric).includes(userMatric);
     return isRep || isAssistant || isEnrolled;
   });
 
@@ -671,7 +682,7 @@ function renderCourses() {
     card.style.position = "relative";
     
     const enrolledCount = course.enrolled ? course.enrolled.length : 1;
-    const isThisUserRep = currentUser && (course.repUid === currentUser.uid || course.rep.toLowerCase() === currentUser.name.toLowerCase());
+    const isThisUserRep = currentUser && course.repUid === currentUser.uid;
 
     const actionIcon = isThisUserRep 
       ? `<button onclick="deleteCourse('${course.id}')" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; cursor: pointer; font-size: 1.2rem;" title="Delete Course (Rep Only)">🗑️</button>`
@@ -698,7 +709,6 @@ window.deleteCourse = async function(courseId) {
   const course = courses.find(c => c.id === courseId);
   if (confirm(`⚠️ WARNING: As the Course Rep, deleting "${course ? course.name : 'this course'}" removes it entirely. Are you sure?`)) {
     await deleteDoc(doc(db, "courses", courseId));
-    checkAuth();
   }
 };
 
@@ -707,15 +717,15 @@ window.leaveCourse = async function(courseId) {
   if (!course) return;
 
   if (confirm(`⚠️ Do you want to leave "${course.name}"? You can rejoin anytime using code [${course.code}].`)) {
-    let newEnrolled = course.enrolled ? course.enrolled.filter(m => m !== currentUser.matric) : [];
-    let newAssistants = course.assistants ? course.assistants.filter(m => m !== currentUser.matric) : [];
+    const userMatric = normalizeMatric(currentUser.matric);
+    let newEnrolled = (course.enrolled || []).map(normalizeMatric).filter(m => m !== userMatric);
+    let newAssistants = (course.assistants || []).map(normalizeMatric).filter(m => m !== userMatric);
 
     await updateDoc(doc(db, "courses", courseId), {
       enrolled: newEnrolled,
       assistants: newAssistants
     });
 
-    checkAuth();
     alert(`You have left ${course.name}. 👋`);
   }
 };
@@ -724,9 +734,10 @@ window.openPortal = function(courseId) {
   const selectedCourse = courses.find(c => c.id === courseId);
   if (!selectedCourse) return;
   
-  const isRep = currentUser && (selectedCourse.repUid === currentUser.uid || selectedCourse.rep.toLowerCase() === currentUser.name.toLowerCase());
-  const isAssistant = currentUser && selectedCourse.assistants && selectedCourse.assistants.includes(currentUser.matric);
-  const isEnrolled = currentUser && selectedCourse.enrolled && selectedCourse.enrolled.includes(currentUser.matric);
+  const userMatric = normalizeMatric(currentUser ? currentUser.matric : "");
+  const isRep = currentUser && selectedCourse.repUid === currentUser.uid;
+  const isAssistant = currentUser && (selectedCourse.assistants || []).map(normalizeMatric).includes(userMatric);
+  const isEnrolled = currentUser && (selectedCourse.enrolled || []).map(normalizeMatric).includes(userMatric);
 
   if (!isRep && !isAssistant && !isEnrolled) {
     alert(`⚠️ Access Denied! You are not enrolled in "${selectedCourse.name}". Please join using code [${selectedCourse.code}] first.`);
@@ -785,23 +796,18 @@ if (backToDashboardBtn) {
   });
 }
 
-// 🐛 FIX #2: Updated Create Course Handler
+// --- CREATE COURSE FORM ---
 const createCourseForm = document.getElementById("createCourseForm");
 if (createCourseForm) {
   createCourseForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = document.getElementById("courseTitle").value.trim();
-    let code = document.getElementById("courseCodeInput").value.trim().toUpperCase();
-
-    // Bulletproof formatting to force "XXX 000" spacing just in case
-    const rawCode = code.replace(/[^A-Z0-9]/g, "");
-    const letters = rawCode.slice(0, 3).replace(/[0-9]/g, "");
-    const numbers = rawCode.slice(letters.length).replace(/[^0-9]/g, "").slice(0, 3);
-    code = numbers ? `${letters} ${numbers}` : letters;
+    const code = normalizeCourseCode(document.getElementById("courseCodeInput").value);
 
     const repInstitution = currentUser ? (currentUser.institution || "GENERAL") : "GENERAL";
     const repDepartment = currentUser ? (currentUser.department || "GENERAL") : "GENERAL";
     const repLevel = currentUser ? (currentUser.level || "GENERAL") : "GENERAL";
+    const studentMatric = normalizeMatric(currentUser ? currentUser.matric : "");
 
     const duplicateExists = courses.some(c => 
       c.code === code && 
@@ -823,7 +829,7 @@ if (createCourseForm) {
       institution: repInstitution,
       department: repDepartment,
       level: repLevel,
-      enrolled: currentUser ? [currentUser.matric] : [],
+      enrolled: studentMatric ? [studentMatric] : [],
       assistants: [],
       attendanceHistory: [],
       activeSession: null
@@ -838,19 +844,14 @@ if (createCourseForm) {
   });
 }
 
-// 🐛 FIX #3: Updated Join Course Handler
+// --- JOIN COURSE FORM ---
 const joinCourseForm = document.getElementById("joinCourseForm");
 if (joinCourseForm) {
   joinCourseForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const submitBtn = joinCourseForm.querySelector("button[type='submit']");
-    let code = document.getElementById("joinCode").value.trim().toUpperCase();
-
-    // Bulletproof formatting to force "XXX 000" spacing
-    const rawCode = code.replace(/[^A-Z0-9]/g, "");
-    const letters = rawCode.slice(0, 3).replace(/[0-9]/g, "");
-    const numbers = rawCode.slice(letters.length).replace(/[^0-9]/g, "").slice(0, 3);
-    code = numbers ? `${letters} ${numbers}` : letters;
+    const code = normalizeCourseCode(document.getElementById("joinCode").value);
+    const studentMatric = normalizeMatric(currentUser ? currentUser.matric : "");
 
     try {
       if (submitBtn) {
@@ -869,10 +870,11 @@ if (joinCourseForm) {
       const foundDoc = querySnap.docs[0];
       const found = { id: foundDoc.id, ...foundDoc.data() };
 
-      let enrolled = found.enrolled || [];
-      if (currentUser && !enrolled.includes(currentUser.matric)) {
-        enrolled.push(currentUser.matric);
-        await updateDoc(doc(db, "courses", found.id), { enrolled: enrolled });
+      const enrolled = (found.enrolled || []).map(normalizeMatric);
+      if (studentMatric && !enrolled.includes(studentMatric)) {
+        await updateDoc(doc(db, "courses", found.id), {
+          enrolled: [...new Set([...enrolled, studentMatric])]
+        });
       }
 
       alert(`Successfully joined ${found.name}! 🎉`);
@@ -898,7 +900,7 @@ if (appointAssistantBtn) {
     if (!activeCourse) return;
 
     const selectEl = document.getElementById("courseStudentSelect");
-    const selectedMatric = selectEl ? selectEl.value : "";
+    const selectedMatric = normalizeMatric(selectEl ? selectEl.value : "");
 
     if (!selectedMatric) {
       alert("⚠️ Please select an enrolled student to appoint.");
@@ -909,7 +911,8 @@ if (appointAssistantBtn) {
       activeCourse.assistants = [];
     }
 
-    if (activeCourse.assistants.includes(selectedMatric)) {
+    const currentAssistants = activeCourse.assistants.map(normalizeMatric);
+    if (currentAssistants.includes(selectedMatric)) {
       alert("⚠️ This student is already an appointed assistant!");
       return;
     }
@@ -928,7 +931,8 @@ window.revokeAssistant = async function(matric) {
   if (!activeCourse || !activeCourse.assistants) return;
 
   if (confirm("⚠️ Do you want to remove this assistant's badge?")) {
-    activeCourse.assistants = activeCourse.assistants.filter(m => m !== matric);
+    const targetMatric = normalizeMatric(matric);
+    activeCourse.assistants = (activeCourse.assistants || []).map(normalizeMatric).filter(m => m !== targetMatric);
     await updateCourseInFirestore();
     
     renderPortalState();
@@ -942,17 +946,18 @@ window.removeStudentFromCourse = async function(matric) {
   if (!activeCourse) return;
 
   if (confirm(`⚠️ Are you sure you want to remove student [${matric}] from ${activeCourse.name}?`)) {
+    const targetMatric = normalizeMatric(matric);
     if (activeCourse.enrolled) {
-      activeCourse.enrolled = activeCourse.enrolled.filter(m => m !== matric);
+      activeCourse.enrolled = (activeCourse.enrolled || []).map(normalizeMatric).filter(m => m !== targetMatric);
     }
     if (activeCourse.assistants) {
-      activeCourse.assistants = activeCourse.assistants.filter(m => m !== matric);
+      activeCourse.assistants = (activeCourse.assistants || []).map(normalizeMatric).filter(m => m !== targetMatric);
     }
 
     await updateCourseInFirestore();
     renderPortalState();
     renderAssistantDropdownAndList();
-    alert(`Student [${matric}] has been removed from the course.`);
+    alert(`Student [${targetMatric}] has been removed from the course.`);
   }
 };
 
@@ -964,11 +969,12 @@ function renderAssistantDropdownAndList() {
   if (!selectEl || !listEl) return;
 
   selectEl.innerHTML = `<option value="">-- Choose student to appoint --</option>`;
-  const enrolled = activeCourse.enrolled || [];
+  const enrolled = (activeCourse.enrolled || []).map(normalizeMatric);
+  const assistants = (activeCourse.assistants || []).map(normalizeMatric);
 
   enrolled.forEach(matric => {
-    const isMainRep = currentUser && (activeCourse.repUid === currentUser.uid || activeCourse.rep.toLowerCase() === currentUser.name.toLowerCase());
-    const isAlreadyAssistant = activeCourse.assistants && activeCourse.assistants.includes(matric);
+    const isMainRep = currentUser && activeCourse.repUid === currentUser.uid;
+    const isAlreadyAssistant = assistants.includes(matric);
 
     if (!isMainRep && !isAlreadyAssistant) {
       const opt = document.createElement("option");
@@ -978,7 +984,6 @@ function renderAssistantDropdownAndList() {
     }
   });
 
-  const assistants = activeCourse.assistants || [];
   if (assistants.length === 0) {
     listEl.innerHTML = `<li style="color: var(--muted); font-size: 0.85rem; padding: 5px;">No assistants appointed yet. ⏳</li>`;
   } else {
@@ -1006,7 +1011,7 @@ if (generatePinBtn) {
     if (!activeCourse) return;
 
     const randomPin = Math.floor(1000 + Math.random() * 9000).toString();
-    const managerMatric = currentUser ? currentUser.matric : "REP-001";
+    const managerMatric = normalizeMatric(currentUser ? currentUser.matric : "REP-001");
 
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -1226,8 +1231,9 @@ window.downloadAttendance = function(index) {
 function renderPortalState() {
   if (!activeCourse) return;
 
-  const isRep = currentUser && (activeCourse.repUid === currentUser.uid || activeCourse.rep.toLowerCase() === currentUser.name.toLowerCase());
-  const isAssistant = currentUser && activeCourse.assistants && activeCourse.assistants.includes(currentUser.matric);
+  const userMatric = normalizeMatric(currentUser ? currentUser.matric : "");
+  const isRep = currentUser && activeCourse.repUid === currentUser.uid;
+  const isAssistant = currentUser && (activeCourse.assistants || []).map(normalizeMatric).includes(userMatric);
   const session = activeCourse.activeSession;
   const isSessionActive = session && !session.expired && Date.now() < session.expiresAt;
 
@@ -1298,8 +1304,8 @@ function renderPortalState() {
     rosterList.innerHTML = `<li style="color: var(--muted); font-size: 0.9rem; text-align: center; padding: 10px;">No check-ins recorded yet. ⏳</li>`;
   } else {
     attendees.forEach(matric => {
-      const isMainRepUser = activeCourse.rep.toLowerCase() === (currentUser && currentUser.matric === matric ? currentUser.name.toLowerCase() : "");
-      const isAssistantUser = activeCourse.assistants && activeCourse.assistants.includes(matric);
+      const isMainRepUser = activeCourse.repUid === currentUser.uid;
+      const isAssistantUser = (activeCourse.assistants || []).map(normalizeMatric).includes(normalizeMatric(matric));
       
       let badgeHTML = "";
       if (isMainRepUser) {
@@ -1335,7 +1341,7 @@ function renderPortalState() {
         studentRowsHTML = `<p style="color: var(--muted); font-size: 0.85rem;">No students enrolled yet.</p>`;
       } else {
         enrolledMatrics.forEach(matric => {
-          const isRepMatric = currentUser && currentUser.matric === matric;
+          const isRepMatric = userMatric === normalizeMatric(matric);
           studentRowsHTML += `
             <li style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: var(--bg); border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem;">
               <span>🎓 <strong>${matric}</strong> ${isRepMatric ? '(You - Rep)' : ''}</span>
@@ -1394,7 +1400,7 @@ function renderPortalState() {
   }
 
   const studentAnalyticsSection = document.getElementById("studentAnalyticsSection");
-  const isEnrolled = currentUser && activeCourse.enrolled && activeCourse.enrolled.includes(currentUser.matric);
+  const isEnrolled = (activeCourse.enrolled || []).map(normalizeMatric).includes(userMatric);
 
   if (isEnrolled && studentAnalyticsSection) {
     studentAnalyticsSection.classList.remove("hidden");
@@ -1406,7 +1412,8 @@ function renderPortalState() {
     let historyListHTML = "";
 
     history.forEach(sessionRecord => {
-      const wasPresent = sessionRecord.attendees && sessionRecord.attendees.includes(currentUser.matric);
+      const normalizedAttendees = (sessionRecord.attendees || []).map(normalizeMatric);
+      const wasPresent = normalizedAttendees.includes(userMatric);
       if (wasPresent) attendedCount++;
 
       historyListHTML += `

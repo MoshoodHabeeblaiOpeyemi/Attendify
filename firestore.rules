@@ -18,9 +18,6 @@ service cloud.firestore {
       );
     }
     
-    // Students can ONLY add/remove themselves from enrolled[],
-    // or remove themselves from assistants[].
-    // No if-statements allowed — pure boolean logic only.
     function isSelfManagingEnrollment() {
       let userMatric = getUserMatric();
       let affected = request.resource.data.diff(resource.data).affectedKeys();
@@ -69,8 +66,15 @@ service cloud.firestore {
 
     match /courses/{courseId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isCourseStaff(courseId) || isSelfManagingEnrollment();
+      allow create: if isSignedIn() && request.resource.data.repUid == request.auth.uid;
+      allow update: if (
+        isCourseStaff(courseId)
+        && request.resource.data.repUid == resource.data.repUid
+        && request.resource.data.code == resource.data.code
+        && request.resource.data.institution == resource.data.institution
+        && request.resource.data.department == resource.data.department
+        && request.resource.data.level == resource.data.level
+      ) || isSelfManagingEnrollment();
       allow delete: if isCourseStaff(courseId);
 
       match /session/live {
