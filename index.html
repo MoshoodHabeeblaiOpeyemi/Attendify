@@ -39,7 +39,7 @@
     <div id="authContainer">
 
       <!-- SIGN UP CARD -->
-      <section id="signupCard" class="card">
+      <section id="signupCard" class="card hidden">
         <h2>Create Account 🚀</h2>
         <p>Sign up to start managing or joining classes.</p>
 
@@ -54,21 +54,18 @@
           </div>
           <div class="input-group autocomplete-wrapper">
             <label for="signupInstitution">Institution / University</label>
-            <input type="text" id="signupInstitution" placeholder="e.g., UNILORIN, UI, OAU" required
-              autocomplete="off">
+            <input type="text" id="signupInstitution" placeholder="e.g., UNILORIN, UI, OAU" required autocomplete="off">
             <div id="institutionSuggestions" class="suggestions-box hidden"></div>
           </div>
 
           <div class="input-group autocomplete-wrapper">
             <label for="signupDepartment">Department</label>
-            <input type="text" id="signupDepartment" placeholder="e.g., Computer Science" required
-              autocomplete="off">
+            <input type="text" id="signupDepartment" placeholder="e.g., Computer Science" required autocomplete="off">
             <div id="departmentSuggestions" class="suggestions-box hidden"></div>
           </div>
           <div class="input-group autocomplete-wrapper">
             <label for="signupLevel">Level</label>
-            <input type="text" id="signupLevel" placeholder="e.g., 100L, 200L, 300L, 400L" required
-              autocomplete="off">
+            <input type="text" id="signupLevel" placeholder="e.g., 100L, 200L, 300L, 400L" required autocomplete="off">
             <div id="levelSuggestions" class="suggestions-box hidden"></div>
           </div>
           <div class="field">
@@ -100,7 +97,7 @@
       </section>
 
       <!-- LOG IN CARD (Initially hidden) -->
-      <section id="loginCard" class="card hidden">
+      <section id="loginCard" class="card">
         <h2>Welcome Back 👋</h2>
         <p>Log in to access your course portals.</p>
 
@@ -413,7 +410,8 @@
   <div id="settingsModal" class="modal">
     <div class="modal-card">
       <h3>Account Settings ⚙️</h3>
-      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Update your name below. Your matric number is permanently linked to your account for security.</p>
+      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Update your name below. Your matric
+        number is permanently linked to your account for security.</p>
 
       <form id="settingsForm">
         <div class="field">
@@ -422,8 +420,11 @@
         </div>
         <div class="field">
           <label for="settingsMatric">Matric Number</label>
-          <input type="text" id="settingsMatric" required placeholder="e.g., UCH/2022/4092" readonly aria-describedby="matricHelp">
-          <small id="matricHelp" style="color: var(--muted); font-size: 0.75rem; display: block; margin-top: 4px;">Matric numbers cannot be changed after account creation.</small>
+          <input type="text" id="settingsMatric" required placeholder="e.g., UCH/2022/4092" readonly
+            aria-describedby="matricHelp">
+          <small id="matricHelp"
+            style="color: var(--muted); font-size: 0.75rem; display: block; margin-top: 4px;">Matric numbers cannot be
+            changed after account creation.</small>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-outline close-modal">Cancel</button>
