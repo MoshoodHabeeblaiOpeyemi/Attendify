@@ -72,11 +72,22 @@ function startCourseListener() {
   if (unsubscribeCourses) return; 
   unsubscribeCourses = onSnapshot(
     collection(db, "courses"),
-    (snapshot) => {
-      courses = [];
-      snapshot.forEach((docSnap) => {
-        courses.push({ id: docSnap.id, ...docSnap.data() });
-      });
+    async (snapshot) => {
+      const loadedCourses = await Promise.all(snapshot.docs.map(async (docSnap) => {
+        const course = { id: docSnap.id, ...docSnap.data() };
+        const membersSnap = await getDocs(collection(db, "courses", docSnap.id, "members"));
+        const members = membersSnap.docs.map(memberSnap => ({
+          uid: memberSnap.id,
+          ...memberSnap.data()
+        }));
+        return {
+          ...course,
+          members,
+          enrolled: members.filter(member => member.role === "student").map(member => normalizeMatric(member.matric)),
+          assistants: members.filter(member => member.role === "assistant").map(member => normalizeMatric(member.matric))
+        };
+      }));
+      courses = loadedCourses;
       if (currentUser) {
         renderCourses();
         if (activeCourse) {
@@ -870,12 +881,21 @@ if (joinCourseForm) {
       const foundDoc = querySnap.docs[0];
       const found = { id: foundDoc.id, ...foundDoc.data() };
 
-      const enrolled = (found.enrolled || []).map(normalizeMatric);
-      if (studentMatric && !enrolled.includes(studentMatric)) {
-        await updateDoc(doc(db, "courses", found.id), {
-          enrolled: [...new Set([...enrolled, studentMatric])]
-        });
+      if (!auth.currentUser || !studentMatric) {
+        throw new Error("Your account is missing a valid matric number.");
       }
+
+      const idToken = await auth.currentUser.getIdToken();
+      const response = await fetch("/api/enrollCourse", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`
+        },
+        body: JSON.stringify({ courseCode: code })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to join course.");
 
       alert(`Successfully joined ${found.name}! 🎉`);
       

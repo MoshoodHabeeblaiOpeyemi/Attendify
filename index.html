@@ -413,8 +413,7 @@
   <div id="settingsModal" class="modal">
     <div class="modal-card">
       <h3>Account Settings ⚙️</h3>
-      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Update your name or matric number
-        below. No need to delete your account to fix a typo.</p>
+      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Update your name below. Your matric number is permanently linked to your account for security.</p>
 
       <form id="settingsForm">
         <div class="field">
@@ -423,7 +422,8 @@
         </div>
         <div class="field">
           <label for="settingsMatric">Matric Number</label>
-          <input type="text" id="settingsMatric" required placeholder="e.g., UCH/2022/4092">
+          <input type="text" id="settingsMatric" required placeholder="e.g., UCH/2022/4092" readonly aria-describedby="matricHelp">
+          <small id="matricHelp" style="color: var(--muted); font-size: 0.75rem; display: block; margin-top: 4px;">Matric numbers cannot be changed after account creation.</small>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-outline close-modal">Cancel</button>
@@ -437,8 +437,9 @@
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("/sw.js")
-          .then((reg) => console.log("Service Worker registered! 🎉", reg.scope))
+        navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" })
+          .then((reg) => reg.update())
+          .then(() => console.log("Attendify service worker updated"))
           .catch((err) => console.log("Service Worker registration failed ❌", err));
       });
     }

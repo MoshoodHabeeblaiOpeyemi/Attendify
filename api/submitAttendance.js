@@ -57,11 +57,14 @@ module.exports = async (req, res) => {
     if (!userDoc.exists) {
       return res.status(404).json({ error: "User profile not found." });
     }
-    const matric = userDoc.data().matric;
+    const matric = String(userDoc.data().matric || "").trim().toUpperCase();
+    if (!matric) {
+      return res.status(400).json({ error: "User profile has no valid matric number." });
+    }
 
-    // 📥 3. Check Body Parameters
-    const { courseId, pin, lat, lon, accuracy } = req.body;
-    if (!courseId || !pin || lat === undefined || lon === undefined) {
+    // 3. Check and validate body parameters
+    const { courseId, pin, lat, lon, accuracy } = req.body || {};
+    if (typeof courseId !== "string" || !courseId.trim() || pin === undefined || lat === undefined || lon === undefined) {
       return res.status(400).json({ error: "Missing required check-in fields." });
     }
 
@@ -77,8 +80,9 @@ module.exports = async (req, res) => {
       return res.status(404).json({ error: "Course not found." });
     }
     const courseData = courseDoc.data();
-    const enrolled = courseData.enrolled || [];
-    if (!enrolled.includes(matric)) {
+    const memberRef = courseRef.collection("members").doc(uid);
+    const memberDoc = await memberRef.get();
+    if (!memberDoc.exists || memberDoc.data().role !== "student") {
       return res.status(403).json({ error: "You are not enrolled in this course." });
     }
 

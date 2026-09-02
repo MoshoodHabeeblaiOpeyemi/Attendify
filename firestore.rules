@@ -1,94 +1,141 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isSignedIn() { return request.auth != null; }
-    function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
-    
-    function getUserMatric() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.matric;
+    function signedIn() {
+      return request.auth != null;
     }
 
-    function isCourseStaff(courseId) {
-      let course = get(/databases/$(database)/documents/courses/$(courseId)).data;
-      let userMatric = getUserMatric();
-      return isSignedIn() && (
-        course.repUid == request.auth.uid ||
-        (course.assistants != null && userMatric in course.assistants)
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function userExists() {
+      return signedIn() && exists(
+        /databases/$(database)/documents/users/$(request.auth.uid)
       );
     }
-    
-    function isSelfManagingEnrollment() {
-      let userMatric = getUserMatric();
-      let affected = request.resource.data.diff(resource.data).affectedKeys();
-      
-      return affected.hasOnly(['enrolled', 'assistants'])
-        && (
-          resource.data.enrolled == request.resource.data.enrolled
-          || (
-            resource.data.enrolled != null
-            && request.resource.data.enrolled != null
-            && (
-              (request.resource.data.enrolled.size() == resource.data.enrolled.size() + 1
-               && !(userMatric in resource.data.enrolled)
-               && userMatric in request.resource.data.enrolled)
-              ||
-              (request.resource.data.enrolled.size() == resource.data.enrolled.size() - 1
-               && userMatric in resource.data.enrolled
-               && !(userMatric in request.resource.data.enrolled))
-            )
-          )
+
+    function hasUserProfile() {
+      return userExists()
+        && get(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        ).data.uid == request.auth.uid;
+    }
+
+    function isCourseRep(courseId) {
+      return signedIn()
+        && exists(
+          /databases/$(database)/documents/courses/$(courseId)
         )
-        && (
-          resource.data.assistants == request.resource.data.assistants
-          || (
-            resource.data.assistants != null
-            && request.resource.data.assistants != null
-            && request.resource.data.assistants.size() == resource.data.assistants.size() - 1
-            && userMatric in resource.data.assistants
-            && !(userMatric in request.resource.data.assistants)
-          )
+        && get(
+          /databases/$(database)/documents/courses/$(courseId)
+        ).data.repUid == request.auth.uid;
+    }
+
+    function isCourseMember(courseId) {
+      return signedIn()
+        && exists(
+          /databases/$(database)/documents/courses/$(courseId)/members/$(request.auth.uid)
         );
     }
 
-    match /users/{userId} {
-      allow read: if isSignedIn();
-      allow create: if isOwner(userId);
-      allow update: if isOwner(userId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isRep', 'institution', 'department']);
-      allow delete: if isOwner(userId);
+    function isCourseStaff(courseId) {
+      return isCourseRep(courseId) || (
+        isCourseMember(courseId)
+        && get(
+          /databases/$(database)/documents/courses/$(courseId)/members/$(request.auth.uid)
+        ).data.role == 'assistant'
+      );
     }
 
-    match /departmentReps/{slotId} {
-      allow read: if true; 
-      allow create: if isSignedIn() && request.resource.data.repUid == request.auth.uid;
-      allow update, delete: if false;
+    function validCourseFields() {
+      return request.resource.data.repUid is string
+        && request.resource.data.repUid == request.auth.uid
+        && request.resource.data.code is string
+        && request.resource.data.code.size() > 0
+        && request.resource.data.institution is string
+        && request.resource.data.institution.size() > 0
+        && request.resource.data.department is string
+        && request.resource.data.department.size() > 0
+        && request.resource.data.level is string
+        && request.resource.data.level.size() > 0;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+
+      allow create: if isOwner(userId)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.matric is string
+        && request.resource.data.matric.size() > 0
+        && request.resource.data.isRep is bool;
+
+      allow update: if isOwner(userId)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.matric == resource.data.matric
+        && request.resource.data.isRep == resource.data.isRep
+        && request.resource.data.institution == resource.data.institution
+        && request.resource.data.department == resource.data.department;
+
+      allow delete: if false;
+    }
+
+    match /departmentReps/{repId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.repUid == request.auth.uid;
+      allow update, delete: if isOwner(repId);
     }
 
     match /courses/{courseId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.repUid == request.auth.uid;
-      allow update: if (
-        isCourseStaff(courseId)
+      allow read: if signedIn();
+
+      allow create: if hasUserProfile() && validCourseFields();
+
+      allow update: if isCourseStaff(courseId)
         && request.resource.data.repUid == resource.data.repUid
         && request.resource.data.code == resource.data.code
         && request.resource.data.institution == resource.data.institution
         && request.resource.data.department == resource.data.department
-        && request.resource.data.level == resource.data.level
-      ) || isSelfManagingEnrollment();
-      allow delete: if isCourseStaff(courseId);
+        && request.resource.data.level == resource.data.level;
+
+      allow delete: if isCourseRep(courseId);
+
+      match /members/{memberUid} {
+        allow read: if signedIn() && (
+          request.auth.uid == memberUid || isCourseStaff(courseId)
+        );
+
+        // Normal student enrollment must be performed by the trusted backend.
+        // The backend uses Firebase Admin credentials and bypasses client rules.
+        allow create: if isCourseRep(courseId)
+          && request.resource.data.uid == memberUid
+          && request.resource.data.role in ['student', 'assistant'];
+
+        allow update: if isCourseRep(courseId)
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.role in ['student', 'assistant'];
+
+        allow delete: if isCourseRep(courseId)
+          || (signedIn() && request.auth.uid == memberUid);
+      }
 
       match /session/live {
-        allow read: if isSignedIn();
-        allow write: if isCourseStaff(courseId);
+        allow read: if signedIn() && (
+          isCourseStaff(courseId) || isCourseMember(courseId)
+        );
+        allow create, update, delete: if isCourseStaff(courseId);
       }
 
       match /session/secret {
-        allow read, write: if isCourseStaff(courseId);
+        allow read, write: if isCourseRep(courseId);
       }
 
-      match /attendance/{document=**} {
+      match /attendance/{attendanceId} {
         allow read: if isCourseStaff(courseId);
-        allow write: if false; 
+        allow write: if false;
       }
     }
   }
