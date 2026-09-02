@@ -42,6 +42,8 @@ let currentUser = null;
 let activeCourse = null;
 let countdownInterval = null;
 
+let isCreatingAccount = false; // 🛡️ Prevents race condition during signup
+
 // --- DATA NORMALIZERS (v0 Fixes) ---
 function normalizeMatric(value) {
   return String(value || "").trim().toUpperCase();
@@ -393,6 +395,8 @@ if (signupForm) {
         submitBtn.textContent = "Creating Account... ⏳";
       }
 
+      isCreatingAccount = true; // 🛑 Lock ghost blocker during signup sequence
+
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const uid = userCredential.user.uid;
 
@@ -411,9 +415,11 @@ if (signupForm) {
         await setDoc(window._pendingRepSlotRef, { repUid: uid, registeredAt: Date.now() });
       }
 
+      isCreatingAccount = false; // 🔓 Release lock
       signupForm.reset();
       alert("Account created successfully in the cloud! 🎉");
     } catch (error) {
+      isCreatingAccount = false; // 🔓 Ensure lock releases on error
       console.error("Signup error:", error);
       alert("⚠️ Error: " + error.message);
       if (submitBtn) {
@@ -465,6 +471,8 @@ if (logoutBtn) {
 
 onAuthStateChanged(auth, async (user) => {
   if (user) {
+    if (isCreatingAccount) return; // 🛑 Skip ghost check while profile is being written
+
     const userDoc = await getDoc(doc(db, "users", user.uid));
     
     if (userDoc.exists()) {
@@ -472,7 +480,6 @@ onAuthStateChanged(auth, async (user) => {
       startCourseListener(); 
       checkAuth();
     } else {
-      // 🚫 GHOST BLOCKER: Auth exists, but DB profile is missing!
       console.warn("Ghost user blocked: No Firestore profile found.");
       alert("⚠️ Access Denied: Your account data could not be found. It may have been deleted.");
       await signOut(auth);
@@ -480,6 +487,8 @@ onAuthStateChanged(auth, async (user) => {
       checkAuth();
     }
   } else {
+    if (isCreatingAccount) return; // 🛑 Skip during active signup process
+
     currentUser = null;
     if (portalSection) portalSection.classList.add("hidden");
     const repArchiveSection = document.getElementById("repArchiveSection");
