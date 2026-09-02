@@ -15,6 +15,8 @@ import {
   setDoc, 
   getDoc, 
   getDocs, 
+  query,
+  where,
   updateDoc, 
   deleteDoc, 
   onSnapshot 
@@ -54,22 +56,34 @@ let unsubscribeCourses = null;
 
 function startCourseListener() {
   if (unsubscribeCourses) return; // Don't start if already running
-  unsubscribeCourses = onSnapshot(collection(db, "courses"), (snapshot) => {
-    courses = [];
-    snapshot.forEach((docSnap) => {
-      courses.push({ id: docSnap.id, ...docSnap.data() });
-    });
-    if (currentUser) {
-      renderCourses();
-      if (activeCourse) {
-        const updated = courses.find(c => c.id === activeCourse.id);
-        if (updated) {
-          activeCourse = updated;
-          renderPortalState();
+  unsubscribeCourses = onSnapshot(
+    collection(db, "courses"),
+    (snapshot) => {
+      courses = [];
+      snapshot.forEach((docSnap) => {
+        courses.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      if (currentUser) {
+        renderCourses();
+        if (activeCourse) {
+          const updated = courses.find(c => c.id === activeCourse.id);
+          if (updated) {
+            activeCourse = updated;
+            renderPortalState();
+          }
         }
       }
+    },
+    (error) => {
+      // Previously any failure here (a rules hiccup, a dropped connection)
+      // failed completely silently — the dashboard just stayed blank
+      // forever with zero clue why. This surfaces it instead of hiding it.
+      console.error("Course listener error:", error);
+      if (courseGrid) {
+        courseGrid.innerHTML = `<p style="color: var(--danger);">⚠️ Couldn't load your courses. Check your connection and try refreshing.</p>`;
+      }
     }
-  });
+  );
 }
 
 function stopCourseListener() {
@@ -837,6 +851,11 @@ if (createCourseForm) {
     const newDocRef = doc(collection(db, "courses"));
     await setDoc(newDocRef, newCourse);
 
+    // Update local state immediately rather than waiting on the background
+    // listener's next snapshot round-trip — this is what was causing
+    // "created course doesn't show until I refresh."
+    courses.push({ id: newDocRef.id, ...newCourse });
+
     if (createModal) createModal.classList.remove("show");
     createCourseForm.reset();
     checkAuth();
@@ -849,23 +868,50 @@ const joinCourseForm = document.getElementById("joinCourseForm");
 if (joinCourseForm) {
   joinCourseForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const submitBtn = joinCourseForm.querySelector("button[type='submit']");
     const code = document.getElementById("joinCode").value.trim().toUpperCase();
 
-    const found = courses.find(c => c.code === code);
-    if (found) {
+    try {
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Checking... ⏳";
+      }
+
+      // Query Firestore directly instead of searching the in-memory
+      // `courses` array — that array is filled in by a background listener
+      // that may not have delivered its first snapshot yet. That gap is
+      // exactly what was causing real, existing course codes to come back
+      // "not found," and silently skip enrolling the student entirely.
+      const codeQuery = query(collection(db, "courses"), where("code", "==", code));
+      const querySnap = await getDocs(codeQuery);
+
+      if (querySnap.empty) {
+        alert(`⚠️ Course code "${code}" not found.`);
+        return;
+      }
+
+      const foundDoc = querySnap.docs[0];
+      const found = { id: foundDoc.id, ...foundDoc.data() };
+
       let enrolled = found.enrolled || [];
       if (currentUser && !enrolled.includes(currentUser.matric)) {
         enrolled.push(currentUser.matric);
         await updateDoc(doc(db, "courses", found.id), { enrolled: enrolled });
       }
+
       alert(`Successfully joined ${found.name}! 🎉`);
       checkAuth();
-    } else {
-      alert(`⚠️ Course code "${code}" not found.`);
+    } catch (error) {
+      console.error("Join course error:", error);
+      alert("⚠️ Something went wrong while joining. Please check your connection and try again.");
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Join Class 🏃‍♂️";
+      }
+      if (joinModal) joinModal.classList.remove("show");
+      joinCourseForm.reset();
     }
-
-    if (joinModal) joinModal.classList.remove("show");
-    joinCourseForm.reset();
   });
 }
 
