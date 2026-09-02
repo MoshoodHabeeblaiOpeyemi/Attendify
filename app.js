@@ -93,6 +93,141 @@ if (themeToggle) {
 }
 
 // --- AUTH & USER DATABASE MANAGEMENT ---
+// --- AUTOCOMPLETE DATA & LOGIC (Institution / Department / Level) ---
+// Note: these lists cover common Nigerian tertiary institutions and
+// departments, not an exhaustive national registry. Typing something not
+// on the list still works fine as free text — these only *suggest*, they
+// never block or force a selection.
+const NIGERIAN_INSTITUTIONS = [
+  "University of Ilorin (UNILORIN)", "University of Ibadan (UI)", "University of Lagos (UNILAG)",
+  "Obafemi Awolowo University (OAU)", "Ahmadu Bello University (ABU)", "University of Nigeria, Nsukka (UNN)",
+  "University of Benin (UNIBEN)", "University of Port Harcourt (UNIPORT)", "Bayero University Kano (BUK)",
+  "University of Calabar (UNICAL)", "Federal University of Technology, Akure (FUTA)",
+  "Federal University of Technology, Minna (FUTMINNA)", "Federal University of Technology, Owerri (FUTO)",
+  "University of Jos (UNIJOS)", "University of Maiduguri (UNIMAID)", "Usmanu Danfodiyo University Sokoto (UDUS)",
+  "Nnamdi Azikiwe University (UNIZIK)", "Ladoke Akintola University of Technology (LAUTECH)",
+  "Federal University of Agriculture, Abeokuta (FUNAAB)", "University of Uyo (UNIUYO)",
+  "Ekiti State University (EKSU)", "Lagos State University (LASU)", "Rivers State University (RSU)",
+  "Delta State University (DELSU)", "Ambrose Alli University (AAU)", "Enugu State University of Science and Technology (ESUT)",
+  "Kaduna State University (KASU)", "Kano University of Science and Technology (KUST)",
+  "Imo State University (IMSU)", "Abia State University (ABSU)", "Benue State University (BSU)",
+  "Kogi State University (KSU)", "Niger State Polytechnic", "Ondo State University of Science and Technology (OSUSTECH)",
+  "Osun State University (UNIOSUN)", "Plateau State University", "Taraba State University",
+  "Covenant University", "Babcock University", "Bowen University", "Afe Babalola University (ABUAD)",
+  "Bells University of Technology", "Pan-Atlantic University", "Landmark University",
+  "Redeemer's University", "American University of Nigeria (AUN)", "Igbinedion University",
+  "Elizade University", "Crawford University", "Caleb University", "Lead City University",
+  "Al-Hikmah University", "Adeleke University", "Chrisland University", "Veritas University",
+  "Yaba College of Technology (YABATECH)", "The Polytechnic, Ibadan", "Federal Polytechnic, Nekede",
+  "Federal Polytechnic, Ilaro", "Kaduna Polytechnic (KADPOLY)", "Auchi Polytechnic",
+  "Federal Polytechnic, Offa", "Rufus Giwa Polytechnic", "Moshood Abiola Polytechnic (MAPOLY)",
+  "Lagos State Polytechnic (LASPOTECH)", "Federal College of Education (Technical)",
+  "Federal University Oye-Ekiti (FUOYE)", "Federal University Dutse (FUD)", "Federal University Lokoja (FULOKOJA)",
+  "Federal University Dutsin-Ma (FUDMA)", "Michael Okpara University of Agriculture (MOUAU)",
+  "University of Agriculture, Makurdi", "Modibbo Adama University (MAU)", "Abubakar Tafawa Balewa University (ATBU)"
+];
+
+const NIGERIAN_DEPARTMENTS = [
+  "Computer Science", "Geology", "Geophysics", "Civil Engineering", "Electrical Engineering",
+  "Mechanical Engineering", "Chemical Engineering", "Petroleum Engineering", "Mining Engineering",
+  "Agricultural Engineering", "Biomedical Engineering", "Architecture", "Estate Management",
+  "Quantity Surveying", "Urban and Regional Planning", "Building Technology", "Surveying and Geoinformatics",
+  "Physics", "Chemistry", "Biochemistry", "Microbiology", "Botany", "Zoology", "Mathematics",
+  "Statistics", "Industrial Chemistry", "Biology", "Environmental Science",
+  "Accounting", "Banking and Finance", "Business Administration", "Economics", "Marketing",
+  "Insurance", "Actuarial Science", "Public Administration", "Political Science",
+  "Mass Communication", "Sociology", "Psychology", "Criminology", "International Relations",
+  "Medicine and Surgery", "Nursing Science", "Pharmacy", "Physiology", "Anatomy",
+  "Medical Laboratory Science", "Physiotherapy", "Public Health", "Dentistry", "Radiography",
+  "Law", "English Language", "History and International Studies", "Theatre Arts",
+  "Linguistics", "Philosophy", "Religious Studies", "French", "Library and Information Science",
+  "Education", "Guidance and Counselling", "Human Kinetics and Health Education",
+  "Agricultural Economics", "Animal Science", "Crop Science", "Soil Science", "Forestry and Wildlife",
+  "Fisheries and Aquaculture", "Food Science and Technology", "Home Science and Management"
+];
+
+const ACADEMIC_LEVELS = [
+  "ND 1", "ND 2", "HND 1", "HND 2",
+  "100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "600 Level"
+];
+
+function setupAutocomplete(inputId, suggestionsId, dataList) {
+  const input = document.getElementById(inputId);
+  const box = document.getElementById(suggestionsId);
+  if (!input || !box) return;
+
+  function renderMatches() {
+    const query = input.value.trim().toLowerCase();
+    box.innerHTML = "";
+
+    if (!query) {
+      box.classList.add("hidden");
+      return;
+    }
+
+    const matches = dataList.filter(item => item.toLowerCase().includes(query)).slice(0, 8);
+    if (matches.length === 0) {
+      box.classList.add("hidden");
+      return;
+    }
+
+    matches.forEach(match => {
+      const item = document.createElement("div");
+      item.className = "suggestion-item";
+      item.textContent = match;
+      item.addEventListener("mousedown", (e) => {
+        // mousedown (not click) fires before the input's blur event,
+        // so the value gets set before the box hides itself
+        e.preventDefault();
+        input.value = match;
+        box.classList.add("hidden");
+        box.innerHTML = "";
+      });
+      box.appendChild(item);
+    });
+
+    box.classList.remove("hidden");
+  }
+
+  input.addEventListener("input", renderMatches);
+  input.addEventListener("focus", () => {
+    if (input.value.trim()) renderMatches();
+  });
+  input.addEventListener("blur", () => {
+    setTimeout(() => box.classList.add("hidden"), 100);
+  });
+}
+
+setupAutocomplete("signupInstitution", "institutionSuggestions", NIGERIAN_INSTITUTIONS);
+setupAutocomplete("signupDepartment", "departmentSuggestions", NIGERIAN_DEPARTMENTS);
+setupAutocomplete("signupLevel", "levelSuggestions", ACADEMIC_LEVELS);
+
+// --- INPUT MASKS: Course Code (XXX 000) & Matric (live uppercase) ---
+function maskCourseCodeInput(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener("input", () => {
+    const raw = el.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const letters = raw.slice(0, 3).replace(/[0-9]/g, "");
+    const numbers = raw.slice(letters.length).replace(/[^0-9]/g, "").slice(0, 3);
+    el.value = numbers ? `${letters} ${numbers}` : letters;
+  });
+}
+
+function maskMatricInput(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener("input", () => {
+    const cursor = el.selectionStart;
+    el.value = el.value.toUpperCase();
+    el.setSelectionRange(cursor, cursor);
+  });
+}
+
+maskCourseCodeInput("courseCodeInput");
+maskMatricInput("signupMatric");
+maskMatricInput("settingsMatric");
+
 const authContainer = document.getElementById("authContainer");
 const signupCard = document.getElementById("signupCard");
 const loginCard = document.getElementById("loginCard");
@@ -100,6 +235,7 @@ const dashboardSection = document.getElementById("dashboardSection");
 const displayName = document.getElementById("displayName");
 const displayMatric = document.getElementById("displayMatric");
 const logoutBtn = document.getElementById("logoutBtn");
+const openSettingsBtn = document.getElementById("openSettingsBtn");
 const deleteAccountBtn = document.getElementById("deleteAccountBtn");
 
 const showLoginBtn = document.getElementById("showLogin");
@@ -125,6 +261,7 @@ function checkAuth() {
     authContainer.classList.add("hidden");
     dashboardSection.classList.remove("hidden");
     logoutBtn.classList.remove("hidden");
+    if (openSettingsBtn) openSettingsBtn.classList.remove("hidden");
     displayName.textContent = currentUser.name;
     displayMatric.textContent = currentUser.matric;
 
@@ -144,6 +281,7 @@ function checkAuth() {
     authContainer.classList.remove("hidden");
     dashboardSection.classList.add("hidden");
     logoutBtn.classList.add("hidden");
+    if (openSettingsBtn) openSettingsBtn.classList.add("hidden");
     signupCard.classList.remove("hidden");
     loginCard.classList.add("hidden");
   }
@@ -354,6 +492,7 @@ const createModal = document.getElementById("createModal");
 const joinModal = document.getElementById("joinModal");
 const forgotModal = document.getElementById("forgotModal");
 const guideModal = document.getElementById("guideModal");
+const settingsModal = document.getElementById("settingsModal");
 const openGuideBtn = document.getElementById("openGuideBtn");
 
 const openCreateModalBtn = document.getElementById("openCreateModal");
@@ -378,18 +517,108 @@ if (openForgotModalBtn) {
   });
 }
 
+// Generic close handler — works for every modal, including any added later,
+// instead of a hardcoded list that silently misses new ones (that's exactly
+// what was happening to createModal/joinModal/forgotModal/guideModal before:
+// a 5th modal like Settings would never have closed via its Cancel button).
 document.querySelectorAll(".close-modal").forEach(btn => {
   btn.addEventListener("click", () => {
-    if (createModal) createModal.classList.remove("show");
-    if (joinModal) joinModal.classList.remove("show");
-    if (forgotModal) forgotModal.classList.remove("show");
-    if (guideModal) guideModal.classList.remove("show");
+    const parentModal = btn.closest(".modal");
+    if (parentModal) parentModal.classList.remove("show");
+  });
+});
+
+// Tap/click anywhere on the dark backdrop (outside the modal-card) closes it —
+// applies to every .modal automatically, no per-modal wiring needed.
+document.querySelectorAll(".modal").forEach(modal => {
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) modal.classList.remove("show");
   });
 });
 
 if (openGuideBtn && guideModal) {
   openGuideBtn.addEventListener("click", () => {
     guideModal.classList.add("show");
+  });
+}
+
+// --- ACCOUNT SETTINGS MODAL ---
+const settingsForm = document.getElementById("settingsForm");
+
+if (openSettingsBtn && settingsModal) {
+  openSettingsBtn.addEventListener("click", () => {
+    if (!currentUser) return;
+    const settingsNameInput = document.getElementById("settingsName");
+    const settingsMatricInput = document.getElementById("settingsMatric");
+    if (settingsNameInput) settingsNameInput.value = currentUser.name || "";
+    if (settingsMatricInput) settingsMatricInput.value = currentUser.matric || "";
+    settingsModal.classList.add("show");
+  });
+}
+
+if (settingsForm) {
+  settingsForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const submitBtn = settingsForm.querySelector("button[type='submit']");
+    const newName = document.getElementById("settingsName").value.trim();
+    const newMatric = document.getElementById("settingsMatric").value.trim().toUpperCase();
+
+    if (!newName || !newMatric || !currentUser || !auth.currentUser) return;
+
+    try {
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Saving... ⏳";
+      }
+
+      const oldMatric = currentUser.matric;
+      const uid = auth.currentUser.uid;
+
+      await updateDoc(doc(db, "users", uid), { name: newName, matric: newMatric });
+
+      // Matric is used as the identifier in enrolled[]/assistants[] arrays on
+      // every course document (not uid) — if it changed, those references
+      // would otherwise silently point at a matric number that no longer
+      // exists, quietly breaking enrollment/assistant status everywhere.
+      if (oldMatric && newMatric !== oldMatric) {
+        for (const course of courses) {
+          let updated = false;
+          let newEnrolled = course.enrolled || [];
+          let newAssistants = course.assistants || [];
+
+          if (newEnrolled.includes(oldMatric)) {
+            newEnrolled = newEnrolled.map(m => (m === oldMatric ? newMatric : m));
+            updated = true;
+          }
+          if (newAssistants.includes(oldMatric)) {
+            newAssistants = newAssistants.map(m => (m === oldMatric ? newMatric : m));
+            updated = true;
+          }
+          if (updated) {
+            await updateDoc(doc(db, "courses", course.id), {
+              enrolled: newEnrolled,
+              assistants: newAssistants
+            });
+          }
+        }
+      }
+
+      currentUser.name = newName;
+      currentUser.matric = newMatric;
+      if (displayName) displayName.textContent = newName;
+      if (displayMatric) displayMatric.textContent = newMatric;
+
+      settingsModal.classList.remove("show");
+      alert("Profile updated successfully! ✅");
+    } catch (error) {
+      console.error("Settings update error:", error);
+      alert("⚠️ Error: " + error.message);
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Save Changes 💾";
+      }
+    }
   });
 }
 

@@ -2,39 +2,48 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isSignedIn() {
-      return request.auth != null;
-    }
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
 
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+    function isCourseStaff(courseId) {
+      let course = get(/databases/$(database)/documents/courses/$(courseId)).data;
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return isSignedIn() && (
+        course.repUid == request.auth.uid ||
+        (course.assistants != null && userDoc.matric in course.assistants)
+      );
     }
 
     match /users/{userId} {
       allow read: if isSignedIn();
       allow create: if isOwner(userId);
-      allow update: if isOwner(userId) 
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isRep', 'matric', 'institution', 'department']);
+      allow update: if isOwner(userId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isRep', 'institution', 'department']);
       allow delete: if isOwner(userId);
     }
 
     match /departmentReps/{slotId} {
-      allow read: if isSignedIn();
+      allow read: if true; 
       allow create: if isSignedIn() && request.resource.data.repUid == request.auth.uid;
+      allow update, delete: if false;
     }
 
     match /courses/{courseId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
-      allow update: if isSignedIn();
-      allow delete: if isSignedIn() && resource.data.repUid == request.auth.uid;
+      allow update, delete: if isCourseStaff(courseId);
 
-      match /session/{document=**} {
-        allow read, write: if isSignedIn();
-      }
-      match /attendance/{document=**} {
+      match /session/live {
         allow read: if isSignedIn();
-        allow write: if false; // Only Vercel Backend Admin SDK can write attendance!
+        allow write: if isCourseStaff(courseId);
+      }
+
+      match /session/secret {
+        allow read, write: if isCourseStaff(courseId);
+      }
+
+      match /attendance/{document=**} {
+        allow read: if isCourseStaff(courseId); // 🔒 FIXED: Scoped strictly to Course Staff!
+        allow write: if false; 
       }
     }
   }
