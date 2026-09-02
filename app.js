@@ -65,6 +65,24 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 });
 
+// --- HAMBURGER MENU LOGIC ---
+const mobileMenuBtn = document.getElementById("mobileMenuBtn");
+const navLinks = document.getElementById("navLinks");
+
+if (mobileMenuBtn && navLinks) {
+  mobileMenuBtn.addEventListener("click", () => {
+    navLinks.classList.toggle("show-menu");
+    mobileMenuBtn.textContent = navLinks.classList.contains("show-menu") ? "✖" : "☰";
+  });
+
+  navLinks.addEventListener("click", (e) => {
+    if (e.target.tagName === "BUTTON") {
+      navLinks.classList.remove("show-menu");
+      mobileMenuBtn.textContent = "☰";
+    }
+  });
+}
+
 // --- REAL-TIME FIRESTORE SYNC ---
 let unsubscribeCourses = null;
 
@@ -292,8 +310,14 @@ function checkAuth() {
     dashboardSection.classList.remove("hidden");
     logoutBtn.classList.remove("hidden");
     if (openSettingsBtn) openSettingsBtn.classList.remove("hidden");
+    
     displayName.textContent = currentUser.name;
     displayMatric.textContent = currentUser.matric;
+    
+    const displaySchoolInfo = document.getElementById("displaySchoolInfo");
+    if (displaySchoolInfo) {
+      displaySchoolInfo.textContent = `${currentUser.institution || 'GEN'} • ${currentUser.department || 'GEN'} • ${currentUser.level || 'GEN'}`;
+    }
 
     const openCreateModalBtn = document.getElementById("openCreateModal");
     if (openCreateModalBtn) {
@@ -313,8 +337,8 @@ function checkAuth() {
     dashboardSection.classList.add("hidden");
     logoutBtn.classList.add("hidden");
     if (openSettingsBtn) openSettingsBtn.classList.add("hidden");
-    signupCard.classList.remove("hidden");
-    loginCard.classList.add("hidden");
+    signupCard.classList.add("hidden"); 
+    loginCard.classList.remove("hidden"); // Sets login as default!
   }
 }
 
@@ -442,14 +466,19 @@ if (logoutBtn) {
 onAuthStateChanged(auth, async (user) => {
   if (user) {
     const userDoc = await getDoc(doc(db, "users", user.uid));
+    
     if (userDoc.exists()) {
       currentUser = userDoc.data();
+      startCourseListener(); 
+      checkAuth();
     } else {
-      currentUser = { name: "User", matric: "---", email: user.email, isRep: false, institution: "GENERAL", department: "GENERAL" };
+      // 🚫 GHOST BLOCKER: Auth exists, but DB profile is missing!
+      console.warn("Ghost user blocked: No Firestore profile found.");
+      alert("⚠️ Access Denied: Your account data could not be found. It may have been deleted.");
+      await signOut(auth);
+      currentUser = null;
+      checkAuth();
     }
-    
-    startCourseListener(); 
-    checkAuth();
   } else {
     currentUser = null;
     if (portalSection) portalSection.classList.add("hidden");
@@ -468,9 +497,11 @@ onAuthStateChanged(auth, async (user) => {
 
 if (deleteAccountBtn) {
   deleteAccountBtn.addEventListener("click", async () => {
-    if (confirm("⚠️ Are you sure you want to delete your account? This cannot be undone.")) {
+    if (confirm("⚠️ Are you sure you want to completely delete your account? This cannot be undone.")) {
       const userMatric = normalizeMatric(currentUser.matric);
+      const uid = auth.currentUser.uid;
 
+      // 1. Remove references from all courses
       for (let course of courses) {
         let updated = false;
         let newEnrolled = (course.enrolled || []).map(normalizeMatric);
@@ -493,18 +524,18 @@ if (deleteAccountBtn) {
         }
       }
 
-      currentUser = null;
-      if (portalSection) portalSection.classList.add("hidden");
-      const repArchiveSection = document.getElementById("repArchiveSection");
-      if (repArchiveSection) repArchiveSection.classList.add("hidden");
-      const assistantManagementSection = document.getElementById("assistantManagementSection");
-      if (assistantManagementSection) assistantManagementSection.classList.add("hidden");
+      // 2. Delete the actual database document
+      await deleteDoc(doc(db, "users", uid));
 
-      activeCourse = null;
-      if (countdownInterval) clearInterval(countdownInterval);
+      // 3. Attempt to delete the Firebase Auth user (if recent login), otherwise force sign out
+      try {
+        await auth.currentUser.delete();
+      } catch (error) {
+        console.warn("Requires recent login to delete auth object. Signing out instead.");
+        await signOut(auth);
+      }
 
-      checkAuth();
-      alert("Account references cleaned successfully.");
+      alert("Account successfully deleted and data cleared. 👋");
     }
   });
 }

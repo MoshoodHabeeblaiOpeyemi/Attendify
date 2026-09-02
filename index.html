@@ -12,24 +12,26 @@
 
 <body>
 
+
   <!-- NAVBAR -->
   <header class="navbar">
     <div class="brand">
       <span>Attend<span>ify</span> 🎓</span>
     </div>
-    <div style="display: flex; gap: 15px; align-items: center;">
+
+    <!-- Mobile Hamburger Button -->
+    <button id="mobileMenuBtn" class="hamburger-btn">☰</button>
+
+    <!-- Grouped Nav Links -->
+    <div id="navLinks" class="nav-links">
       <button id="openSettingsBtn" class="theme-btn hidden" title="Account Settings"
         style="font-size: 0.9rem; padding: 8px 12px;">⚙️</button>
-
+      <button id="openGuideBtn" class="theme-btn" title="How Attendify Works 📖"
+        style="font-size: 0.9rem; padding: 8px 12px; font-weight: bold;">📖 Guide</button>
+      <button id="themeToggle" class="theme-btn" aria-label="Toggle theme">🌙</button>
       <button id="logoutBtn" class="btn-outline hidden"
         style="padding: 6px 12px; font-size: 0.85rem; border-color: var(--danger); color: var(--danger);">Logout
         🚪</button>
-
-      <!-- 👈 MAKE SURE THIS BUTTON IS HERE IN YOUR NAVBAR -->
-      <button id="openGuideBtn" class="theme-btn" title="How Attendify Works 📖"
-        style="font-size: 0.9rem; padding: 8px 12px; font-weight: bold;">📖 Guide</button>
-
-      <button id="themeToggle" class="theme-btn" aria-label="Toggle theme">🌙</button>
     </div>
   </header>
 
@@ -130,7 +132,13 @@
     <section id="dashboardSection" class="hidden">
       <div class="dashboard-header">
         <h2>Hey, <span id="displayName">Student</span>! 👋</h2>
-        <p>Matric No: <strong id="displayMatric">---</strong> | Manage your courses or check in below.</p>
+        <p style="margin-bottom: 5px;">
+          <span style="font-weight: bold; color: var(--navy);">Matric No:</span> <strong id="displayMatric">---</strong>
+        </p>
+        <p style="font-size: 0.9rem; font-weight: 600; color: var(--teal); margin-bottom: 10px;" id="displaySchoolInfo">
+          ---
+        </p>
+        <p style="font-size: 0.85rem; color: var(--muted);">Manage your courses or check in below.</p>
       </div>
 
       <div class="action-buttons">
