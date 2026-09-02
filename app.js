@@ -514,7 +514,7 @@ if (signupForm) {
       ? levelInput.value.trim().toUpperCase()
       : "GENERAL";
 
-    let userCredential = null;
+    isCreatingAccount = true; // 🔒 LOCK THE BLOCKER
 
     try {
       if (submitBtn) {
@@ -522,7 +522,7 @@ if (signupForm) {
         submitBtn.textContent = "Creating Account... ⏳";
       }
 
-      userCredential = await createUserWithEmailAndPassword(
+      const userCredential = await createUserWithEmailAndPassword(
         auth,
         email,
         password,
@@ -561,11 +561,12 @@ if (signupForm) {
       });
 
       signupForm.reset();
-      alert("Account created successfully in the cloud! 🎉");
+      alert("Account created successfully in the cloud! 🎉✨");
     } catch (error) {
       console.error("Signup error:", error);
       alert("⚠️ Error: " + error.message);
     } finally {
+      isCreatingAccount = false; // 🔓 UNLOCK THE BLOCKER NO MATTER WHAT
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.textContent = "Sign Up 📝";
@@ -617,9 +618,9 @@ if (logoutBtn) {
 }
 
 onAuthStateChanged(auth, async (user) => {
-  if (user) {
-    if (isCreatingAccount) return; // 🛑 Skip ghost check while profile is being written
+  if (isCreatingAccount) return; // 🛑 Ignore during active registration sequence!
 
+  if (user) {
     const userDoc = await getDoc(doc(db, "users", user.uid));
 
     if (userDoc.exists()) {
@@ -636,8 +637,6 @@ onAuthStateChanged(auth, async (user) => {
       checkAuth();
     }
   } else {
-    if (isCreatingAccount) return; // 🛑 Skip during active signup process
-
     currentUser = null;
     if (portalSection) portalSection.classList.add("hidden");
     const repArchiveSection = document.getElementById("repArchiveSection");
