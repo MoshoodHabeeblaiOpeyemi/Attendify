@@ -94,6 +94,43 @@ if (mobileMenuBtn && navLinks) {
 
 // --- REAL-TIME FIRESTORE SYNC ---
 let unsubscribeCourses = null;
+// Map of courseId → unsubscribe function for per-course member listeners
+const memberListeners = {};
+
+function startMemberListener(courseId) {
+  if (memberListeners[courseId]) return; // already listening
+  memberListeners[courseId] = onSnapshot(
+    collection(db, "courses", courseId, "members"),
+    (snap) => {
+      const members = snap.docs.map((d) => ({ uid: d.id, ...d.data() }));
+      const idx = courses.findIndex((c) => c.id === courseId);
+      if (idx < 0) return;
+      courses[idx] = {
+        ...courses[idx],
+        members,
+        enrolled: members
+          .filter((m) => m.role === "student")
+          .map((m) => normalizeMatric(m.matric)),
+        assistants: members
+          .filter((m) => m.role === "assistant")
+          .map((m) => normalizeMatric(m.matric)),
+      };
+      if (currentUser) {
+        renderCourses();
+        if (activeCourse && activeCourse.id === courseId) {
+          activeCourse = courses[idx];
+          renderPortalState();
+        }
+      }
+    },
+    (error) => console.error(`Member listener error (${courseId}):`, error),
+  );
+}
+
+function stopAllMemberListeners() {
+  Object.values(memberListeners).forEach((unsub) => unsub());
+  Object.keys(memberListeners).forEach((k) => delete memberListeners[k]);
+}
 
 function startCourseListener() {
   if (unsubscribeCourses) return;
@@ -110,6 +147,8 @@ function startCourseListener() {
             uid: memberSnap.id,
             ...memberSnap.data(),
           }));
+          // Start a live listener for this course's members subcollection
+          startMemberListener(docSnap.id);
           return {
             ...course,
             members,
@@ -148,6 +187,8 @@ function stopCourseListener() {
     unsubscribeCourses();
     unsubscribeCourses = null;
   }
+  stopAllMemberListeners();
+}
 }
 
 // --- THEME TOGGLE LOGIC ---
@@ -1248,6 +1289,47 @@ if (joinCourseForm) {
       if (!response.ok)
         throw new Error(result.error || "Unable to join course.");
 
+      // The onSnapshot listener watches the courses collection, NOT subcollections.
+      // It won't fire when members/ changes. Manually refresh this course's member
+      // list so the card appears immediately without waiting for a page reload.
+      const membersSnap = await getDocs(
+        collection(db, "courses", result.courseId, "members"),
+      );
+      const freshMembers = membersSnap.docs.map((m) => ({
+        uid: m.id,
+        ...m.data(),
+      }));
+      const freshEnrolled = freshMembers
+        .filter((m) => m.role === "student")
+        .map((m) => normalizeMatric(m.matric));
+      const freshAssistants = freshMembers
+        .filter((m) => m.role === "assistant")
+        .map((m) => normalizeMatric(m.matric));
+
+      // Update or insert the course in local state
+      const existingIdx = courses.findIndex((c) => c.id === result.courseId);
+      if (existingIdx >= 0) {
+        courses[existingIdx] = {
+          ...courses[existingIdx],
+          members: freshMembers,
+          enrolled: freshEnrolled,
+          assistants: freshAssistants,
+        };
+      } else {
+        // Course wasn't in local array yet — fetch the full doc and add it
+        const courseDocSnap = await getDoc(doc(db, "courses", result.courseId));
+        if (courseDocSnap.exists()) {
+          courses.push({
+            id: courseDocSnap.id,
+            ...courseDocSnap.data(),
+            members: freshMembers,
+            enrolled: freshEnrolled,
+            assistants: freshAssistants,
+          });
+        }
+      }
+
+      renderCourses();
       alert(`Successfully joined ${found.name}! 🎉`);
     } catch (error) {
       console.error("Join course error:", error);
