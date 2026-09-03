@@ -189,7 +189,6 @@ function stopCourseListener() {
   }
   stopAllMemberListeners();
 }
-}
 
 // --- THEME TOGGLE LOGIC ---
 const themeToggle = document.getElementById("themeToggle");
