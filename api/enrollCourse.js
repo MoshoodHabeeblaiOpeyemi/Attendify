@@ -1,20 +1,28 @@
-const admin = require("firebase-admin");
+const { getApps, initializeApp, cert } = require("firebase-admin/app");
+const { getAuth } = require("firebase-admin/auth");
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: String(process.env.FIREBASE_PRIVATE_KEY || "").replace(
-        /\\n/g,
-        "\n",
-      ),
-    }),
-  });
+// Claude + Gemini Ultimate Initialization
+try {
+  if (getApps().length === 0) {
+    initializeApp({
+      credential: cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: String(process.env.FIREBASE_PRIVATE_KEY || "").replace(
+          /\\n/g,
+          "\n",
+        ),
+      }),
+    });
+  }
+} catch (error) {
+  if (!/already exists/.test(error.message)) {
+    console.error("Firebase Admin Init Error:", error);
+  }
 }
 
-const db = admin.firestore();
-const { FieldValue } = admin.firestore;
+const db = getFirestore();
 
 module.exports = async (req, res) => {
   if (req.method !== "POST")
@@ -24,7 +32,9 @@ module.exports = async (req, res) => {
     const header = req.headers.authorization || "";
     if (!header.startsWith("Bearer "))
       return res.status(401).json({ error: "Unauthorized" });
-    const decoded = await admin.auth().verifyIdToken(header.slice(7));
+
+    const decoded = await getAuth().verifyIdToken(header.slice(7));
+
     const { courseCode } = req.body || {};
     const code = String(courseCode || "")
       .trim()
@@ -36,6 +46,7 @@ module.exports = async (req, res) => {
     const profile = await db.collection("users").doc(decoded.uid).get();
     if (!profile.exists || !profile.data().matric)
       return res.status(400).json({ error: "Valid user profile required." });
+
     const matric = String(profile.data().matric).trim().toUpperCase();
     const matches = await db.collection("courses").get();
     const course = matches.docs.find(
@@ -44,19 +55,15 @@ module.exports = async (req, res) => {
           .toUpperCase()
           .replace(/[^A-Z0-9]/g, "") === code,
     );
+
     if (!course)
       return res.status(404).json({ error: "Course code not found." });
 
     const memberRef = course.ref.collection("members").doc(decoded.uid);
 
-    // Update the members subcollection AND the legacy `enrolled` array in one
-    // transaction. The frontend (course cards, "my courses" filtering,
-    // assistant management) still reads `enrolled` directly in a dozen
-    // places — letting these two drift apart is exactly what caused counts
-    // to freeze at 0 and joined courses to vanish after login before.
     await db.runTransaction(async (tx) => {
       const memberSnap = await tx.get(memberRef);
-      if (memberSnap.exists) return; // already enrolled — nothing to do
+      if (memberSnap.exists) return;
 
       tx.set(memberRef, {
         uid: decoded.uid,
@@ -72,6 +79,7 @@ module.exports = async (req, res) => {
     return res.status(200).json({ success: true, courseId: course.id });
   } catch (error) {
     console.error("Enroll course error:", error);
-    return res.status(500).json({ error: "Unable to enroll in course." });
+    // v0's suggestion to send back the actual error string for easier debugging
+    return res.status(500).json({ error: "Server Error: " + error.message });
   }
 };

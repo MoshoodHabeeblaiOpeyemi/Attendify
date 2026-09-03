@@ -110,13 +110,13 @@ service cloud.firestore {
 
         // Normal student enrollment must be performed by the trusted backend.
         // The backend uses Firebase Admin credentials and bypasses client rules.
-        allow create: if isCourseRep(courseId)
+       allow create: if isCourseRep(courseId)
           && request.resource.data.uid == memberUid
-          && request.resource.data.role in ['student', 'assistant'];
+          && request.resource.data.role in ['student', 'assistant', 'rep']; 
 
         allow update: if isCourseRep(courseId)
           && request.resource.data.uid == resource.data.uid
-          && request.resource.data.role in ['student', 'assistant'];
+          && request.resource.data.role in ['student', 'assistant', 'rep'];
 
         allow delete: if isCourseRep(courseId)
           || (signedIn() && request.auth.uid == memberUid);

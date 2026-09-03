@@ -960,27 +960,26 @@ window.deleteCourse = async function (courseId) {
 
 window.leaveCourse = async function (courseId) {
   const course = courses.find((c) => c.id === courseId);
-  if (!course) return;
+  if (!course || !auth.currentUser) return;
 
   if (
     confirm(
       `⚠️ Do you want to leave "${course.name}"? You can rejoin anytime using code [${course.code}].`,
     )
   ) {
-    const userMatric = normalizeMatric(currentUser.matric);
-    let newEnrolled = (course.enrolled || [])
-      .map(normalizeMatric)
-      .filter((m) => m !== userMatric);
-    let newAssistants = (course.assistants || [])
-      .map(normalizeMatric)
-      .filter((m) => m !== userMatric);
+    try {
+      // Delete the student's entry from the secure members subcollection
+      await deleteDoc(
+        doc(db, "courses", courseId, "members", auth.currentUser.uid),
+      );
 
-    await updateDoc(doc(db, "courses", courseId), {
-      enrolled: newEnrolled,
-      assistants: newAssistants,
-    });
-
-    alert(`You have left ${course.name}. 👋`);
+      alert(`You have left ${course.name}. 👋`);
+    } catch (error) {
+      console.error("Leave course error:", error);
+      alert(
+        "⚠️ Error: Unable to leave course. Please check your connection and try again.",
+      );
+    }
   }
 };
 
