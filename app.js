@@ -140,6 +140,22 @@ function startCourseListener() {
       const loadedCourses = await Promise.all(
         snapshot.docs.map(async (docSnap) => {
           const course = { id: docSnap.id, ...docSnap.data() };
+
+          // If a member listener is already running for this course, it owns
+          // the enrolled/assistants/members fields — don't overwrite them with
+          // a one-time getDocs that may race against an in-flight transaction.
+          if (memberListeners[docSnap.id]) {
+            const existing = courses.find((c) => c.id === docSnap.id);
+            startMemberListener(docSnap.id); // no-op since guard is already set
+            return {
+              ...course,
+              members: existing ? existing.members : [],
+              enrolled: existing ? existing.enrolled : [],
+              assistants: existing ? existing.assistants : [],
+            };
+          }
+
+          // First time seeing this course — do the initial members read
           const membersSnap = await getDocs(
             collection(db, "courses", docSnap.id, "members"),
           );
