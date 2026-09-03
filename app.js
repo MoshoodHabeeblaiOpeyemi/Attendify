@@ -1069,6 +1069,9 @@ const createCourseForm = document.getElementById("createCourseForm");
 if (createCourseForm) {
   createCourseForm.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const submitBtn = createCourseForm.querySelector("button[type='submit']");
+    const originalBtnText = submitBtn ? submitBtn.textContent : "";
+
     const name = document.getElementById("courseTitle").value.trim();
     const code = normalizeCourseCode(
       document.getElementById("courseCodeInput").value,
@@ -1085,40 +1088,62 @@ if (createCourseForm) {
       currentUser ? currentUser.matric : "",
     );
 
-    const duplicateExists = courses.some(
-      (c) =>
-        c.code === code &&
-        c.institution === repInstitution &&
-        c.department.toLowerCase() === repDepartment.toLowerCase() &&
-        c.level === repLevel,
-    );
-
-    if (duplicateExists) {
+    if (!studentMatric) {
       alert(
-        `⚠️ Course Creation Blocked: Course code "${code}" already exists in your department (${repDepartment} - ${repLevel}). Each course code must be unique per level!`,
+        "⚠️ Your profile isn't fully loaded yet. Please wait a moment and try again.",
       );
       return;
     }
 
-    const newCourse = {
-      name,
-      code,
-      rep: currentUser ? currentUser.name : "Unknown",
-      repUid: currentUser ? currentUser.uid : "unknown-uid",
-      institution: repInstitution,
-      department: repDepartment,
-      level: repLevel,
-      enrolled: studentMatric ? [studentMatric] : [],
-      assistants: [],
-      attendanceHistory: [],
-      activeSession: null,
-    };
+    try {
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Creating... ⏳";
+      }
 
-    const newDocRef = doc(collection(db, "courses"));
-    await setDoc(newDocRef, newCourse);
+      // Query Firestore directly for the duplicate check instead of the
+      // in-memory `courses` array — that array may not have finished
+      // loading yet on a fresh page, the exact same race that used to make
+      // "Join Course" say a real code wasn't found.
+      const dupSnap = await getDocs(
+        query(
+          collection(db, "courses"),
+          where("code", "==", code),
+          where("institution", "==", repInstitution),
+          where("level", "==", repLevel),
+        ),
+      );
+      const duplicateExists = dupSnap.docs.some(
+        (d) =>
+          (d.data().department || "").toLowerCase() ===
+          repDepartment.toLowerCase(),
+      );
 
-    // Add the Rep to the secure members subcollection instantly
-    if (currentUser) {
+      if (duplicateExists) {
+        alert(
+          `⚠️ Course Creation Blocked: Course code "${code}" already exists in your department (${repDepartment} - ${repLevel}). Each course code must be unique per level!`,
+        );
+        return;
+      }
+
+      const newCourse = {
+        name,
+        code,
+        rep: currentUser ? currentUser.name : "Unknown",
+        repUid: currentUser ? currentUser.uid : "unknown-uid",
+        institution: repInstitution,
+        department: repDepartment,
+        level: repLevel,
+        enrolled: [studentMatric],
+        assistants: [],
+        attendanceHistory: [],
+        activeSession: null,
+      };
+
+      const newDocRef = doc(collection(db, "courses"));
+      await setDoc(newDocRef, newCourse);
+
+      // Add the Rep to the secure members subcollection instantly
       await setDoc(
         doc(db, "courses", newDocRef.id, "members", currentUser.uid),
         {
@@ -1129,11 +1154,26 @@ if (createCourseForm) {
           joinedAt: Date.now(),
         },
       );
-    }
 
-    if (createModal) createModal.classList.remove("show");
-    createCourseForm.reset();
-    alert(`Course "${name}" created successfully! 🚀`);
+      // Update local state immediately rather than waiting on the
+      // background listener's next snapshot round-trip.
+      courses.push({ id: newDocRef.id, ...newCourse });
+
+      if (createModal) createModal.classList.remove("show");
+      createCourseForm.reset();
+      checkAuth();
+      alert(`Course "${name}" created successfully! 🚀`);
+    } catch (error) {
+      console.error("Create course error:", error);
+      alert(
+        "⚠️ Something went wrong while creating the course. Please check your connection and try again.",
+      );
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalBtnText;
+      }
+    }
   });
 }
 
