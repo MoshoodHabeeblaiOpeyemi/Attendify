@@ -130,11 +130,17 @@ service cloud.firestore {
       }
 
       match /session/secret {
-        allow read, write: if isCourseRep(courseId);
+        // Assistants need to read the PIN during a live session.
+        // Write is rep-only (they generate the session).
+        allow read: if isCourseStaff(courseId);
+        allow write: if isCourseRep(courseId);
       }
 
       match /attendance/{attendanceId} {
-        allow read: if isCourseStaff(courseId);
+        // Rep and assistants can read all records (archive view).
+        // Enrolled students can read to power their personal analytics.
+        allow read: if isCourseStaff(courseId) || isCourseMember(courseId);
+        // All writes go through the trusted backend (Admin SDK), never the client.
         allow write: if false;
       }
     }

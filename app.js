@@ -17,9 +17,12 @@ import {
   getDocs,
   query,
   where,
+  orderBy,
   updateDoc,
   deleteDoc,
   onSnapshot,
+  arrayUnion,
+  arrayRemove,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -944,10 +947,28 @@ window.deleteCourse = async function (courseId) {
   const course = courses.find((c) => c.id === courseId);
   if (
     confirm(
-      `⚠️ WARNING: As the Course Rep, deleting "${course ? course.name : "this course"}" removes it entirely. Are you sure?`,
+      `⚠️ WARNING: As the Course Rep, deleting "${course ? course.name : "this course"}" removes it entirely including all records. Are you sure?`,
     )
   ) {
-    await deleteDoc(doc(db, "courses", courseId));
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const response = await fetch("/api/deleteCourse", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ courseId }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to delete course.");
+      // Remove from local state immediately
+      courses = courses.filter((c) => c.id !== courseId);
+      renderCourses();
+    } catch (error) {
+      console.error("Delete course error:", error);
+      alert("⚠️ Error: Unable to delete course. Please try again.");
+    }
   }
 };
 
@@ -1043,6 +1064,8 @@ window.openPortal = function (courseId) {
   }
 
   renderPortalState();
+  // Load attendance history from the subcollection now that we know the courseId
+  loadAttendanceHistory().then(() => renderPortalState());
 };
 
 const backToDashboardBtn = document.getElementById("backToDashboard");
@@ -1301,22 +1324,39 @@ window.removeStudentFromCourse = async function (matric) {
       `⚠️ Are you sure you want to remove student [${matric}] from ${activeCourse.name}?`,
     )
   ) {
-    const targetMatric = normalizeMatric(matric);
-    if (activeCourse.enrolled) {
-      activeCourse.enrolled = (activeCourse.enrolled || [])
-        .map(normalizeMatric)
-        .filter((m) => m !== targetMatric);
-    }
-    if (activeCourse.assistants) {
-      activeCourse.assistants = (activeCourse.assistants || [])
-        .map(normalizeMatric)
-        .filter((m) => m !== targetMatric);
-    }
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const response = await fetch("/api/removeStudent", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ courseId: activeCourse.id, targetMatric: matric }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to remove student.");
 
-    await updateCourseInFirestore();
-    renderPortalState();
-    renderAssistantDropdownAndList();
-    alert(`Student [${targetMatric}] has been removed from the course.`);
+      // Update local state to reflect the removal immediately
+      const targetMatric = normalizeMatric(matric);
+      if (activeCourse.enrolled) {
+        activeCourse.enrolled = activeCourse.enrolled
+          .map(normalizeMatric)
+          .filter((m) => m !== targetMatric);
+      }
+      if (activeCourse.assistants) {
+        activeCourse.assistants = activeCourse.assistants
+          .map(normalizeMatric)
+          .filter((m) => m !== targetMatric);
+      }
+
+      renderPortalState();
+      renderAssistantDropdownAndList();
+      alert(`Student [${targetMatric}] has been removed from the course.`);
+    } catch (error) {
+      console.error("Remove student error:", error);
+      alert("⚠️ Error: Unable to remove student. Please try again.");
+    }
   }
 };
 
@@ -1537,33 +1577,32 @@ if (closeClassBtn) {
         "⚠️ Are you sure you want to close this attendance session and save the records?",
       )
     ) {
-      if (!activeCourse.attendanceHistory) {
-        activeCourse.attendanceHistory = [];
+      try {
+        const idToken = await auth.currentUser.getIdToken();
+        const response = await fetch("/api/closeSession", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({ courseId: activeCourse.id }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Unable to close session.");
+
+        // Clear local session state
+        activeCourse.activeSession = null;
+        if (countdownInterval) clearInterval(countdownInterval);
+
+        // Reload attendance history from the subcollection
+        await loadAttendanceHistory();
+
+        renderPortalState();
+        alert("📁 Class closed successfully! Attendance has been archived.");
+      } catch (error) {
+        console.error("Close session error:", error);
+        alert("⚠️ Error: Unable to close session. Please try again.");
       }
-
-      if (
-        activeCourse.activeSession &&
-        activeCourse.activeSession.attendees.length > 0
-      ) {
-        const sessionRecord = {
-          date:
-            new Date().toLocaleDateString() +
-            " " +
-            new Date().toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-          attendees: [...activeCourse.activeSession.attendees],
-        };
-        activeCourse.attendanceHistory.push(sessionRecord);
-      }
-
-      activeCourse.activeSession = null;
-      if (countdownInterval) clearInterval(countdownInterval);
-
-      await updateCourseInFirestore();
-      renderPortalState();
-      alert("📁 Class closed successfully! Attendance has been archived.");
     }
   });
 }
@@ -1579,25 +1618,62 @@ if (endSemesterBtn) {
         `⚠️ WARNING: Are you sure you want to END THE SEMESTER for "${activeCourse.name}"? This will clear all class history and reset the total class count to 0.`,
       )
     ) {
-      activeCourse.attendanceHistory = [];
-      activeCourse.activeSession = null;
-      if (countdownInterval) clearInterval(countdownInterval);
+      try {
+        const idToken = await auth.currentUser.getIdToken();
+        const response = await fetch("/api/endSemester", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({ courseId: activeCourse.id }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Unable to end semester.");
 
-      await updateCourseInFirestore();
-      renderPortalState();
-      alert("🎓 Semester ended successfully! All records have been reset.");
+        activeCourse.attendanceHistory = [];
+        activeCourse.activeSession = null;
+        if (countdownInterval) clearInterval(countdownInterval);
+
+        renderPortalState();
+        alert("🎓 Semester ended successfully! All records have been reset.");
+      } catch (error) {
+        console.error("End semester error:", error);
+        alert("⚠️ Error: Unable to end semester. Please try again.");
+      }
     }
   });
+}
+
+// Load attendance history from the attendance/ subcollection (source of truth)
+async function loadAttendanceHistory() {
+  if (!activeCourse || !activeCourse.id) return;
+  try {
+    const snap = await getDocs(
+      query(
+        collection(db, "courses", activeCourse.id, "attendance"),
+        orderBy("closedAt", "asc"),
+      ),
+    );
+    activeCourse.attendanceHistory = snap.docs.map((d) => ({
+      id: d.id,
+      ...d.data(),
+    }));
+  } catch (error) {
+    console.error("Failed to load attendance history:", error);
+    activeCourse.attendanceHistory = [];
+  }
 }
 
 async function updateCourseInFirestore() {
   if (!activeCourse || !activeCourse.id) return;
   const courseRef = doc(db, "courses", activeCourse.id);
+  // Never overwrite enrolled[] from client state — enrollment is managed
+  // exclusively by the trusted backend (enrollCourse / removeStudent APIs)
+  // to prevent race conditions. Only safe non-enrollment fields go here.
   await updateDoc(courseRef, {
     activeSession: activeCourse.activeSession || null,
-    attendanceHistory: activeCourse.attendanceHistory || [],
     assistants: activeCourse.assistants || [],
-    enrolled: activeCourse.enrolled || [],
   });
 }
 
