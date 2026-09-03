@@ -916,7 +916,7 @@ function renderCourses() {
     card.style.maxHeight = "none";
     card.style.position = "relative";
 
-    const enrolledCount = course.enrolled ? course.enrolled.length : 1;
+    const enrolledCount = Array.isArray(course.enrolled) ? course.enrolled.length : 0;
     const isThisUserRep = currentUser && course.repUid === currentUser.uid;
 
     const actionIcon = isThisUserRep

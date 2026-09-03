@@ -3,9 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "firebase-admin": "^14.3.0"
-  },
-  "overrides": {
-    "jose": "^4.15.9"
+    "firebase-admin": "12.7.0"
   }
 }
