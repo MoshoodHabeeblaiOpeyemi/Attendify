@@ -4,5 +4,8 @@
   "private": true,
   "dependencies": {
     "firebase-admin": "^14.3.0"
+  },
+  "overrides": {
+    "jose": "^4.15.9"
   }
 }
