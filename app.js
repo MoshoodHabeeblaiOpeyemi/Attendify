@@ -763,9 +763,13 @@ if (openSettingsBtn && settingsModal) {
     if (!currentUser) return;
     const settingsNameInput = document.getElementById("settingsName");
     const settingsMatricInput = document.getElementById("settingsMatric");
+    const settingsLevelInput = document.getElementById("settingsLevel"); // NEW
+
     if (settingsNameInput) settingsNameInput.value = currentUser.name || "";
     if (settingsMatricInput)
       settingsMatricInput.value = currentUser.matric || "";
+    if (settingsLevelInput) settingsLevelInput.value = currentUser.level || ""; // NEW
+
     settingsModal.classList.add("show");
   });
 }
@@ -778,6 +782,9 @@ if (settingsForm) {
     const newMatric = normalizeMatric(
       document.getElementById("settingsMatric").value,
     );
+    const newLevel = document.getElementById("settingsLevel")
+      ? document.getElementById("settingsLevel").value
+      : currentUser.level || "GENERAL"; // NEW
 
     if (!newName || !newMatric || !currentUser || !auth.currentUser) return;
 
@@ -790,9 +797,11 @@ if (settingsForm) {
       const oldMatric = normalizeMatric(currentUser.matric);
       const uid = auth.currentUser.uid;
 
+      // Update name, matric, and level in database
       await updateDoc(doc(db, "users", uid), {
         name: newName,
         matric: newMatric,
+        level: newLevel,
       });
 
       if (oldMatric && newMatric !== oldMatric) {
@@ -822,10 +831,18 @@ if (settingsForm) {
         }
       }
 
+      // Update local UI state
       currentUser.name = newName;
       currentUser.matric = newMatric;
+      currentUser.level = newLevel; // NEW
+
       if (displayName) displayName.textContent = newName;
       if (displayMatric) displayMatric.textContent = newMatric;
+
+      const displaySchoolInfo = document.getElementById("displaySchoolInfo");
+      if (displaySchoolInfo) {
+        displaySchoolInfo.textContent = `${currentUser.institution || "GEN"} • ${currentUser.department || "GEN"} • ${currentUser.level || "GEN"}`;
+      }
 
       settingsModal.classList.remove("show");
       alert("Profile updated successfully! ✅");
@@ -1099,6 +1116,20 @@ if (createCourseForm) {
 
     const newDocRef = doc(collection(db, "courses"));
     await setDoc(newDocRef, newCourse);
+
+    // Add the Rep to the secure members subcollection instantly
+    if (currentUser) {
+      await setDoc(
+        doc(db, "courses", newDocRef.id, "members", currentUser.uid),
+        {
+          uid: currentUser.uid,
+          matric: studentMatric,
+          name: currentUser.name,
+          role: "rep",
+          joinedAt: Date.now(),
+        },
+      );
+    }
 
     if (createModal) createModal.classList.remove("show");
     createCourseForm.reset();
