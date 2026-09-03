@@ -104,15 +104,19 @@ service cloud.firestore {
       allow delete: if isCourseRep(courseId);
 
       match /members/{memberUid} {
-        allow read: if signedIn() && (
+        // get (single doc): own doc or course staff
+        // list (collection query / onSnapshot): any course member — needed for
+        //   the live member listener that keeps enrolled counts in sync
+        allow get: if signedIn() && (
           request.auth.uid == memberUid || isCourseStaff(courseId)
         );
+        allow list: if isCourseMember(courseId) || isCourseStaff(courseId);
 
         // Normal student enrollment must be performed by the trusted backend.
         // The backend uses Firebase Admin credentials and bypasses client rules.
-       allow create: if isCourseRep(courseId)
+        allow create: if isCourseRep(courseId)
           && request.resource.data.uid == memberUid
-          && request.resource.data.role in ['student', 'assistant', 'rep']; 
+          && request.resource.data.role in ['student', 'assistant', 'rep'];
 
         allow update: if isCourseRep(courseId)
           && request.resource.data.uid == resource.data.uid

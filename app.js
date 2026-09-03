@@ -1289,41 +1289,33 @@ if (joinCourseForm) {
         throw new Error(result.error || "Unable to join course.");
 
       // The onSnapshot listener watches the courses collection, NOT subcollections.
-      // It won't fire when members/ changes. Manually refresh this course's member
-      // list so the card appears immediately without waiting for a page reload.
-      const membersSnap = await getDocs(
-        collection(db, "courses", result.courseId, "members"),
-      );
-      const freshMembers = membersSnap.docs.map((m) => ({
-        uid: m.id,
-        ...m.data(),
-      }));
-      const freshEnrolled = freshMembers
-        .filter((m) => m.role === "student")
-        .map((m) => normalizeMatric(m.matric));
-      const freshAssistants = freshMembers
-        .filter((m) => m.role === "assistant")
-        .map((m) => normalizeMatric(m.matric));
-
-      // Update or insert the course in local state
+      // It won't fire when members/ changes. A student can only read their own
+      // member doc (not the full collection), so we update local state directly
+      // using the data we already have from the join — no extra Firestore read needed.
+      const myMatric = normalizeMatric(currentUser ? currentUser.matric : "");
       const existingIdx = courses.findIndex((c) => c.id === result.courseId);
       if (existingIdx >= 0) {
-        courses[existingIdx] = {
-          ...courses[existingIdx],
-          members: freshMembers,
-          enrolled: freshEnrolled,
-          assistants: freshAssistants,
-        };
+        // Add student's own matric to enrolled[] in local state
+        const alreadyIn = (courses[existingIdx].enrolled || [])
+          .map(normalizeMatric)
+          .includes(myMatric);
+        if (!alreadyIn) {
+          courses[existingIdx] = {
+            ...courses[existingIdx],
+            enrolled: [...(courses[existingIdx].enrolled || []), myMatric],
+          };
+        }
       } else {
-        // Course wasn't in local array yet — fetch the full doc and add it
+        // Course wasn't in local array yet — fetch the full course doc and add it
         const courseDocSnap = await getDoc(doc(db, "courses", result.courseId));
         if (courseDocSnap.exists()) {
           courses.push({
             id: courseDocSnap.id,
             ...courseDocSnap.data(),
-            members: freshMembers,
-            enrolled: freshEnrolled,
-            assistants: freshAssistants,
+            // Seed with at least the current student so the card shows
+            enrolled: [...(courseDocSnap.data().enrolled || []), myMatric],
+            assistants: courseDocSnap.data().assistants || [],
+            members: [],
           });
         }
       }
