@@ -566,7 +566,18 @@ input:focus, select:focus {
   flex-direction: column;
   gap: 10px;
   pointer-events: none;
-  max-width: min(360px, calc(100vw - 40px));
+  max-width: min(360px, calc(100vw - 32px));
+}
+
+/* On mobile, anchor toasts to the top so they clear the virtual keyboard */
+@media (max-width: 600px) {
+  #toast-container {
+    top: 80px;
+    bottom: auto;
+    right: 16px;
+    left: 16px;
+    max-width: 100%;
+  }
 }
 
 .toast {
@@ -636,7 +647,7 @@ input:focus, select:focus {
 #confirm-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(5, 6, 15, 0.72);
+  background: rgba(5, 6, 15, 0.88); /* slightly more opaque as backdrop-filter fallback */
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   z-index: 10000;

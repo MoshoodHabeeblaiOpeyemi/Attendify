@@ -785,6 +785,10 @@ onAuthStateChanged(auth, async (user) => {
 
     activeCourse = null;
     if (countdownInterval) clearInterval(countdownInterval);
+    if (unsubscribeSessionLive) {
+      unsubscribeSessionLive();
+      unsubscribeSessionLive = null;
+    }
 
     stopCourseListener();
     checkAuth();
@@ -1147,6 +1151,51 @@ window.leaveCourse = async function (courseId) {
   }
 };
 
+// Per-portal live session listener for students — fires when rep starts/stops a session
+let unsubscribeSessionLive = null;
+
+function startSessionLiveListener(courseId) {
+  if (unsubscribeSessionLive) {
+    unsubscribeSessionLive();
+    unsubscribeSessionLive = null;
+  }
+  unsubscribeSessionLive = onSnapshot(
+    doc(db, "courses", courseId, "session", "live"),
+    (snap) => {
+      if (!activeCourse || activeCourse.id !== courseId) return;
+      if (snap.exists()) {
+        const data = snap.data();
+        const isStillActive = data.active && Date.now() < data.expiresAt;
+        if (isStillActive) {
+          // Session just went live — populate activeSession on local course
+          activeCourse.activeSession = {
+            expiresAt: data.expiresAt,
+            expired: false,
+            attendees: activeCourse.activeSession
+              ? activeCourse.activeSession.attendees
+              : [],
+            pin: null, // student doesn't need PIN from here — they type it
+            lat: null,
+            lon: null,
+          };
+        } else {
+          // Session expired or was closed
+          if (activeCourse.activeSession) {
+            activeCourse.activeSession.expired = true;
+          }
+        }
+      } else {
+        // Doc deleted — session closed
+        if (activeCourse.activeSession) {
+          activeCourse.activeSession.expired = true;
+        }
+      }
+      renderPortalState();
+    },
+    (err) => console.error("Session live listener error:", err),
+  );
+}
+
 window.openPortal = function (courseId) {
   const selectedCourse = courses.find((c) => c.id === courseId);
   if (!selectedCourse) return;
@@ -1206,6 +1255,12 @@ window.openPortal = function (courseId) {
   renderPortalState();
   // Load attendance history from the subcollection now that we know the courseId
   loadAttendanceHistory().then(() => renderPortalState());
+
+  // Students: subscribe to session/live so the check-in form appears
+  // the moment the rep generates a PIN, without needing a page reload.
+  if (!isRep && !isAssistant) {
+    startSessionLiveListener(courseId);
+  }
 };
 
 const backToDashboardBtn = document.getElementById("backToDashboard");
@@ -1224,6 +1279,10 @@ if (backToDashboardBtn) {
 
     activeCourse = null;
     if (countdownInterval) clearInterval(countdownInterval);
+    if (unsubscribeSessionLive) {
+      unsubscribeSessionLive();
+      unsubscribeSessionLive = null;
+    }
   });
 }
 
@@ -1665,6 +1724,10 @@ async function createSession(pin, managerMatric, lat, lon) {
     lat: lat,
     lon: lon,
   };
+
+  // Write activeSession to the course doc so the student's onSnapshot
+  // listener picks it up and shows the check-in form immediately.
+  await updateCourseInFirestore();
 
   startSessionTimer();
   renderPortalState();
