@@ -1165,16 +1165,24 @@ function startSessionLiveListener(courseId) {
       if (!activeCourse || activeCourse.id !== courseId) return;
       if (snap.exists()) {
         const data = snap.data();
-        const isStillActive = data.active && Date.now() < data.expiresAt;
+        // Cap remaining time at 60s maximum to handle clock skew between devices.
+        // If the student's device clock is behind the rep's, Date.now() will be
+        // smaller, making (expiresAt - Date.now()) artificially large (e.g. 132s).
+        // Capping at 60000ms ensures the displayed countdown is never misleading.
+        const rawMsLeft = data.expiresAt - Date.now();
+        const cappedMsLeft = Math.min(rawMsLeft, 60000);
+        const isStillActive = data.active && cappedMsLeft > 0;
         if (isStillActive) {
-          // Session just went live — populate activeSession on local course
+          // Compute a local deadline from capped remaining time so startSessionTimer
+          // always counts down from ≤60s, regardless of device clock differences.
+          const localExpiresAt = Date.now() + cappedMsLeft;
           activeCourse.activeSession = {
-            expiresAt: data.expiresAt,
+            expiresAt: localExpiresAt,
             expired: false,
             attendees: activeCourse.activeSession
               ? activeCourse.activeSession.attendees
               : [],
-            pin: null, // student doesn't need PIN from here — they type it
+            pin: null,
             lat: null,
             lon: null,
           };
@@ -1771,55 +1779,84 @@ if (checkInForm) {
       return;
     }
 
-    toast.info("Verifying your location... Please allow GPS access.", "📍 Location Check");
+    toast.info("Getting your location... This may take up to 20 seconds on first use.", "📍 Location Check");
+
+    // Try high-accuracy GPS first, fall back to network/cell location if it times out
+    const tryCheckIn = async (position) => {
+      const studentLat = position.coords.latitude;
+      const studentLon = position.coords.longitude;
+      const accuracy = position.coords.accuracy || 999;
+
+      // Warn if accuracy is low but still allow submission — the server does
+      // the final geofence check. A soft warning lets students in weak-signal
+      // areas still attempt check-in rather than being blocked client-side.
+      if (accuracy > 100) {
+        toast.warning(`Low GPS signal (±${Math.round(accuracy)}m). Your check-in may be rejected if you're outside the lecture hall.`, "Weak Signal");
+      }
+
+      try {
+        const idToken = await auth.currentUser.getIdToken();
+
+        const response = await fetch("/api/submitAttendance", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            courseId: activeCourse.id,
+            pin: enteredPin,
+            lat: studentLat,
+            lon: studentLon,
+            accuracy: accuracy,
+          }),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || "Check-in failed.");
+        }
+
+        toast.success("Your attendance has been recorded!", "Checked In! 🎉");
+        checkInForm.reset();
+      } catch (error) {
+        toast.error(error.message);
+        console.error(error);
+      }
+    };
+
+    const onGpsError = (error) => {
+      console.error("GPS error code:", error.code, error.message);
+      if (error.code === 1) {
+        // PERMISSION_DENIED
+        toast.error(
+          "Location access was denied. In Chrome: tap the 🔒 icon in the address bar → Site settings → Location → Allow.",
+          "GPS Permission Denied"
+        );
+      } else if (error.code === 2) {
+        // POSITION_UNAVAILABLE — try low-accuracy fallback
+        toast.warning("Precise GPS unavailable. Trying network location...", "GPS Fallback");
+        navigator.geolocation.getCurrentPosition(
+          tryCheckIn,
+          () => toast.error("Could not get your location. Please go outside or near a window and try again.", "GPS Error"),
+          { enableHighAccuracy: false, timeout: 15000, maximumAge: 30000 },
+        );
+      } else {
+        // TIMEOUT
+        toast.warning("GPS timed out. Trying network location...", "GPS Timeout");
+        navigator.geolocation.getCurrentPosition(
+          tryCheckIn,
+          () => toast.error("Could not get your location. Please ensure Location is enabled in your phone settings.", "GPS Error"),
+          { enableHighAccuracy: false, timeout: 15000, maximumAge: 30000 },
+        );
+      }
+    };
 
     navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const studentLat = position.coords.latitude;
-        const studentLon = position.coords.longitude;
-        const accuracy = position.coords.accuracy || 999;
-
-        if (accuracy > 50) {
-          toast.warning(`Your GPS accuracy is ±${Math.round(accuracy)}m. Move closer to a window for better signal.`, "Low GPS Accuracy");
-          return;
-        }
-
-        try {
-          const idToken = await auth.currentUser.getIdToken();
-
-          const response = await fetch("/api/submitAttendance", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${idToken}`,
-            },
-            body: JSON.stringify({
-              courseId: activeCourse.id,
-              pin: enteredPin,
-              lat: studentLat,
-              lon: studentLon,
-              accuracy: accuracy,
-            }),
-          });
-
-          const result = await response.json();
-
-          if (!response.ok) {
-            throw new Error(result.error || "Check-in failed.");
-          }
-
-          toast.success("Your attendance has been recorded via GPS verification.", "Checked In! 🎉");
-          checkInForm.reset();
-        } catch (error) {
-          toast.error(error.message);
-          console.error(error);
-        }
-      },
-      (error) => {
-        toast.error("Unable to retrieve your location. Please allow GPS access and try again.", "GPS Error");
-        console.error(error);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+      tryCheckIn,
+      onGpsError,
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
     );
   });
 }

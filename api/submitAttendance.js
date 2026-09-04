@@ -96,9 +96,12 @@ module.exports = async (req, res) => {
     }
 
     // 🎯 4. GPS Accuracy Filter
-    if (accuracy !== undefined && accuracy > 50) {
+    // Allow up to 150m accuracy — the geofence check below (30m radius) is the
+    // real security gate. Blocking at 50m accuracy was too aggressive for indoor
+    // Android devices where GPS readings often report 60-100m accuracy.
+    if (accuracy !== undefined && accuracy > 150) {
       return res.status(400).json({
-        error: `GPS accuracy too low (±${Math.round(accuracy)}m). Move to an open space!`,
+        error: `GPS signal too weak (±${Math.round(accuracy)}m). Please go near a window or outside and try again.`,
       });
     }
 
