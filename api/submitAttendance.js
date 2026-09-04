@@ -82,27 +82,37 @@ module.exports = async (req, res) => {
     }
 
     // 3. Check and validate body parameters
-    const { courseId, pin, lat, lon, accuracy } = req.body || {};
+    const { courseId, pin, lat, lon, accuracy, deviceId } = req.body || {};
     if (
       typeof courseId !== "string" ||
       !courseId.trim() ||
-      pin === undefined ||
-      lat === undefined ||
-      lon === undefined
+      pin === undefined
     ) {
       return res
         .status(400)
         .json({ error: "Missing required check-in fields." });
     }
 
-    // 🎯 4. GPS Accuracy Filter
-    // Allow up to 150m accuracy — the geofence check below (30m radius) is the
-    // real security gate. Blocking at 50m accuracy was too aggressive for indoor
-    // Android devices where GPS readings often report 60-100m accuracy.
-    if (accuracy !== undefined && accuracy > 150) {
-      return res.status(400).json({
-        error: `GPS signal too weak (±${Math.round(accuracy)}m). Please go near a window or outside and try again.`,
-      });
+    // 📱 4. One-Phone = One-Student Device Binding (Anti-Proxy Shield)
+    if (deviceId && typeof deviceId === "string" && deviceId.length >= 8) {
+      const deviceRef = db.collection("devices").doc(deviceId);
+      const deviceDoc = await deviceRef.get();
+      if (deviceDoc.exists) {
+        const boundMatric = String(deviceDoc.data().matric || "").trim().toUpperCase();
+        if (boundMatric && boundMatric !== matric) {
+          return res.status(403).json({
+            error: `Device Locked: This phone is registered to matric [${boundMatric}]. Proxy attendance is strictly prohibited.`,
+          });
+        }
+      } else {
+        // First time check-in from this device — bind it permanently to this matric
+        await deviceRef.set({
+          matric,
+          uid,
+          boundAt: FieldValue.serverTimestamp(),
+          userAgent: req.headers["user-agent"] || "",
+        });
+      }
     }
 
     // 📚 5. Check Enrollment
@@ -120,7 +130,7 @@ module.exports = async (req, res) => {
         .json({ error: "You are not enrolled in this course." });
     }
 
-    // ⏱️ 6. Server-Side Session & Expiry Check
+    // ⏱️ 6. Server-Side Session & Expiry Check (with 10s network latency grace window)
     const liveRef = courseRef.collection("session").doc("live");
     const liveDoc = await liveRef.get();
     if (!liveDoc.exists || !liveDoc.data().active) {
@@ -128,11 +138,12 @@ module.exports = async (req, res) => {
         .status(404)
         .json({ error: "No active attendance session found." });
     }
-    if (Date.now() > liveDoc.data().expiresAt) {
+    // 10-second grace window ensures students who submit at :58 on mobile network aren't rejected
+    if (Date.now() > liveDoc.data().expiresAt + 10000) {
       return res.status(403).json({ error: "Attendance session has expired!" });
     }
 
-    // 🔑 7. PIN Validation
+    // 🔑 7. PIN Validation & Session Security Details
     const secretRef = courseRef.collection("session").doc("secret");
     const secretDoc = await secretRef.get();
     if (!secretDoc.exists) {
@@ -154,15 +165,39 @@ module.exports = async (req, res) => {
     }
 
     // 📍 9. Server Geofence Distance Calculation
-    const hallLat = sessionData.lat;
-    const hallLon = sessionData.lon;
+    const isNoGpsMode = sessionData.locationMode === "no_gps";
     let distance = 0;
-    if (hallLat !== undefined && hallLon !== undefined) {
-      distance = calculateDistance(hallLat, hallLon, lat, lon);
-      if (distance > 30) {
-        return res.status(403).json({
-          error: `Too far (~${Math.round(distance)}m). Max radius is 30m.`,
+
+    if (!isNoGpsMode) {
+      if (lat === undefined || lon === undefined) {
+        return res.status(400).json({
+          error: "GPS location is required for this lecture session.",
         });
+      }
+
+      // Allow up to 300m accuracy for indoor cell/Wi-Fi triangulation under concrete roofs
+      if (accuracy !== undefined && accuracy > 300) {
+        return res.status(400).json({
+          error: `GPS signal too weak (±${Math.round(accuracy)}m). Please move closer to a window or door and try again.`,
+        });
+      }
+
+      const hallLat = sessionData.lat;
+      const hallLon = sessionData.lon;
+      const baseRadius = Number(sessionData.radius) || 70; // Default 70m hall radius
+
+      if (hallLat !== undefined && hallLon !== undefined) {
+        distance = calculateDistance(hallLat, hallLon, lat, lon);
+        // Dynamic indoor tolerance: if indoor accuracy is degraded (e.g. 150m-200m),
+        // adjust allowable radius slightly, capped at 180m to strictly block hostel check-ins.
+        const accuracyTolerance = accuracy > 50 ? (accuracy - 50) * 0.45 : 0;
+        const allowedRadius = Math.min(180, baseRadius + accuracyTolerance);
+
+        if (distance > allowedRadius) {
+          return res.status(403).json({
+            error: `Too far from lecture hall (~${Math.round(distance)}m). Max radius is ${Math.round(allowedRadius)}m.`,
+          });
+        }
       }
     }
 
@@ -180,7 +215,9 @@ module.exports = async (req, res) => {
       matric,
       timestamp: FieldValue.serverTimestamp(),
       status: "Present",
-      location: { lat, lon },
+      location: isNoGpsMode
+        ? { mode: "no_gps" }
+        : { lat, lon, accuracy: accuracy ? Math.round(accuracy) : null },
       distance: Math.round(distance),
     });
 

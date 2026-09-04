@@ -122,7 +122,41 @@ let currentUser = null;
 let activeCourse = null;
 let countdownInterval = null;
 
-let isCreatingAccount = false; // 🛡️ Prevents race condition during signup
+// --- CLOCK SKEW SYNC & DEVICE BINDING ---
+let serverClockSkewMs = 0;
+
+async function syncServerClock() {
+  try {
+    const start = Date.now();
+    const resp = await fetch("/api/submitAttendance", { method: "OPTIONS" });
+    const dateHeader = resp.headers.get("date");
+    if (dateHeader) {
+      const serverTime = new Date(dateHeader).getTime();
+      const latency = (Date.now() - start) / 2;
+      serverClockSkewMs = (serverTime + latency) - Date.now();
+    }
+  } catch (e) {
+    console.warn("Clock sync ping fallback:", e);
+  }
+}
+syncServerClock();
+
+function getAccurateNow() {
+  return Date.now() + serverClockSkewMs;
+}
+
+function getOrCreateDeviceId() {
+  let deviceId = localStorage.getItem("attendify_device_uuid");
+  if (!deviceId) {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) {
+      deviceId = "dev_" + crypto.randomUUID().replace(/-/g, "");
+    } else {
+      deviceId = "dev_" + Math.random().toString(36).substring(2, 12) + Date.now().toString(36);
+    }
+    localStorage.setItem("attendify_device_uuid", deviceId);
+  }
+  return deviceId;
+}
 
 // --- DATA NORMALIZERS (v0 Fixes) ---
 function normalizeMatric(value) {
@@ -262,7 +296,11 @@ function startCourseListener() {
         if (activeCourse) {
           const updated = courses.find((c) => c.id === activeCourse.id);
           if (updated) {
+            const prevSession = activeCourse.activeSession;
             activeCourse = updated;
+            if (prevSession && prevSession.localDeadline && activeCourse.activeSession) {
+              activeCourse.activeSession.localDeadline = prevSession.localDeadline;
+            }
             renderPortalState();
           }
         }
@@ -1165,26 +1203,28 @@ function startSessionLiveListener(courseId) {
       if (!activeCourse || activeCourse.id !== courseId) return;
       if (snap.exists()) {
         const data = snap.data();
-        // Cap remaining time at 60s maximum to handle clock skew between devices.
-        // If the student's device clock is behind the rep's, Date.now() will be
-        // smaller, making (expiresAt - Date.now()) artificially large (e.g. 132s).
-        // Capping at 60000ms ensures the displayed countdown is never misleading.
-        const rawMsLeft = data.expiresAt - Date.now();
-        const cappedMsLeft = Math.min(rawMsLeft, 60000);
+        const accurateNow = getAccurateNow();
+        const duration = (data.durationSeconds || 60) * 1000;
+        const rawMsLeft = (data.expiresAt || 0) - accurateNow;
+        const cappedMsLeft = Math.max(0, Math.min(rawMsLeft, duration));
         const isStillActive = data.active && cappedMsLeft > 0;
         if (isStillActive) {
-          // Compute a local deadline from capped remaining time so startSessionTimer
-          // always counts down from ≤60s, regardless of device clock differences.
-          const localExpiresAt = Date.now() + cappedMsLeft;
+          // If a countdown is already ticking for this session, keep our local monotonic deadline
+          const existingDeadline = activeCourse.activeSession && activeCourse.activeSession.localDeadline;
+          const localDeadline = (existingDeadline && existingDeadline > Date.now())
+            ? existingDeadline
+            : Date.now() + cappedMsLeft;
+
           activeCourse.activeSession = {
-            expiresAt: localExpiresAt,
+            expiresAt: data.expiresAt,
+            localDeadline: localDeadline,
             expired: false,
+            locationMode: data.locationMode || "preset_hall",
+            hallName: data.hallName || null,
             attendees: activeCourse.activeSession
               ? activeCourse.activeSession.attendees
               : [],
-            pin: null,
-            lat: null,
-            lon: null,
+            pin: activeCourse.activeSession ? activeCourse.activeSession.pin : null,
           };
         } else {
           // Session expired or was closed
@@ -1252,6 +1292,7 @@ window.openPortal = function (courseId) {
       if (assistantManagementSection)
         assistantManagementSection.classList.add("hidden");
     }
+    renderLectureHallOptions();
   } else {
     if (repControls) repControls.classList.add("hidden");
     if (studentControls) studentControls.classList.remove("hidden");
@@ -1665,6 +1706,232 @@ function renderAssistantDropdownAndList() {
   }
 }
 
+// --- LECTURE HALL MANAGEMENT LOGIC ---
+function renderLectureHallOptions() {
+  const selectEl = document.getElementById("repHallSelect");
+  const badgeEl = document.getElementById("hallInfoBadge");
+  if (!selectEl || !activeCourse) return;
+
+  const halls = activeCourse.savedHalls || [];
+  const storedPreference = localStorage.getItem(`attendify_last_hall_${activeCourse.id}`);
+  const defaultVal = storedPreference || (halls.length > 0 ? `hall_${halls[0].id}` : "no_gps");
+
+  selectEl.innerHTML = "";
+
+  // Group 1: Saved Lecture Halls
+  if (halls.length > 0) {
+    const hallGroup = document.createElement("optgroup");
+    hallGroup.label = "🏛️ Saved Lecture Halls";
+    halls.forEach((hall) => {
+      const opt = document.createElement("option");
+      opt.value = `hall_${hall.id}`;
+      opt.textContent = `🏛️ ${hall.name} (${hall.radius || 80}m radius)`;
+      if (opt.value === defaultVal || String(hall.id) === defaultVal) {
+        opt.selected = true;
+      }
+      hallGroup.appendChild(opt);
+    });
+    selectEl.appendChild(hallGroup);
+  }
+
+  // Group 2: Alternative Modes
+  const modeGroup = document.createElement("optgroup");
+  modeGroup.label = "⚙️ Other Location Modes";
+
+  const noGpsOpt = document.createElement("option");
+  noGpsOpt.value = "no_gps";
+  noGpsOpt.textContent = "⚡ PIN + Device Lock Only (Emergency / No GPS)";
+  if (defaultVal === "no_gps" || halls.length === 0) noGpsOpt.selected = true;
+  modeGroup.appendChild(noGpsOpt);
+
+  const liveGpsOpt = document.createElement("option");
+  liveGpsOpt.value = "live_gps";
+  liveGpsOpt.textContent = "📍 Capture Rep Live GPS (Outdoors / Ground)";
+  if (defaultVal === "live_gps") liveGpsOpt.selected = true;
+  modeGroup.appendChild(liveGpsOpt);
+
+  const addOpt = document.createElement("option");
+  addOpt.value = "add_new";
+  addOpt.textContent = "➕ Add / Set New Lecture Hall...";
+  modeGroup.appendChild(addOpt);
+
+  selectEl.appendChild(modeGroup);
+
+  const updateBadge = () => {
+    const val = selectEl.value;
+    if (val === "add_new") {
+      openManageHallsModal();
+      selectEl.value = defaultVal;
+      return;
+    }
+    localStorage.setItem(`attendify_last_hall_${activeCourse.id}`, val);
+    if (!badgeEl) return;
+    if (val === "no_gps") {
+      badgeEl.innerHTML = `<span style="color: #fd7e14; font-weight: 600;">⚡ Emergency Mode: GPS check disabled. One-phone device lock active.</span>`;
+    } else if (val === "live_gps") {
+      badgeEl.innerHTML = `<span style="color: var(--teal); font-weight: 600;">📍 Live GPS: Captures Rep's current position upon generating PIN.</span>`;
+    } else if (val.startsWith("hall_")) {
+      const hId = val.replace("hall_", "");
+      const h = halls.find((item) => String(item.id) === String(hId));
+      if (h) {
+        badgeEl.innerHTML = `<span style="color: #28a745; font-weight: 600;">🏛️ Hall Active: ${h.name} (${h.radius || 80}m indoor boundary).</span>`;
+      }
+    }
+  };
+
+  selectEl.onchange = updateBadge;
+  updateBadge();
+}
+
+function openManageHallsModal() {
+  const modal = document.getElementById("manageHallsModal");
+  if (!modal || !activeCourse) return;
+  renderSavedHallsList();
+  modal.classList.add("show");
+}
+
+function renderSavedHallsList() {
+  const listEl = document.getElementById("savedHallsList");
+  if (!listEl || !activeCourse) return;
+  const halls = activeCourse.savedHalls || [];
+  if (halls.length === 0) {
+    listEl.innerHTML = `<li style="color: var(--muted); font-size: 0.85rem; padding: 6px;">No saved halls yet. Add one below! 🏛️</li>`;
+    return;
+  }
+  listEl.innerHTML = "";
+  halls.forEach((hall) => {
+    const li = document.createElement("li");
+    li.style.cssText =
+      "display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: var(--bg); border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem; border: 1px solid var(--border);";
+    li.innerHTML = `
+      <div>
+        <strong style="color: var(--navy);">🏛️ ${hall.name}</strong>
+        <div style="font-size: 0.75rem; color: var(--muted);">Coord: ${Number(hall.lat).toFixed(4)}, ${Number(hall.lon).toFixed(4)} • Radius: ${hall.radius || 80}m</div>
+      </div>
+      <button data-hall-id="${hall.id}" class="delete-hall-btn" style="background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 0.8rem; padding: 4px 6px;">Delete ❌</button>
+    `;
+    listEl.appendChild(li);
+  });
+
+  listEl.querySelectorAll(".delete-hall-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const hId = btn.getAttribute("data-hall-id");
+      if (
+        await showConfirm({
+          title: "Delete Lecture Hall",
+          message: "Are you sure you want to remove this saved lecture hall location?",
+          okText: "Delete",
+          danger: true,
+        })
+      ) {
+        activeCourse.savedHalls = (activeCourse.savedHalls || []).filter(
+          (h) => String(h.id) !== String(hId),
+        );
+        await updateCourseInFirestore();
+        renderSavedHallsList();
+        renderLectureHallOptions();
+        toast.success("Hall location removed.", "Deleted 🗑️");
+      }
+    });
+  });
+}
+
+const manageHallsBtn = document.getElementById("manageHallsBtn");
+if (manageHallsBtn) {
+  manageHallsBtn.addEventListener("click", () => {
+    openManageHallsModal();
+  });
+}
+
+const captureHallGpsBtn = document.getElementById("captureHallGpsBtn");
+const captureStatus = document.getElementById("captureStatus");
+if (captureHallGpsBtn) {
+  captureHallGpsBtn.addEventListener("click", () => {
+    if (!navigator.geolocation) {
+      toast.error("Geolocation is not supported by your browser.");
+      return;
+    }
+    captureHallGpsBtn.disabled = true;
+    captureHallGpsBtn.textContent = "Acquiring GPS... ⏳";
+    if (captureStatus) {
+      captureStatus.style.display = "block";
+      captureStatus.style.color = "var(--muted)";
+      captureStatus.textContent = "Acquiring satellite lock... Stand near entrance or window.";
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        captureHallGpsBtn.disabled = false;
+        captureHallGpsBtn.textContent = "📍 Re-Capture GPS";
+        const latInput = document.getElementById("newHallLat");
+        const lonInput = document.getElementById("newHallLon");
+        if (latInput) latInput.value = pos.coords.latitude.toFixed(6);
+        if (lonInput) lonInput.value = pos.coords.longitude.toFixed(6);
+        if (captureStatus) {
+          captureStatus.style.display = "block";
+          captureStatus.style.color = "#28a745";
+          captureStatus.textContent = `✅ GPS locked with ±${Math.round(pos.coords.accuracy)}m accuracy!`;
+        }
+        toast.success(`Coordinates captured (±${Math.round(pos.coords.accuracy)}m).`, "Location Locked 🎯");
+      },
+      (err) => {
+        captureHallGpsBtn.disabled = false;
+        captureHallGpsBtn.textContent = "📍 Capture Current GPS";
+        if (captureStatus) {
+          captureStatus.style.display = "block";
+          captureStatus.style.color = "var(--danger)";
+          captureStatus.textContent = "❌ Could not get GPS. You can enter coordinates manually.";
+        }
+        toast.error("Could not capture GPS. Ensure Location is allowed in browser settings.", "GPS Error");
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
+    );
+  });
+}
+
+const addHallForm = document.getElementById("addHallForm");
+if (addHallForm) {
+  addHallForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!activeCourse) return;
+
+    const name = document.getElementById("newHallName").value.trim();
+    const lat = parseFloat(document.getElementById("newHallLat").value);
+    const lon = parseFloat(document.getElementById("newHallLon").value);
+    const radius = parseInt(document.getElementById("newHallRadius").value, 10) || 80;
+
+    if (!name || isNaN(lat) || isNaN(lon)) {
+      toast.error("Please provide valid hall name and coordinates.");
+      return;
+    }
+
+    const newHall = {
+      id: "hall_" + Date.now(),
+      name,
+      lat,
+      lon,
+      radius,
+    };
+
+    activeCourse.savedHalls = activeCourse.savedHalls || [];
+    activeCourse.savedHalls.push(newHall);
+
+    try {
+      await updateCourseInFirestore();
+      addHallForm.reset();
+      if (captureStatus) captureStatus.style.display = "none";
+      renderSavedHallsList();
+      renderLectureHallOptions();
+      const manageModal = document.getElementById("manageHallsModal");
+      if (manageModal) manageModal.classList.remove("show");
+      toast.success(`"${name}" saved for this course.`, "Hall Added 🏛️");
+    } catch (err) {
+      console.error("Error saving hall:", err);
+      toast.error("Could not save lecture hall. Please try again.");
+    }
+  });
+}
+
 // --- 60-SECOND ATTENDANCE ENGINE & TIMER LOGIC ---
 const generatePinBtn = document.getElementById("generatePinBtn");
 const activePinDisplay = document.getElementById("activePinDisplay");
@@ -1683,60 +1950,97 @@ if (generatePinBtn) {
       currentUser ? currentUser.matric : "REP-001",
     );
 
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          createSession(
-            randomPin,
-            managerMatric,
-            position.coords.latitude,
-            position.coords.longitude,
-          );
-        },
-        (error) => {
-          console.warn(
-            "Could not capture Rep GPS, using default campus coordinates.",
-          );
-          createSession(randomPin, managerMatric, 6.5244, 3.3792);
-        },
-        { enableHighAccuracy: true },
+    const hallSelect = document.getElementById("repHallSelect");
+    const selectedVal = hallSelect ? hallSelect.value : "no_gps";
+
+    if (selectedVal === "no_gps") {
+      createSession(randomPin, managerMatric, { mode: "no_gps" });
+    } else if (selectedVal === "live_gps") {
+      toast.info("Acquiring GPS for live session...", "GPS Check");
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            createSession(randomPin, managerMatric, {
+              mode: "live_gps",
+              lat: pos.coords.latitude,
+              lon: pos.coords.longitude,
+              radius: 80,
+            });
+          },
+          (err) => {
+            console.warn("Could not capture Rep GPS, starting in PIN-only mode:", err);
+            toast.warning("Could not lock GPS. Starting session in PIN-only mode.", "GPS Fallback");
+            createSession(randomPin, managerMatric, { mode: "no_gps" });
+          },
+          { enableHighAccuracy: true, timeout: 15000 },
+        );
+      } else {
+        createSession(randomPin, managerMatric, { mode: "no_gps" });
+      }
+    } else if (selectedVal && selectedVal.startsWith("hall_")) {
+      const hallId = selectedVal.replace("hall_", "");
+      const hall = (activeCourse.savedHalls || []).find(
+        (h) => String(h.id) === String(hallId),
       );
+      if (hall) {
+        createSession(randomPin, managerMatric, {
+          mode: "preset_hall",
+          name: hall.name,
+          lat: hall.lat,
+          lon: hall.lon,
+          radius: hall.radius || 80,
+        });
+      } else {
+        createSession(randomPin, managerMatric, { mode: "no_gps" });
+      }
     } else {
-      createSession(randomPin, managerMatric, 6.5244, 3.3792);
+      createSession(randomPin, managerMatric, { mode: "no_gps" });
     }
   });
 }
 
-async function createSession(pin, managerMatric, lat, lon) {
+async function createSession(pin, managerMatric, locData = {}) {
   if (!activeCourse || !activeCourse.id) return;
 
-  const expiresAt = Date.now() + 60000;
+  const now = getAccurateNow();
+  const durationSeconds = 60;
+  const expiresAt = now + durationSeconds * 1000;
 
-  await setDoc(doc(db, "courses", activeCourse.id, "session", "live"), {
+  const livePayload = {
     active: true,
     expiresAt: expiresAt,
-  });
+    durationSeconds: durationSeconds,
+    locationMode: locData.mode || "no_gps",
+    hallName: locData.name || null,
+  };
 
-  await setDoc(doc(db, "courses", activeCourse.id, "session", "secret"), {
+  await setDoc(doc(db, "courses", activeCourse.id, "session", "live"), livePayload);
+
+  const secretPayload = {
     pin: pin,
-    lat: lat,
-    lon: lon,
+    locationMode: locData.mode || "no_gps",
+    lat: locData.lat !== undefined ? locData.lat : null,
+    lon: locData.lon !== undefined ? locData.lon : null,
+    radius: locData.radius || 80,
     attendees: [managerMatric],
-  });
+  };
+
+  await setDoc(doc(db, "courses", activeCourse.id, "session", "secret"), secretPayload);
 
   activeCourse.activeSession = {
     pin: pin,
     expiresAt: expiresAt,
+    localDeadline: Date.now() + durationSeconds * 1000,
     expired: false,
     attendees: [managerMatric],
-    lat: lat,
-    lon: lon,
+    locationMode: locData.mode || "no_gps",
+    lat: locData.lat,
+    lon: locData.lon,
+    radius: locData.radius || 80,
+    hallName: locData.name || null,
   };
 
-  // Write activeSession to the course doc so the student's onSnapshot
-  // listener picks it up and shows the check-in form immediately.
   await updateCourseInFirestore();
-
   startSessionTimer();
   renderPortalState();
 }
@@ -1746,57 +2050,103 @@ function startSessionTimer() {
 
   if (!activeCourse || !activeCourse.activeSession) return;
 
-  countdownInterval = setInterval(async () => {
-    const session = activeCourse.activeSession;
+  const tick = async () => {
+    const session = activeCourse ? activeCourse.activeSession : null;
     if (!session) {
-      clearInterval(countdownInterval);
+      if (countdownInterval) clearInterval(countdownInterval);
+      countdownInterval = null;
       return;
     }
 
-    const timeLeft = Math.floor((session.expiresAt - Date.now()) / 1000);
+    const deadline =
+      session.localDeadline || (session.expiresAt - serverClockSkewMs);
+    const msRemaining = deadline - Date.now();
+    const timeLeft = Math.max(0, Math.ceil(msRemaining / 1000));
     const liveTimerElement = document.getElementById("countdownTimer");
 
     if (timeLeft <= 0) {
-      clearInterval(countdownInterval);
+      if (countdownInterval) clearInterval(countdownInterval);
+      countdownInterval = null;
       session.expired = true;
-      await updateCourseInFirestore();
+      const isRep = currentUser && activeCourse.repUid === currentUser.uid;
+      if (isRep) {
+        await updateCourseInFirestore();
+      }
       renderPortalState();
     } else {
       if (liveTimerElement) {
         liveTimerElement.textContent = `${timeLeft}s`;
       }
     }
-  }, 1000);
+  };
+
+  tick();
+  countdownInterval = setInterval(tick, 1000);
 }
 
 if (checkInForm) {
-  checkInForm.addEventListener("submit", (e) => {
+  checkInForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const enteredPin = document.getElementById("studentPinInput").value.trim();
+    if (!enteredPin) return;
 
+    const deviceId = getOrCreateDeviceId();
+    const isNoGps =
+      activeCourse.activeSession &&
+      activeCourse.activeSession.locationMode === "no_gps";
+
+    // Fast path: If session has No GPS requirement, submit immediately!
+    if (isNoGps) {
+      toast.info("Submitting attendance...", "Checking In");
+      try {
+        const idToken = await auth.currentUser.getIdToken();
+        const response = await fetch("/api/submitAttendance", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            courseId: activeCourse.id,
+            pin: enteredPin,
+            deviceId: deviceId,
+          }),
+        });
+
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Check-in failed.");
+
+        toast.success("Your attendance has been recorded!", "Checked In! 🎉");
+        checkInForm.reset();
+      } catch (error) {
+        toast.error(error.message);
+        console.error(error);
+      }
+      return;
+    }
+
+    // GPS Geofence path:
     if (!navigator.geolocation) {
       toast.error("Geolocation is not supported by your browser.");
       return;
     }
 
-    toast.info("Getting your location... This may take up to 20 seconds on first use.", "📍 Location Check");
+    toast.info("Verifying lecture hall presence...", "📍 Location Check");
 
-    // Try high-accuracy GPS first, fall back to network/cell location if it times out
     const tryCheckIn = async (position) => {
       const studentLat = position.coords.latitude;
       const studentLon = position.coords.longitude;
       const accuracy = position.coords.accuracy || 999;
 
-      // Warn if accuracy is low but still allow submission — the server does
-      // the final geofence check. A soft warning lets students in weak-signal
-      // areas still attempt check-in rather than being blocked client-side.
-      if (accuracy > 100) {
-        toast.warning(`Low GPS signal (±${Math.round(accuracy)}m). Your check-in may be rejected if you're outside the lecture hall.`, "Weak Signal");
+      if (accuracy > 200) {
+        toast.warning(
+          `Low GPS signal (±${Math.round(accuracy)}m). Ensure you are inside or near the lecture hall.`,
+          "Weak Signal",
+        );
       }
 
       try {
         const idToken = await auth.currentUser.getIdToken();
-
         const response = await fetch("/api/submitAttendance", {
           method: "POST",
           headers: {
@@ -1809,11 +2159,11 @@ if (checkInForm) {
             lat: studentLat,
             lon: studentLon,
             accuracy: accuracy,
+            deviceId: deviceId,
           }),
         });
 
         const result = await response.json();
-
         if (!response.ok) {
           throw new Error(result.error || "Check-in failed.");
         }
@@ -1829,25 +2179,19 @@ if (checkInForm) {
     const onGpsError = (error) => {
       console.error("GPS error code:", error.code, error.message);
       if (error.code === 1) {
-        // PERMISSION_DENIED
         toast.error(
           "Location access was denied. In Chrome: tap the 🔒 icon in the address bar → Site settings → Location → Allow.",
-          "GPS Permission Denied"
+          "GPS Permission Denied",
         );
-      } else if (error.code === 2) {
-        // POSITION_UNAVAILABLE — try low-accuracy fallback
+      } else {
         toast.warning("Precise GPS unavailable. Trying network location...", "GPS Fallback");
         navigator.geolocation.getCurrentPosition(
           tryCheckIn,
-          () => toast.error("Could not get your location. Please go outside or near a window and try again.", "GPS Error"),
-          { enableHighAccuracy: false, timeout: 15000, maximumAge: 30000 },
-        );
-      } else {
-        // TIMEOUT
-        toast.warning("GPS timed out. Trying network location...", "GPS Timeout");
-        navigator.geolocation.getCurrentPosition(
-          tryCheckIn,
-          () => toast.error("Could not get your location. Please ensure Location is enabled in your phone settings.", "GPS Error"),
+          () =>
+            toast.error(
+              "Could not get your location. Please ensure Location is enabled in phone settings.",
+              "GPS Error",
+            ),
           { enableHighAccuracy: false, timeout: 15000, maximumAge: 30000 },
         );
       }
@@ -1975,6 +2319,7 @@ async function updateCourseInFirestore() {
   await updateDoc(courseRef, {
     activeSession: activeCourse.activeSession || null,
     assistants: activeCourse.assistants || [],
+    savedHalls: activeCourse.savedHalls || [],
   });
 }
 
@@ -2015,7 +2360,9 @@ function renderPortalState() {
     (activeCourse.assistants || []).map(normalizeMatric).includes(userMatric);
   const session = activeCourse.activeSession;
   const isSessionActive =
-    session && !session.expired && Date.now() < session.expiresAt;
+    session &&
+    !session.expired &&
+    (session.localDeadline ? Date.now() < session.localDeadline : getAccurateNow() < session.expiresAt);
 
   const bannerTitle = document.getElementById("bannerTitle");
   const bannerText = document.getElementById("bannerText");
@@ -2031,7 +2378,10 @@ function renderPortalState() {
         bannerTitle.style.color = "#28a745";
       }
       if (bannerText) {
-        bannerText.innerHTML = `Time Remaining: <strong id="countdownTimer" style="font-size: 1.2rem;">60s</strong>`;
+        const deadline = session.localDeadline || (session.expiresAt - serverClockSkewMs);
+        const msRemaining = deadline - Date.now();
+        const initialSeconds = Math.max(0, Math.min(60, Math.ceil(msRemaining / 1000)));
+        bannerText.innerHTML = `Time Remaining: <strong id="countdownTimer" style="font-size: 1.2rem;">${initialSeconds}s</strong>`;
       }
     }
     if (isRep || isAssistant) {

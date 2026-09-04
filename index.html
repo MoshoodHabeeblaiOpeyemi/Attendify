@@ -182,6 +182,21 @@
           <h3 style="color: var(--navy); margin-bottom: 10px;">👑 Course Rep Control Center</h3>
           <p style="font-size: 0.9rem; margin-bottom: 15px;">Generate a 60-second secure PIN for today's lecture
             attendance.</p>
+
+          <!-- LECTURE LOCATION SELECTOR -->
+          <div style="margin-bottom: 18px; padding: 14px; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <label for="repHallSelect" style="font-size: 0.85rem; font-weight: 600; color: var(--navy);">📍 Lecture Location / Hall:</label>
+              <button id="manageHallsBtn" type="button" style="background: transparent; border: none; color: var(--teal); font-size: 0.8rem; cursor: pointer; text-decoration: underline; padding: 0;">⚙️ Manage Halls</button>
+            </div>
+            <select id="repHallSelect" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.9rem;">
+              <!-- Dynamically populated in app.js -->
+            </select>
+            <div id="hallInfoBadge" style="margin-top: 8px; font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 5px;">
+              <span>• Smart indoor geofence active</span>
+            </div>
+          </div>
+
           <button id="generatePinBtn" class="btn">Generate Attendance PIN ⏱️</button>
 
           <div id="activePinDisplay" class="hidden"
@@ -423,6 +438,67 @@
 
       <div class="modal-actions">
         <button type="button" class="btn close-modal" style="width: 100%;">Got it, let's go! 🚀</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: MANAGE LECTURE HALLS -->
+  <div id="manageHallsModal" class="modal">
+    <div class="modal-card" style="max-width: 480px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <h3 style="margin: 0; color: var(--navy);">🏛️ Lecture Hall Locations</h3>
+        <button type="button" class="close-modal" style="background: transparent; border: none; font-size: 1.4rem; cursor: pointer; color: var(--muted); padding: 0 4px;">&times;</button>
+      </div>
+      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Set up physical lecture halls so students can check in accurately under lecture hall roofs.</p>
+
+      <!-- CURRENT SAVED HALLS -->
+      <div style="margin-bottom: 20px;">
+        <h4 style="font-size: 0.9rem; color: var(--navy); margin-bottom: 8px;">Saved Halls for this Course:</h4>
+        <ul id="savedHallsList" style="list-style: none; padding-left: 0; margin: 0; max-height: 160px; overflow-y: auto;">
+          <li style="color: var(--muted); font-size: 0.85rem; padding: 6px;">No saved halls yet. Add one below! 🏛️</li>
+        </ul>
+      </div>
+
+      <!-- ADD NEW HALL FORM -->
+      <div style="background: var(--bg); padding: 14px; border-radius: 8px; border: 1px solid var(--border);">
+        <h4 style="font-size: 0.9rem; color: var(--navy); margin-bottom: 10px;">➕ Add New Lecture Hall</h4>
+        <form id="addHallForm">
+          <div class="field" style="margin-bottom: 10px;">
+            <label for="newHallName" style="font-size: 0.8rem; color: var(--muted);">Hall Name</label>
+            <input type="text" id="newHallName" placeholder="e.g., Faculty Lecture Theatre" required style="width: 100%; padding: 8px; font-size: 0.85rem;">
+          </div>
+
+          <div style="margin-bottom: 12px;">
+            <label style="font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6px;">Location Coordinates:</label>
+            <div style="display: flex; gap: 8px; margin-bottom: 6px;">
+              <button id="captureHallGpsBtn" type="button" class="btn btn-outline" style="flex: 1; font-size: 0.8rem; padding: 7px 10px;">📍 Capture My Current GPS</button>
+            </div>
+            <div id="captureStatus" style="font-size: 0.75rem; color: var(--muted); margin-bottom: 8px; display: none;"></div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <div>
+                <label for="newHallLat" style="font-size: 0.75rem; color: var(--muted);">Latitude</label>
+                <input type="number" id="newHallLat" step="any" required placeholder="6.5244" style="width: 100%; padding: 6px 8px; font-size: 0.85rem;">
+              </div>
+              <div>
+                <label for="newHallLon" style="font-size: 0.75rem; color: var(--muted);">Longitude</label>
+                <input type="number" id="newHallLon" step="any" required placeholder="3.3792" style="width: 100%; padding: 6px 8px; font-size: 0.85rem;">
+              </div>
+            </div>
+          </div>
+
+          <div class="field" style="margin-bottom: 14px;">
+            <label for="newHallRadius" style="font-size: 0.8rem; color: var(--muted);">Hall Size / Allowed Radius</label>
+            <select id="newHallRadius" style="width: 100%; padding: 8px; font-size: 0.85rem; border-radius: 6px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text);">
+              <option value="60">Standard Classroom / Lab (60m radius)</option>
+              <option value="80" selected>Medium / Large Lecture Hall (80m radius)</option>
+              <option value="120">Auditorium / 1000-Seater Complex (120m radius)</option>
+            </select>
+          </div>
+
+          <div class="modal-actions" style="margin-top: 10px;">
+            <button type="submit" class="btn" style="width: 100%; font-size: 0.85rem; padding: 10px;">Save Lecture Hall 💾</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>
