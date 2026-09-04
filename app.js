@@ -25,6 +25,83 @@ import {
   arrayRemove,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
+// ============================================================
+// TOAST NOTIFICATION SYSTEM
+// ============================================================
+function showToast(message, type = "info", title = "") {
+  const container = document.getElementById("toast-container");
+  if (!container) { console.warn(message); return; }
+
+  const icons = { success: "✅", error: "❌", warning: "⚠️", info: "ℹ️" };
+  const titles = { success: "Success", error: "Error", warning: "Warning", info: "Info" };
+
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `
+    <span class="toast-icon">${icons[type] || "ℹ️"}</span>
+    <div class="toast-body">
+      <div class="toast-title">${title || titles[type] || ""}</div>
+      <div class="toast-message">${message}</div>
+    </div>
+  `;
+
+  container.appendChild(toast);
+
+  const duration = type === "error" ? 5000 : 3500;
+  setTimeout(() => {
+    toast.classList.add("toast-exit");
+    toast.addEventListener("animationend", () => toast.remove(), { once: true });
+  }, duration);
+}
+
+// Convenience wrappers
+const toast = {
+  success: (msg, title) => showToast(msg, "success", title),
+  error:   (msg, title) => showToast(msg, "error",   title),
+  warning: (msg, title) => showToast(msg, "warning",  title),
+  info:    (msg, title) => showToast(msg, "info",    title),
+};
+
+// ============================================================
+// CUSTOM CONFIRM DIALOG  (replaces window.confirm)
+// ============================================================
+function showConfirm({ title, message, okText = "Confirm", cancelText = "Cancel", danger = true, icon = "⚠️" }) {
+  return new Promise((resolve) => {
+    const overlay  = document.getElementById("confirm-overlay");
+    const iconEl   = document.getElementById("confirm-icon");
+    const titleEl  = document.getElementById("confirm-title");
+    const msgEl    = document.getElementById("confirm-message");
+    const okBtn    = document.getElementById("confirm-ok");
+    const cancelBtn = document.getElementById("confirm-cancel");
+
+    if (!overlay) { resolve(window.confirm(message)); return; }
+
+    iconEl.textContent   = icon;
+    titleEl.textContent  = title   || "Are you sure?";
+    msgEl.textContent    = message || "";
+    okBtn.textContent    = okText;
+    cancelBtn.textContent = cancelText;
+
+    okBtn.className = danger ? "confirm-ok" : "confirm-ok ok-safe";
+    okBtn.id = "confirm-ok"; // keep id
+
+    overlay.classList.add("show");
+
+    const cleanup = (result) => {
+      overlay.classList.remove("show");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      resolve(result);
+    };
+
+    const onOk     = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+
+    okBtn.addEventListener("click", onOk,     { once: true });
+    cancelBtn.addEventListener("click", onCancel, { once: true });
+  });
+}
+
 const firebaseConfig = {
   apiKey: "AIzaSyDUtViZ-mef1dSV-XpSos4-oh1HpQ7jpyw",
   authDomain: "attendify-4c93d.firebaseapp.com",
@@ -622,10 +699,10 @@ if (signupForm) {
       });
 
       signupForm.reset();
-      alert("Account created successfully in the cloud! 🎉✨");
+      toast.success("Your account is ready. Welcome to Attendify!", "Account Created 🎉");
     } catch (error) {
       console.error("Signup error:", error);
-      alert("⚠️ Error: " + error.message);
+      toast.error(error.message, "Something went wrong");
     } finally {
       isCreatingAccount = false; // 🔓 UNLOCK THE BLOCKER NO MATTER WHAT
       if (submitBtn) {
@@ -657,7 +734,7 @@ if (loginForm) {
       loginForm.reset();
     } catch (error) {
       console.error("Login error:", error);
-      alert("❌ Invalid email or password. Please check your credentials.");
+      toast.error("Invalid email or password. Please check your credentials.", "Login Failed");
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.textContent = "Log In 🔓";
@@ -673,7 +750,7 @@ if (logoutBtn) {
       await signOut(auth);
     } catch (error) {
       console.error("Logout error:", error);
-      alert("Unable to log out. Please try again.");
+      toast.error("Unable to log out. Please try again.");
     }
   });
 }
@@ -690,9 +767,7 @@ onAuthStateChanged(auth, async (user) => {
       checkAuth();
     } else {
       console.warn("Ghost user blocked: No Firestore profile found.");
-      alert(
-        "⚠️ Access Denied: Your account data could not be found. It may have been deleted.",
-      );
+      toast.error("Your account data could not be found. It may have been deleted.", "Access Denied");
       await signOut(auth);
       currentUser = null;
       checkAuth();
@@ -718,11 +793,14 @@ onAuthStateChanged(auth, async (user) => {
 
 if (deleteAccountBtn) {
   deleteAccountBtn.addEventListener("click", async () => {
-    if (
-      confirm(
-        "⚠️ Are you sure you want to completely delete your account? This cannot be undone.",
-      )
-    ) {
+    if (await showConfirm({
+      title: "Delete Account",
+      message: "This will permanently delete your account and remove you from all courses. This cannot be undone.",
+      okText: "Yes, Delete",
+      cancelText: "Keep Account",
+      icon: "🗑️",
+      danger: true,
+    })) {
       try {
         const uid = auth.currentUser.uid;
         const idToken = await auth.currentUser.getIdToken();
@@ -766,12 +844,10 @@ if (deleteAccountBtn) {
           await signOut(auth);
         }
 
-        alert("Account successfully deleted and data cleared. 👋");
+        toast.info("Your account has been deleted. Goodbye! 👋", "Account Deleted");
       } catch (error) {
         console.error("Delete account error:", error);
-        alert(
-          "⚠️ Something went wrong while deleting your account. Please check your connection and try again.",
-        );
+        toast.error("Something went wrong while deleting your account. Please check your connection.", "Delete Failed");
       }
     }
   });
@@ -899,10 +975,10 @@ if (settingsForm) {
       }
 
       settingsModal.classList.remove("show");
-      alert("Profile updated successfully! ✅");
+      toast.success("Your profile has been updated.", "Profile Saved");
     } catch (error) {
       console.error("Settings update error:", error);
-      alert("⚠️ Error: " + error.message);
+      toast.error(error.message, "Something went wrong");
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;
@@ -929,12 +1005,12 @@ if (forgotPasswordForm) {
       }
 
       await sendPasswordResetEmail(auth, email);
-      alert("Password reset email sent! Check your inbox or spam folder. 📧✨");
+      toast.success("Check your inbox or spam folder for the reset link.", "Reset Email Sent 📧");
       forgotPasswordForm.reset();
       if (forgotModal) forgotModal.classList.remove("show");
     } catch (error) {
       console.error("Password reset error:", error);
-      alert("⚠️ Error: " + error.message);
+      toast.error(error.message, "Something went wrong");
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;
@@ -1004,9 +1080,14 @@ function renderCourses() {
 window.deleteCourse = async function (courseId) {
   const course = courses.find((c) => c.id === courseId);
   if (
-    confirm(
-      `⚠️ WARNING: As the Course Rep, deleting "${course ? course.name : "this course"}" removes it entirely including all records. Are you sure?`,
-    )
+    await showConfirm({
+      title: "Delete Course",
+      message: `Deleting "${course ? course.name : "this course"}" will permanently remove it and all attendance records. This cannot be undone.`,
+      okText: "Delete Course",
+      cancelText: "Cancel",
+      icon: "🗑️",
+      danger: true,
+    })
   ) {
     try {
       const idToken = await auth.currentUser.getIdToken();
@@ -1025,7 +1106,7 @@ window.deleteCourse = async function (courseId) {
       renderCourses();
     } catch (error) {
       console.error("Delete course error:", error);
-      alert("⚠️ Error: Unable to delete course. Please try again.");
+      toast.error("Unable to delete course. Please try again.");
     }
   }
 };
@@ -1035,9 +1116,14 @@ window.leaveCourse = async function (courseId) {
   if (!course || !auth.currentUser) return;
 
   if (
-    confirm(
-      `⚠️ Do you want to leave "${course.name}"? You can rejoin anytime using code [${course.code}].`,
-    )
+    await showConfirm({
+      title: "Leave Course",
+      message: `Leave "${course.name}"? You can rejoin anytime using the course code.`,
+      okText: "Leave",
+      cancelText: "Stay",
+      icon: "🚪",
+      danger: false,
+    })
   ) {
     try {
       const idToken = await auth.currentUser.getIdToken();
@@ -1053,12 +1139,10 @@ window.leaveCourse = async function (courseId) {
       if (!response.ok)
         throw new Error(result.error || "Unable to leave course.");
 
-      alert(`You have left ${course.name}. 👋`);
+      toast.info(`You have left ${course.name}.`, "Left Course 👋");
     } catch (error) {
       console.error("Leave course error:", error);
-      alert(
-        "⚠️ Error: Unable to leave course. Please check your connection and try again.",
-      );
+      toast.error("Unable to leave course. Please check your connection.");
     }
   }
 };
@@ -1077,9 +1161,7 @@ window.openPortal = function (courseId) {
     (selectedCourse.enrolled || []).map(normalizeMatric).includes(userMatric);
 
   if (!isRep && !isAssistant && !isEnrolled) {
-    alert(
-      `⚠️ Access Denied! You are not enrolled in "${selectedCourse.name}". Please join using code [${selectedCourse.code}] first.`,
-    );
+    toast.warning(`You are not enrolled in "${selectedCourse.name}". Join using code [${selectedCourse.code}] first.`, "Access Denied");
     return;
   }
 
@@ -1170,9 +1252,7 @@ if (createCourseForm) {
     );
 
     if (!studentMatric) {
-      alert(
-        "⚠️ Your profile isn't fully loaded yet. Please wait a moment and try again.",
-      );
+      toast.warning("Your profile isn't fully loaded yet. Please wait a moment and try again.");
       return;
     }
 
@@ -1201,9 +1281,7 @@ if (createCourseForm) {
       );
 
       if (duplicateExists) {
-        alert(
-          `⚠️ Course Creation Blocked: Course code "${code}" already exists in your department (${repDepartment} - ${repLevel}). Each course code must be unique per level!`,
-        );
+        toast.warning(`Course code "${code}" already exists in your department (${repDepartment} - ${repLevel}).`, "Course Code Taken");
         return;
       }
 
@@ -1243,12 +1321,10 @@ if (createCourseForm) {
       if (createModal) createModal.classList.remove("show");
       createCourseForm.reset();
       checkAuth();
-      alert(`Course "${name}" created successfully! 🚀`);
+      toast.success(`"${name}" is ready. Share the code with your class!`, "Course Created 🚀");
     } catch (error) {
       console.error("Create course error:", error);
-      alert(
-        "⚠️ Something went wrong while creating the course. Please check your connection and try again.",
-      );
+      toast.error("Something went wrong while creating the course. Check your connection.");
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;
@@ -1282,7 +1358,7 @@ if (joinCourseForm) {
       const querySnap = await getDocs(codeQuery);
 
       if (querySnap.empty) {
-        alert(`⚠️ Course code "${code}" not found.`);
+        toast.warning(`Course code "${code}" was not found. Double-check and try again.`, "Not Found");
         return;
       }
 
@@ -1339,12 +1415,10 @@ if (joinCourseForm) {
       }
 
       renderCourses();
-      alert(`Successfully joined ${found.name}! 🎉`);
+      toast.success(`You are now enrolled in ${found.name}!`, "Joined! 🎉");
     } catch (error) {
       console.error("Join course error:", error);
-      alert(
-        "⚠️ Something went wrong while joining. Please check your connection and try again.",
-      );
+      toast.error("Something went wrong while joining. Please check your connection.");
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;
@@ -1369,7 +1443,7 @@ if (appointAssistantBtn) {
     const isSessionScoped = scopeEl && scopeEl.value === "session";
 
     if (!selectedMatric) {
-      alert("⚠️ Please select an enrolled student to appoint.");
+      toast.warning("Please select an enrolled student to appoint.");
       return;
     }
 
@@ -1377,7 +1451,7 @@ if (appointAssistantBtn) {
 
     const currentAssistants = activeCourse.assistants.map(normalizeMatric);
     if (currentAssistants.includes(selectedMatric)) {
-      alert("⚠️ This student is already an appointed assistant!");
+      toast.warning("This student is already an appointed assistant.");
       return;
     }
 
@@ -1398,7 +1472,7 @@ if (appointAssistantBtn) {
         );
       } catch (err) {
         console.error("Could not update member role:", err);
-        alert("⚠️ Failed to assign assistant. Please try again.");
+        toast.error("Failed to assign assistant. Please try again.");
         return;
       }
     }
@@ -1409,15 +1483,15 @@ if (appointAssistantBtn) {
     renderPortalState();
     renderAssistantDropdownAndList();
 
-    const scopeLabel = isSessionScoped ? "Session Rep (auto-revoked after class)" : "Permanent Assistant Rep";
-    alert(`🎉 ${scopeLabel} assigned to [${selectedMatric}]! 👑`);
+    const scopeLabel = isSessionScoped ? "Session Rep — auto-revoked after class" : "Permanent Assistant Rep";
+    toast.success(`${scopeLabel} assigned to [${selectedMatric}].`, "Assistant Assigned 👑");
   });
 }
 
 window.revokeAssistant = async function (matric) {
   if (!activeCourse || !activeCourse.assistants) return;
 
-  if (confirm("⚠️ Do you want to remove this assistant's badge?")) {
+  if (await showConfirm({ title: "Remove Assistant", message: "Remove this student's assistant badge?", okText: "Remove", cancelText: "Cancel", icon: "👑", danger: true })) {
     const targetMatric = normalizeMatric(matric);
     activeCourse.assistants = (activeCourse.assistants || [])
       .map(normalizeMatric)
@@ -1427,7 +1501,7 @@ window.revokeAssistant = async function (matric) {
     renderPortalState();
     renderAssistantDropdownAndList();
 
-    alert("Assistant badge removed.");
+    toast.info("Assistant badge removed.");
   }
 };
 
@@ -1435,9 +1509,14 @@ window.removeStudentFromCourse = async function (matric) {
   if (!activeCourse) return;
 
   if (
-    confirm(
-      `⚠️ Are you sure you want to remove student [${matric}] from ${activeCourse.name}?`,
-    )
+    await showConfirm({
+      title: "Remove Student",
+      message: `Remove [${matric}] from ${activeCourse.name}? They can rejoin using the course code.`,
+      okText: "Remove",
+      cancelText: "Cancel",
+      icon: "🚪",
+      danger: true,
+    })
   ) {
     try {
       const idToken = await auth.currentUser.getIdToken();
@@ -1467,10 +1546,10 @@ window.removeStudentFromCourse = async function (matric) {
 
       renderPortalState();
       renderAssistantDropdownAndList();
-      alert(`Student [${targetMatric}] has been removed from the course.`);
+      toast.info(`Student [${targetMatric}] has been removed.`, "Student Removed");
     } catch (error) {
       console.error("Remove student error:", error);
-      alert("⚠️ Error: Unable to remove student. Please try again.");
+      toast.error("Unable to remove student. Please try again.");
     }
   }
 };
@@ -1625,13 +1704,11 @@ if (checkInForm) {
     const enteredPin = document.getElementById("studentPinInput").value.trim();
 
     if (!navigator.geolocation) {
-      alert("⚠️ Geolocation is not supported by your browser.");
+      toast.error("Geolocation is not supported by your browser.");
       return;
     }
 
-    alert(
-      "📍 Verifying secure location with server... Please allow GPS access.",
-    );
+    toast.info("Verifying your location... Please allow GPS access.", "📍 Location Check");
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
@@ -1640,9 +1717,7 @@ if (checkInForm) {
         const accuracy = position.coords.accuracy || 999;
 
         if (accuracy > 50) {
-          alert(
-            `⚠️ GPS Accuracy Warning: Your location accuracy is ±${Math.round(accuracy)}m. Move closer to a window!`,
-          );
+          toast.warning(`Your GPS accuracy is ±${Math.round(accuracy)}m. Move closer to a window for better signal.`, "Low GPS Accuracy");
           return;
         }
 
@@ -1670,17 +1745,15 @@ if (checkInForm) {
             throw new Error(result.error || "Check-in failed.");
           }
 
-          alert(
-            "🎉 Attendance marked successfully via secure token & GPS verification! ✅📍",
-          );
+          toast.success("Your attendance has been recorded via GPS verification.", "Checked In! 🎉");
           checkInForm.reset();
         } catch (error) {
-          alert("❌ " + error.message);
+          toast.error(error.message);
           console.error(error);
         }
       },
       (error) => {
-        alert("❌ GPS Error: Unable to retrieve your precise location.");
+        toast.error("Unable to retrieve your location. Please allow GPS access and try again.", "GPS Error");
         console.error(error);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
@@ -1694,11 +1767,14 @@ if (closeClassBtn) {
   closeClassBtn.addEventListener("click", async () => {
     if (!activeCourse) return;
 
-    if (
-      confirm(
-        "⚠️ Are you sure you want to close this attendance session and save the records?",
-      )
-    ) {
+    if (await showConfirm({
+      title: "Close Class",
+      message: "This will save the attendance records and end the active session.",
+      okText: "Close & Save",
+      cancelText: "Cancel",
+      icon: "📁",
+      danger: false,
+    })) {
       try {
         const idToken = await auth.currentUser.getIdToken();
         const response = await fetch("/api/closeSession", {
@@ -1720,10 +1796,10 @@ if (closeClassBtn) {
         await loadAttendanceHistory();
 
         renderPortalState();
-        alert("📁 Class closed successfully! Attendance has been archived.");
+        toast.success("Attendance records have been saved to the archive.", "Class Closed 📁");
       } catch (error) {
         console.error("Close session error:", error);
-        alert("⚠️ Error: Unable to close session. Please try again.");
+        toast.error("Unable to close session. Please try again.");
       }
     }
   });
@@ -1735,11 +1811,14 @@ if (endSemesterBtn) {
   endSemesterBtn.addEventListener("click", async () => {
     if (!activeCourse) return;
 
-    if (
-      confirm(
-        `⚠️ WARNING: Are you sure you want to END THE SEMESTER for "${activeCourse.name}"? This will clear all class history and reset the total class count to 0.`,
-      )
-    ) {
+    if (await showConfirm({
+      title: "End Semester",
+      message: `This will permanently delete all attendance history for "${activeCourse.name}" and reset the class count to zero.`,
+      okText: "End Semester",
+      cancelText: "Cancel",
+      icon: "🎓",
+      danger: true,
+    })) {
       try {
         const idToken = await auth.currentUser.getIdToken();
         const response = await fetch("/api/endSemester", {
@@ -1758,10 +1837,10 @@ if (endSemesterBtn) {
         if (countdownInterval) clearInterval(countdownInterval);
 
         renderPortalState();
-        alert("🎓 Semester ended successfully! All records have been reset.");
+        toast.success("All records have been cleared. New semester ready.", "Semester Ended 🎓");
       } catch (error) {
         console.error("End semester error:", error);
-        alert("⚠️ Error: Unable to end semester. Please try again.");
+        toast.error("Unable to end semester. Please try again.");
       }
     }
   });
