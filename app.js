@@ -875,6 +875,7 @@ if (deleteAccountBtn) {
 
         // Delete the actual database document
         await deleteDoc(doc(db, "users", uid));
+        localStorage.removeItem("attendify_device_uuid");
 
         // Attempt to delete the Firebase Auth user (if recent login), otherwise force sign out
         try {
@@ -1027,6 +1028,14 @@ if (settingsForm) {
         submitBtn.textContent = "Save Changes 💾";
       }
     }
+  });
+}
+
+const resetDeviceBindingBtn = document.getElementById("resetDeviceBindingBtn");
+if (resetDeviceBindingBtn) {
+  resetDeviceBindingBtn.addEventListener("click", () => {
+    localStorage.removeItem("attendify_device_uuid");
+    toast.success("Device binding removed from this phone. Next check-in will register as a new phone.", "Device Reset 📱");
   });
 }
 
@@ -1767,14 +1776,17 @@ function renderLectureHallOptions() {
     localStorage.setItem(`attendify_last_hall_${activeCourse.id}`, val);
     if (!badgeEl) return;
     if (val === "no_gps") {
-      badgeEl.innerHTML = `<span style="color: #fd7e14; font-weight: 600;">⚡ Emergency Mode: GPS check disabled. One-phone device lock active.</span>`;
+      badgeEl.className = "hall-info-chip badge-emergency";
+      badgeEl.innerHTML = `<span>⚡ <strong>Emergency Mode:</strong> GPS check disabled. One-phone device lock active.</span>`;
     } else if (val === "live_gps") {
-      badgeEl.innerHTML = `<span style="color: var(--teal); font-weight: 600;">📍 Live GPS: Captures Rep's current position upon generating PIN.</span>`;
+      badgeEl.className = "hall-info-chip badge-live";
+      badgeEl.innerHTML = `<span>📍 <strong>Live GPS:</strong> Captures Rep's current position upon generating PIN.</span>`;
     } else if (val.startsWith("hall_")) {
       const hId = val.replace("hall_", "");
       const h = halls.find((item) => String(item.id) === String(hId));
       if (h) {
-        badgeEl.innerHTML = `<span style="color: #28a745; font-weight: 600;">🏛️ Hall Active: ${h.name} (${h.radius || 80}m indoor boundary).</span>`;
+        badgeEl.className = "hall-info-chip badge-hall";
+        badgeEl.innerHTML = `<span>🏛️ <strong>Hall Active:</strong> ${h.name} (${h.radius || 80}m indoor boundary).</span>`;
       }
     }
   };

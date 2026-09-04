@@ -184,15 +184,15 @@
             attendance.</p>
 
           <!-- LECTURE LOCATION SELECTOR -->
-          <div style="margin-bottom: 18px; padding: 14px; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border);">
+          <div style="margin-bottom: 18px; padding: 14px; background: var(--card-bg); border-radius: 12px; border: 1.5px solid var(--border);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-              <label for="repHallSelect" style="font-size: 0.85rem; font-weight: 600; color: var(--navy);">📍 Lecture Location / Hall:</label>
-              <button id="manageHallsBtn" type="button" style="background: transparent; border: none; color: var(--teal); font-size: 0.8rem; cursor: pointer; text-decoration: underline; padding: 0;">⚙️ Manage Halls</button>
+              <label for="repHallSelect" style="font-size: 0.85rem; font-weight: 700; color: var(--navy); margin-bottom: 0;">📍 Lecture Location / Hall:</label>
+              <button id="manageHallsBtn" type="button" style="background: transparent; border: none; color: var(--teal); font-size: 0.8rem; font-weight: 600; cursor: pointer; text-decoration: underline; padding: 0;">⚙️ Manage Halls</button>
             </div>
-            <select id="repHallSelect" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.9rem;">
+            <select id="repHallSelect" class="custom-dropdown" style="width: 100%; border-radius: 10px; font-size: 0.9rem;">
               <!-- Dynamically populated in app.js -->
             </select>
-            <div id="hallInfoBadge" style="margin-top: 8px; font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 5px;">
+            <div id="hallInfoBadge" class="hall-info-chip">
               <span>• Smart indoor geofence active</span>
             </div>
           </div>
@@ -542,6 +542,9 @@
         <div class="modal-actions">
           <button type="button" class="btn btn-outline close-modal">Cancel</button>
           <button type="submit" class="btn">Save Changes 💾</button>
+        </div>
+        <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); text-align: center;">
+          <button id="resetDeviceBindingBtn" type="button" style="background: transparent; border: none; color: var(--teal); font-size: 0.82rem; font-weight: 600; cursor: pointer; text-decoration: underline;">📱 Reset Device Binding (For Testing)</button>
         </div>
       </form>
     </div>

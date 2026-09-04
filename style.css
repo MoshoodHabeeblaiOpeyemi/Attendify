@@ -270,8 +270,8 @@ label {
 
 input, select {
   width: 100%;
-  padding: 15px;
-  border-radius: 14px;
+  padding: 14px 16px;
+  border-radius: 12px;
   border: 1.5px solid var(--border);
   background: rgba(127, 127, 127, 0.06);
   color: var(--text-primary);
@@ -280,12 +280,110 @@ input, select {
   transition: border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
 }
 
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  cursor: pointer;
+  padding-right: 42px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2316C4D9'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 16px;
+}
+
+[data-theme="dark"] select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%232DE0C9'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+}
+
+select option, select optgroup {
+  background-color: var(--bg-base-2);
+  color: var(--text-primary);
+  padding: 10px;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+[data-theme="dark"] select option,
+[data-theme="dark"] select optgroup {
+  background-color: #0d0f1f;
+  color: #eef1ff;
+}
+
+[data-theme="light"] select option,
+[data-theme="light"] select optgroup {
+  background-color: #ffffff;
+  color: #0b1120;
+}
+
 input::placeholder { color: var(--text-muted); opacity: 0.7; }
 
 input:focus, select:focus {
   border-color: var(--teal);
   box-shadow: 0 0 0 4px var(--teal-glow);
   background: var(--card-bg);
+}
+
+/* --- CUSTOM ATTENDANCE DROPDOWN & BADGES --- */
+.custom-dropdown {
+  border: 1.5px solid var(--border) !important;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+}
+
+.custom-dropdown:hover {
+  border-color: var(--teal) !important;
+}
+
+.hall-info-chip {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.25s ease;
+  border: 1px solid var(--border);
+  background: rgba(127, 127, 127, 0.06);
+  color: var(--text-muted);
+}
+
+.hall-info-chip.badge-hall {
+  background: rgba(34, 197, 140, 0.12);
+  border-color: rgba(34, 197, 140, 0.35);
+  color: var(--success);
+}
+
+.hall-info-chip.badge-emergency {
+  background: rgba(253, 126, 20, 0.12);
+  border-color: rgba(253, 126, 20, 0.35);
+  color: #fd7e14;
+}
+
+.hall-info-chip.badge-live {
+  background: rgba(22, 196, 217, 0.12);
+  border-color: rgba(22, 196, 217, 0.35);
+  color: var(--teal);
+}
+
+[data-theme="dark"] .hall-info-chip.badge-hall {
+  background: rgba(60, 231, 166, 0.14);
+  border-color: rgba(60, 231, 166, 0.35);
+  color: var(--success);
+}
+
+[data-theme="dark"] .hall-info-chip.badge-emergency {
+  background: rgba(255, 153, 0, 0.14);
+  border-color: rgba(255, 153, 0, 0.35);
+  color: #ffaa33;
+}
+
+[data-theme="dark"] .hall-info-chip.badge-live {
+  background: rgba(45, 224, 201, 0.14);
+  border-color: rgba(45, 224, 201, 0.35);
+  color: var(--teal);
 }
 
 /* --- AUTOCOMPLETE DROPDOWN (Institution / Department / Level) ---
