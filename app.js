@@ -108,11 +108,12 @@ function startMemberListener(courseId) {
       courses[idx] = {
         ...courses[idx],
         members,
+        // Include rep role so rep counts in enrolled total and analytics
         enrolled: members
-          .filter((m) => m.role === "student")
+          .filter((m) => m.role === "student" || m.role === "rep")
           .map((m) => normalizeMatric(m.matric)),
         assistants: members
-          .filter((m) => m.role === "assistant")
+          .filter((m) => m.role === "assistant" || m.role === "session_assistant")
           .map((m) => normalizeMatric(m.matric)),
       };
       if (currentUser) {
@@ -168,11 +169,12 @@ function startCourseListener() {
           return {
             ...course,
             members,
+            // Include rep role so rep counts in enrolled total and analytics
             enrolled: members
-              .filter((member) => member.role === "student")
+              .filter((member) => member.role === "student" || member.role === "rep")
               .map((member) => normalizeMatric(member.matric)),
             assistants: members
-              .filter((member) => member.role === "assistant")
+              .filter((member) => member.role === "assistant" || member.role === "session_assistant")
               .map((member) => normalizeMatric(member.matric)),
           };
         }),
@@ -1362,20 +1364,43 @@ if (appointAssistantBtn) {
 
     const selectEl = document.getElementById("courseStudentSelect");
     const selectedMatric = normalizeMatric(selectEl ? selectEl.value : "");
+    // Read the scope radio buttons (permanent vs session)
+    const scopeEl = document.querySelector('input[name="assistantScope"]:checked');
+    const isSessionScoped = scopeEl && scopeEl.value === "session";
 
     if (!selectedMatric) {
       alert("⚠️ Please select an enrolled student to appoint.");
       return;
     }
 
-    if (!activeCourse.assistants) {
-      activeCourse.assistants = [];
-    }
+    if (!activeCourse.assistants) activeCourse.assistants = [];
 
     const currentAssistants = activeCourse.assistants.map(normalizeMatric);
     if (currentAssistants.includes(selectedMatric)) {
       alert("⚠️ This student is already an appointed assistant!");
       return;
+    }
+
+    // Update the member's role in Firestore via updateDoc
+    // We store role as "assistant" (permanent) or "session_assistant" (auto-revoked on close)
+    const newRole = isSessionScoped ? "session_assistant" : "assistant";
+
+    // Find the member doc for this matric
+    const memberRecord = (activeCourse.members || []).find(
+      (m) => normalizeMatric(m.matric) === selectedMatric,
+    );
+
+    if (memberRecord) {
+      try {
+        await updateDoc(
+          doc(db, "courses", activeCourse.id, "members", memberRecord.uid),
+          { role: newRole },
+        );
+      } catch (err) {
+        console.error("Could not update member role:", err);
+        alert("⚠️ Failed to assign assistant. Please try again.");
+        return;
+      }
     }
 
     activeCourse.assistants.push(selectedMatric);
@@ -1384,7 +1409,8 @@ if (appointAssistantBtn) {
     renderPortalState();
     renderAssistantDropdownAndList();
 
-    alert("🎉 Assistant badge assigned successfully! 👑 ASST");
+    const scopeLabel = isSessionScoped ? "Session Rep (auto-revoked after class)" : "Permanent Assistant Rep";
+    alert(`🎉 ${scopeLabel} assigned to [${selectedMatric}]! 👑`);
   });
 }
 
@@ -1457,19 +1483,17 @@ function renderAssistantDropdownAndList() {
   if (!selectEl || !listEl) return;
 
   selectEl.innerHTML = `<option value="">-- Choose student to appoint --</option>`;
-  const enrolled = (activeCourse.enrolled || []).map(normalizeMatric);
   const assistants = (activeCourse.assistants || []).map(normalizeMatric);
 
-  enrolled.forEach((matric) => {
-    const isMainRep = currentUser && activeCourse.repUid === currentUser.uid;
-    const isAlreadyAssistant = assistants.includes(matric);
-
-    if (!isMainRep && !isAlreadyAssistant) {
-      const opt = document.createElement("option");
-      opt.value = matric;
-      opt.textContent = `Student (${matric})`;
-      selectEl.appendChild(opt);
-    }
+  // Only show students (not the rep, not already-assistants) in the dropdown
+  (activeCourse.members || []).forEach((member) => {
+    if (member.role !== "student") return; // skip rep, existing assistants
+    const matric = normalizeMatric(member.matric);
+    if (assistants.includes(matric)) return;
+    const opt = document.createElement("option");
+    opt.value = matric;
+    opt.textContent = `${matric}`;
+    selectEl.appendChild(opt);
   });
 
   if (assistants.length === 0) {
@@ -1477,10 +1501,19 @@ function renderAssistantDropdownAndList() {
   } else {
     listEl.innerHTML = "";
     assistants.forEach((matric) => {
+      // Find member record to determine scope
+      const memberRecord = (activeCourse.members || []).find(
+        (m) => normalizeMatric(m.matric) === matric,
+      );
+      const isSession = memberRecord && memberRecord.role === "session_assistant";
+      const scopeBadge = isSession
+        ? `<span style="background: #fd7e14; color: white; padding: 2px 4px; border-radius: 3px; font-size: 0.6rem; margin-left: 4px;">SESSION</span>`
+        : `<span style="background: var(--teal); color: white; padding: 2px 4px; border-radius: 3px; font-size: 0.6rem; margin-left: 4px;">PERMANENT</span>`;
+
       const li = document.createElement("li");
       li.style.cssText =
         "display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: var(--card-bg); border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem;";
-      li.innerHTML = `<span>👑 (${matric}) <span style="background: var(--teal); color: white; padding: 2px 4px; border-radius: 3px; font-size: 0.65rem;">ASST</span></span> <button onclick="revokeAssistant('${matric}')" style="background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 0.8rem;">Remove ❌</button>`;
+      li.innerHTML = `<span>👑 ${matric} ${scopeBadge}</span> <button onclick="revokeAssistant('${matric}')" style="background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 0.8rem;">Remove ❌</button>`;
       listEl.appendChild(li);
     });
   }
@@ -1875,22 +1908,25 @@ function renderPortalState() {
     rosterList.innerHTML = `<li style="color: var(--muted); font-size: 0.9rem; text-align: center; padding: 10px;">No check-ins recorded yet. ⏳</li>`;
   } else {
     attendees.forEach((matric) => {
-      const isMainRepUser = activeCourse.repUid === currentUser.uid;
-      const isAssistantUser = (activeCourse.assistants || [])
-        .map(normalizeMatric)
-        .includes(normalizeMatric(matric));
+      const normalizedM = normalizeMatric(matric);
+      // Find this attendee's member record to get their actual role
+      const memberRecord = (activeCourse.members || []).find(
+        (m) => normalizeMatric(m.matric) === normalizedM,
+      );
+      const attendeeRole = memberRecord ? memberRecord.role : "student";
+      const isRepAttendee = activeCourse.repUid === (memberRecord ? memberRecord.uid : null);
 
       let badgeHTML = "";
-      if (isMainRepUser) {
+      if (isRepAttendee || attendeeRole === "rep") {
         badgeHTML = `<span style="background: var(--teal); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 6px;">👑 REP</span>`;
-      } else if (isAssistantUser) {
-        badgeHTML = `<span style="background: var(--teal); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 6px;">👑 ASST</span>`;
+      } else if (attendeeRole === "assistant" || attendeeRole === "session_assistant") {
+        badgeHTML = `<span style="background: #6f42c1; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 6px;">⭐ ASST</span>`;
       }
 
       const li = document.createElement("li");
       li.style.cssText =
         "display: flex; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem;";
-      li.innerHTML = `<span>🎓 <strong>Student</strong> (${matric}) ${badgeHTML}</span> <span style="color: #28a745; font-weight: bold;">Present ✅</span>`;
+      li.innerHTML = `<span>🎓 <strong>${attendeeRole === "rep" || isRepAttendee ? "Rep" : "Student"}</strong> (${matric}) ${badgeHTML}</span> <span style="color: #28a745; font-weight: bold;">Present ✅</span>`;
       rosterList.appendChild(li);
     });
   }

@@ -47,7 +47,8 @@ module.exports = async (req, res) => {
     const courseData = courseSnap.data();
     const memberSnap = await courseRef.collection("members").doc(decoded.uid).get();
     const isRep = courseData.repUid === decoded.uid;
-    const isAssistant = memberSnap.exists && memberSnap.data().role === "assistant";
+    const isAssistant = memberSnap.exists &&
+      (memberSnap.data().role === "assistant" || memberSnap.data().role === "session_assistant");
 
     if (!isRep && !isAssistant)
       return res.status(403).json({ error: "Only course staff can close a session." });
@@ -73,14 +74,36 @@ module.exports = async (req, res) => {
       attendees,
     });
 
-    // Clear the live session docs and wipe activeSession on the course doc
+    // Auto-revoke session_assistant members — restore their role back to "student"
+    const allMembersSnap = await courseRef.collection("members").get();
+    const sessionAssistants = allMembersSnap.docs.filter(
+      (d) => d.data().role === "session_assistant",
+    );
+
+    // Clear the live session docs, wipe activeSession, and revoke session assistants atomically
     const batch = db.batch();
     batch.delete(courseRef.collection("session").doc("live"));
     batch.delete(secretRef);
     batch.update(courseRef, { activeSession: null });
+    sessionAssistants.forEach((d) => batch.update(d.ref, { role: "student" }));
     await batch.commit();
 
-    return res.status(200).json({ success: true, sessionKey, attendeesCount: attendees.length });
+    // Also remove revoked session assistants from the course's assistants[] array
+    if (sessionAssistants.length > 0) {
+      const revokedMatrics = sessionAssistants.map((d) =>
+        String(d.data().matric || "").trim().toUpperCase(),
+      );
+      await courseRef.update({
+        assistants: FieldValue.arrayRemove(...revokedMatrics),
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      sessionKey,
+      attendeesCount: attendees.length,
+      revokedSessionAssistants: sessionAssistants.length,
+    });
   } catch (error) {
     console.error("Close session error:", error);
     return res.status(500).json({ error: "Server Error: " + error.message });

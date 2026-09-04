@@ -208,16 +208,29 @@
             leads who can generate attendance PINs for this course.</p>
 
           <div class="field" style="margin-bottom: 15px;">
-            <label for="courseStudentSelect" style="font-size: 0.85rem; color: var(--muted);">Select Enrolled
-              Student:</label>
+            <label for="courseStudentSelect" style="font-size: 0.85rem; color: var(--muted);">Select Enrolled Student:</label>
             <select id="courseStudentSelect"
               style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text);">
               <option value="">-- Choose student to appoint --</option>
             </select>
           </div>
 
-          <button id="appointAssistantBtn" class="btn" style="font-size: 0.85rem; padding: 8px 14px;">Appoint as
-            Assistant Rep ➕</button>
+          <!-- Scope selection: permanent vs session-only -->
+          <div style="margin-bottom: 15px; font-size: 0.85rem;">
+            <p style="color: var(--muted); margin-bottom: 8px; font-weight: 600;">Assistant Scope:</p>
+            <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; cursor: pointer;">
+              <input type="radio" name="assistantScope" value="permanent" checked
+                style="accent-color: var(--teal);">
+              <span><strong>Permanent</strong> — stays until you remove them (for Group Leads)</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="radio" name="assistantScope" value="session"
+                style="accent-color: #fd7e14;">
+              <span><strong>Session Only</strong> — auto-revoked when class closes (for one-off cover)</span>
+            </label>
+          </div>
+
+          <button id="appointAssistantBtn" class="btn" style="font-size: 0.85rem; padding: 8px 14px;">Appoint Assistant Rep ➕</button>
 
           <!-- LIST OF CURRENT ASSISTANTS -->
           <div style="margin-top: 20px;">
