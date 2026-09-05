@@ -26,14 +26,39 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 // ============================================================
+// UI HELPER: REFRESH ICONS
+// ============================================================
+function refreshIcons() {
+  if (typeof lucide !== "undefined") {
+    lucide.createIcons();
+  }
+}
+
+// ============================================================
 // TOAST NOTIFICATION SYSTEM
 // ============================================================
 function showToast(message, type = "info", title = "") {
   const container = document.getElementById("toast-container");
-  if (!container) { console.warn(message); return; }
+  if (!container) {
+    console.warn(message);
+    return;
+  }
 
-  const icons = { success: "✅", error: "❌", warning: "⚠️", info: "ℹ️" };
-  const titles = { success: "Success", error: "Error", warning: "Warning", info: "Info" };
+  const icons = {
+    success:
+      '<i data-lucide="check-circle" style="color: var(--success); width:18px; height:18px;"></i>',
+    error:
+      '<i data-lucide="x-circle" style="color: var(--danger); width:18px; height:18px;"></i>',
+    warning:
+      '<i data-lucide="alert-triangle" style="color: #fd7e14; width:18px; height:18px;"></i>',
+    info: '<i data-lucide="info" style="color: var(--teal); width:18px; height:18px;"></i>',
+  };
+  const titles = {
+    success: "Success",
+    error: "Error",
+    warning: "Warning",
+    info: "Info",
+  };
 
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
@@ -50,36 +75,50 @@ function showToast(message, type = "info", title = "") {
   const duration = type === "error" ? 5000 : 3500;
   setTimeout(() => {
     toast.classList.add("toast-exit");
-    toast.addEventListener("animationend", () => toast.remove(), { once: true });
+    toast.addEventListener("animationend", () => toast.remove(), {
+      once: true,
+    });
   }, duration);
 }
 
 // Convenience wrappers
 const toast = {
   success: (msg, title) => showToast(msg, "success", title),
-  error:   (msg, title) => showToast(msg, "error",   title),
-  warning: (msg, title) => showToast(msg, "warning",  title),
-  info:    (msg, title) => showToast(msg, "info",    title),
+  error: (msg, title) => showToast(msg, "error", title),
+  warning: (msg, title) => showToast(msg, "warning", title),
+  info: (msg, title) => showToast(msg, "info", title),
 };
 
 // ============================================================
 // CUSTOM CONFIRM DIALOG  (replaces window.confirm)
 // ============================================================
-function showConfirm({ title, message, okText = "Confirm", cancelText = "Cancel", danger = true, icon = "⚠️" }) {
+function showConfirm({
+  title,
+  message,
+  okText = "Confirm",
+  cancelText = "Cancel",
+  danger = true,
+  icon = "⚠️",
+}) {
   return new Promise((resolve) => {
-    const overlay  = document.getElementById("confirm-overlay");
-    const iconEl   = document.getElementById("confirm-icon");
-    const titleEl  = document.getElementById("confirm-title");
-    const msgEl    = document.getElementById("confirm-message");
-    const okBtn    = document.getElementById("confirm-ok");
+    const overlay = document.getElementById("confirm-overlay");
+    const iconEl = document.getElementById("confirm-icon");
+    const titleEl = document.getElementById("confirm-title");
+    const msgEl = document.getElementById("confirm-message");
+    const okBtn = document.getElementById("confirm-ok");
     const cancelBtn = document.getElementById("confirm-cancel");
 
-    if (!overlay) { resolve(window.confirm(message)); return; }
+    if (!overlay) {
+      resolve(window.confirm(message));
+      return;
+    }
 
-    iconEl.textContent   = icon;
-    titleEl.textContent  = title   || "Are you sure?";
-    msgEl.textContent    = message || "";
-    okBtn.textContent    = okText;
+    iconEl.innerHTML = `<i data-lucide="${icon}" style="width: 32px; height: 32px;"></i>`;
+    titleEl.textContent = title || "Are you sure?";
+    msgEl.textContent = message || "";
+    okBtn.innerHTML = danger
+      ? `<i data-lucide="trash-2" style="width:16px; height:16px;"></i> ${okText}`
+      : `<i data-lucide="check" style="width:16px; height:16px;"></i> ${okText}`;
     cancelBtn.textContent = cancelText;
 
     okBtn.className = danger ? "confirm-ok" : "confirm-ok ok-safe";
@@ -94,10 +133,10 @@ function showConfirm({ title, message, okText = "Confirm", cancelText = "Cancel"
       resolve(result);
     };
 
-    const onOk     = () => cleanup(true);
+    const onOk = () => cleanup(true);
     const onCancel = () => cleanup(false);
 
-    okBtn.addEventListener("click", onOk,     { once: true });
+    okBtn.addEventListener("click", onOk, { once: true });
     cancelBtn.addEventListener("click", onCancel, { once: true });
   });
 }
@@ -121,6 +160,7 @@ let courses = [];
 let currentUser = null;
 let activeCourse = null;
 let countdownInterval = null;
+let isCreatingAccount = false; // 👈 ADD THIS LINE HERE%
 
 // --- CLOCK SKEW SYNC & DEVICE BINDING ---
 let serverClockSkewMs = 0;
@@ -133,7 +173,7 @@ async function syncServerClock() {
     if (dateHeader) {
       const serverTime = new Date(dateHeader).getTime();
       const latency = (Date.now() - start) / 2;
-      serverClockSkewMs = (serverTime + latency) - Date.now();
+      serverClockSkewMs = serverTime + latency - Date.now();
     }
   } catch (e) {
     console.warn("Clock sync ping fallback:", e);
@@ -151,7 +191,10 @@ function getOrCreateDeviceId() {
     if (typeof crypto !== "undefined" && crypto.randomUUID) {
       deviceId = "dev_" + crypto.randomUUID().replace(/-/g, "");
     } else {
-      deviceId = "dev_" + Math.random().toString(36).substring(2, 12) + Date.now().toString(36);
+      deviceId =
+        "dev_" +
+        Math.random().toString(36).substring(2, 12) +
+        Date.now().toString(36);
     }
     localStorage.setItem("attendify_device_uuid", deviceId);
   }
@@ -178,30 +221,32 @@ function normalizeCourseCode(value) {
 document.addEventListener("DOMContentLoaded", () => {
   const themeToggle = document.getElementById("themeToggle");
   const htmlElement = document.documentElement;
-  if (themeToggle && htmlElement.getAttribute("data-theme") === "dark") {
-    themeToggle.textContent = "☀️";
+  if (themeToggle) {
+    themeToggle.innerHTML =
+      htmlElement.getAttribute("data-theme") === "dark"
+        ? '<i data-lucide="sun"></i>'
+        : '<i data-lucide="moon"></i>';
+    refreshIcons();
   }
 });
 
 // --- HAMBURGER MENU LOGIC ---
-const mobileMenuBtn = document.getElementById("mobileMenuBtn");
-const navLinks = document.getElementById("navLinks");
-
 if (mobileMenuBtn && navLinks) {
   mobileMenuBtn.addEventListener("click", () => {
     navLinks.classList.toggle("show-menu");
-    mobileMenuBtn.textContent = navLinks.classList.contains("show-menu")
-      ? "✖"
-      : "☰";
+    mobileMenuBtn.innerHTML = navLinks.classList.contains("show-menu")
+      ? '<i data-lucide="x"></i>'
+      : '<i data-lucide="menu"></i>';
+    refreshIcons();
   });
 
   navLinks.addEventListener("click", (e) => {
-    if (e.target.tagName === "BUTTON") {
-      navLinks.classList.remove("show-menu");
-      mobileMenuBtn.textContent = "☰";
-    }
-  });
-}
+  if (e.target.tagName === "BUTTON") {
+    navLinks.classList.remove("show-menu");
+    mobileMenuBtn.innerHTML = '<i data-lucide="menu"></i>'; // 👈 FIXED
+    refreshIcons(); // 👈 FIXED
+  }
+});
 
 // --- REAL-TIME FIRESTORE SYNC ---
 let unsubscribeCourses = null;
@@ -224,7 +269,9 @@ function startMemberListener(courseId) {
           .filter((m) => m.role === "student" || m.role === "rep")
           .map((m) => normalizeMatric(m.matric)),
         assistants: members
-          .filter((m) => m.role === "assistant" || m.role === "session_assistant")
+          .filter(
+            (m) => m.role === "assistant" || m.role === "session_assistant",
+          )
           .map((m) => normalizeMatric(m.matric)),
       };
       if (currentUser) {
@@ -282,10 +329,16 @@ function startCourseListener() {
             members,
             // Include rep role so rep counts in enrolled total and analytics
             enrolled: members
-              .filter((member) => member.role === "student" || member.role === "rep")
+              .filter(
+                (member) => member.role === "student" || member.role === "rep",
+              )
               .map((member) => normalizeMatric(member.matric)),
             assistants: members
-              .filter((member) => member.role === "assistant" || member.role === "session_assistant")
+              .filter(
+                (member) =>
+                  member.role === "assistant" ||
+                  member.role === "session_assistant",
+              )
               .map((member) => normalizeMatric(member.matric)),
           };
         }),
@@ -298,8 +351,13 @@ function startCourseListener() {
           if (updated) {
             const prevSession = activeCourse.activeSession;
             activeCourse = updated;
-            if (prevSession && prevSession.localDeadline && activeCourse.activeSession) {
-              activeCourse.activeSession.localDeadline = prevSession.localDeadline;
+            if (
+              prevSession &&
+              prevSession.localDeadline &&
+              activeCourse.activeSession
+            ) {
+              activeCourse.activeSession.localDeadline =
+                prevSession.localDeadline;
             }
             renderPortalState();
           }
@@ -324,15 +382,17 @@ function stopCourseListener() {
 }
 
 // --- THEME TOGGLE LOGIC ---
-const themeToggle = document.getElementById("themeToggle");
-const htmlElement = document.documentElement;
-
-if (themeToggle) {
-  themeToggle.addEventListener("click", () => {
+const themeToggleBtn = document.getElementById("themeToggle");
+if (themeToggleBtn) {
+  themeToggleBtn.addEventListener("click", () => {
     const currentTheme = htmlElement.getAttribute("data-theme");
     const newTheme = currentTheme === "light" ? "dark" : "light";
     htmlElement.setAttribute("data-theme", newTheme);
-    themeToggle.textContent = newTheme === "dark" ? "☀️" : "🌙";
+    themeToggleBtn.innerHTML =
+      newTheme === "dark"
+        ? '<i data-lucide="sun"></i>'
+        : '<i data-lucide="moon"></i>';
+    refreshIcons();
   });
 }
 
@@ -695,7 +755,9 @@ if (signupForm) {
     try {
       if (submitBtn) {
         submitBtn.disabled = true;
-        submitBtn.textContent = "Creating Account... ⏳";
+        submitBtn.innerHTML =
+          '<i data-lucide="loader" class="lucide-spin" style="margin-right:6px; vertical-align:-3px;"></i> Creating Account...';
+        refreshIcons();
       }
 
       const userCredential = await createUserWithEmailAndPassword(
@@ -737,7 +799,10 @@ if (signupForm) {
       });
 
       signupForm.reset();
-      toast.success("Your account is ready. Welcome to Attendify!", "Account Created 🎉");
+      toast.success(
+        "Your account is ready. Welcome to Attendify!",
+        "Account Created 🎉",
+      );
     } catch (error) {
       console.error("Signup error:", error);
       toast.error(error.message, "Something went wrong");
@@ -745,7 +810,9 @@ if (signupForm) {
       isCreatingAccount = false; // 🔓 UNLOCK THE BLOCKER NO MATTER WHAT
       if (submitBtn) {
         submitBtn.disabled = false;
-        submitBtn.textContent = "Sign Up 📝";
+        submitBtn.innerHTML =
+          '<i data-lucide="user-check" style="margin-right:6px; vertical-align:-3px;"></i> Sign Up';
+        refreshIcons();
       }
     }
   });
@@ -772,7 +839,10 @@ if (loginForm) {
       loginForm.reset();
     } catch (error) {
       console.error("Login error:", error);
-      toast.error("Invalid email or password. Please check your credentials.", "Login Failed");
+      toast.error(
+        "Invalid email or password. Please check your credentials.",
+        "Login Failed",
+      );
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.textContent = "Log In 🔓";
@@ -805,7 +875,10 @@ onAuthStateChanged(auth, async (user) => {
       checkAuth();
     } else {
       console.warn("Ghost user blocked: No Firestore profile found.");
-      toast.error("Your account data could not be found. It may have been deleted.", "Access Denied");
+      toast.error(
+        "Your account data could not be found. It may have been deleted.",
+        "Access Denied",
+      );
       await signOut(auth);
       currentUser = null;
       checkAuth();
@@ -835,14 +908,17 @@ onAuthStateChanged(auth, async (user) => {
 
 if (deleteAccountBtn) {
   deleteAccountBtn.addEventListener("click", async () => {
-    if (await showConfirm({
-      title: "Delete Account",
-      message: "This will permanently delete your account and remove you from all courses. This cannot be undone.",
-      okText: "Yes, Delete",
-      cancelText: "Keep Account",
-      icon: "🗑️",
-      danger: true,
-    })) {
+    if (
+      await showConfirm({
+        title: "Delete Account",
+        message:
+          "This will permanently delete your account and remove you from all courses. This cannot be undone.",
+        okText: "Yes, Delete",
+        cancelText: "Keep Account",
+        icon: "🗑️",
+        danger: true,
+      })
+    ) {
       try {
         const uid = auth.currentUser.uid;
         const idToken = await auth.currentUser.getIdToken();
@@ -887,10 +963,16 @@ if (deleteAccountBtn) {
           await signOut(auth);
         }
 
-        toast.info("Your account has been deleted. Goodbye! 👋", "Account Deleted");
+        toast.info(
+          "Your account has been deleted. Goodbye! 👋",
+          "Account Deleted",
+        );
       } catch (error) {
         console.error("Delete account error:", error);
-        toast.error("Something went wrong while deleting your account. Please check your connection.", "Delete Failed");
+        toast.error(
+          "Something went wrong while deleting your account. Please check your connection.",
+          "Delete Failed",
+        );
       }
     }
   });
@@ -1035,7 +1117,10 @@ const resetDeviceBindingBtn = document.getElementById("resetDeviceBindingBtn");
 if (resetDeviceBindingBtn) {
   resetDeviceBindingBtn.addEventListener("click", () => {
     localStorage.removeItem("attendify_device_uuid");
-    toast.success("Device binding removed from this phone. Next check-in will register as a new phone.", "Device Reset 📱");
+    toast.success(
+      "Device binding removed from this phone. Next check-in will register as a new phone.",
+      "Device Reset 📱",
+    );
   });
 }
 
@@ -1056,7 +1141,10 @@ if (forgotPasswordForm) {
       }
 
       await sendPasswordResetEmail(auth, email);
-      toast.success("Check your inbox or spam folder for the reset link.", "Reset Email Sent 📧");
+      toast.success(
+        "Check your inbox or spam folder for the reset link.",
+        "Reset Email Sent 📧",
+      );
       forgotPasswordForm.reset();
       if (forgotModal) forgotModal.classList.remove("show");
     } catch (error) {
@@ -1104,28 +1192,38 @@ function renderCourses() {
     card.style.maxHeight = "none";
     card.style.position = "relative";
 
-    const enrolledCount = Array.isArray(course.enrolled) ? course.enrolled.length : 0;
+    const enrolledCount = Array.isArray(course.enrolled)
+      ? course.enrolled.length
+      : 0;
     const isThisUserRep = currentUser && course.repUid === currentUser.uid;
 
     const actionIcon = isThisUserRep
-      ? `<button onclick="deleteCourse('${course.id}')" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; cursor: pointer; font-size: 1.2rem;" title="Delete Course (Rep Only)">🗑️</button>`
-      : `<button onclick="leaveCourse('${course.id}')" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; cursor: pointer; font-size: 1.2rem;" title="Leave Course">🚪</button>`;
+      ? `<button onclick="deleteCourse('${course.id}')" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; cursor: pointer; color: var(--danger);" title="Delete Course"><i data-lucide="trash-2"></i></button>`
+      : `<button onclick="leaveCourse('${course.id}')" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; cursor: pointer; color: var(--muted);" title="Leave Course"><i data-lucide="log-out"></i></button>`;
 
     card.innerHTML = `
       ${actionIcon}
       <h3 style="color: var(--navy); margin-bottom: 5px;">${course.name}</h3>
       <p style="font-size: 0.85rem; margin-bottom: 5px;">Code: <strong>${course.code}</strong> | Rep: ${course.rep}</p>
-      <p style="font-size: 0.75rem; color: var(--muted); margin-bottom: 15px;">🏛️ ${course.institution || "GEN"} • 📚 ${course.department || "GEN"}</p>
+      <p style="font-size: 0.75rem; color: var(--muted); margin-bottom: 15px;">
+        <i data-lucide="building" style="width:12px; height:12px;"></i> ${course.institution || "GEN"} • 
+        <i data-lucide="book-open" style="width:12px; height:12px;"></i> ${course.department || "GEN"}
+      </p>
       
-      <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.85rem; display: flex; justify-content: space-between;">
-        <span>👥 Enrolled Students:</span>
+      <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center;">
+        <span><i data-lucide="users" style="width:14px; height:14px;"></i> Enrolled Students:</span>
         <strong>${enrolledCount}</strong>
       </div>
 
-      <button class="btn" style="padding: 10px; font-size: 0.9rem;" onclick="openPortal('${course.id}')">Open Portal 🚀</button>
+      <button class="btn" style="padding: 10px; font-size: 0.9rem;" onclick="openPortal('${course.id}')">
+        <i data-lucide="external-link" style="width:16px; height:16px; margin-right:6px; vertical-align:-3px;"></i> Open Portal
+      </button>
     `;
     courseGrid.appendChild(card);
   });
+
+  // DON'T FORGET THIS LINE AT THE VERY END OF THE FUNCTION
+  refreshIcons();
 }
 
 window.deleteCourse = async function (courseId) {
@@ -1151,7 +1249,8 @@ window.deleteCourse = async function (courseId) {
         body: JSON.stringify({ courseId }),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Unable to delete course.");
+      if (!response.ok)
+        throw new Error(result.error || "Unable to delete course.");
       // Remove from local state immediately
       courses = courses.filter((c) => c.id !== courseId);
       renderCourses();
@@ -1219,10 +1318,13 @@ function startSessionLiveListener(courseId) {
         const isStillActive = data.active && cappedMsLeft > 0;
         if (isStillActive) {
           // If a countdown is already ticking for this session, keep our local monotonic deadline
-          const existingDeadline = activeCourse.activeSession && activeCourse.activeSession.localDeadline;
-          const localDeadline = (existingDeadline && existingDeadline > Date.now())
-            ? existingDeadline
-            : Date.now() + cappedMsLeft;
+          const existingDeadline =
+            activeCourse.activeSession &&
+            activeCourse.activeSession.localDeadline;
+          const localDeadline =
+            existingDeadline && existingDeadline > Date.now()
+              ? existingDeadline
+              : Date.now() + cappedMsLeft;
 
           activeCourse.activeSession = {
             expiresAt: data.expiresAt,
@@ -1233,7 +1335,9 @@ function startSessionLiveListener(courseId) {
             attendees: activeCourse.activeSession
               ? activeCourse.activeSession.attendees
               : [],
-            pin: activeCourse.activeSession ? activeCourse.activeSession.pin : null,
+            pin: activeCourse.activeSession
+              ? activeCourse.activeSession.pin
+              : null,
           };
         } else {
           // Session expired or was closed
@@ -1267,7 +1371,10 @@ window.openPortal = function (courseId) {
     (selectedCourse.enrolled || []).map(normalizeMatric).includes(userMatric);
 
   if (!isRep && !isAssistant && !isEnrolled) {
-    toast.warning(`You are not enrolled in "${selectedCourse.name}". Join using code [${selectedCourse.code}] first.`, "Access Denied");
+    toast.warning(
+      `You are not enrolled in "${selectedCourse.name}". Join using code [${selectedCourse.code}] first.`,
+      "Access Denied",
+    );
     return;
   }
 
@@ -1369,7 +1476,9 @@ if (createCourseForm) {
     );
 
     if (!studentMatric) {
-      toast.warning("Your profile isn't fully loaded yet. Please wait a moment and try again.");
+      toast.warning(
+        "Your profile isn't fully loaded yet. Please wait a moment and try again.",
+      );
       return;
     }
 
@@ -1398,7 +1507,10 @@ if (createCourseForm) {
       );
 
       if (duplicateExists) {
-        toast.warning(`Course code "${code}" already exists in your department (${repDepartment} - ${repLevel}).`, "Course Code Taken");
+        toast.warning(
+          `Course code "${code}" already exists in your department (${repDepartment} - ${repLevel}).`,
+          "Course Code Taken",
+        );
         return;
       }
 
@@ -1438,10 +1550,15 @@ if (createCourseForm) {
       if (createModal) createModal.classList.remove("show");
       createCourseForm.reset();
       checkAuth();
-      toast.success(`"${name}" is ready. Share the code with your class!`, "Course Created 🚀");
+      toast.success(
+        `"${name}" is ready. Share the code with your class!`,
+        "Course Created 🚀",
+      );
     } catch (error) {
       console.error("Create course error:", error);
-      toast.error("Something went wrong while creating the course. Check your connection.");
+      toast.error(
+        "Something went wrong while creating the course. Check your connection.",
+      );
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;
@@ -1475,7 +1592,10 @@ if (joinCourseForm) {
       const querySnap = await getDocs(codeQuery);
 
       if (querySnap.empty) {
-        toast.warning(`Course code "${code}" was not found. Double-check and try again.`, "Not Found");
+        toast.warning(
+          `Course code "${code}" was not found. Double-check and try again.`,
+          "Not Found",
+        );
         return;
       }
 
@@ -1535,7 +1655,9 @@ if (joinCourseForm) {
       toast.success(`You are now enrolled in ${found.name}!`, "Joined! 🎉");
     } catch (error) {
       console.error("Join course error:", error);
-      toast.error("Something went wrong while joining. Please check your connection.");
+      toast.error(
+        "Something went wrong while joining. Please check your connection.",
+      );
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;
@@ -1556,7 +1678,9 @@ if (appointAssistantBtn) {
     const selectEl = document.getElementById("courseStudentSelect");
     const selectedMatric = normalizeMatric(selectEl ? selectEl.value : "");
     // Read the scope radio buttons (permanent vs session)
-    const scopeEl = document.querySelector('input[name="assistantScope"]:checked');
+    const scopeEl = document.querySelector(
+      'input[name="assistantScope"]:checked',
+    );
     const isSessionScoped = scopeEl && scopeEl.value === "session";
 
     if (!selectedMatric) {
@@ -1600,15 +1724,29 @@ if (appointAssistantBtn) {
     renderPortalState();
     renderAssistantDropdownAndList();
 
-    const scopeLabel = isSessionScoped ? "Session Rep — auto-revoked after class" : "Permanent Assistant Rep";
-    toast.success(`${scopeLabel} assigned to [${selectedMatric}].`, "Assistant Assigned 👑");
+    const scopeLabel = isSessionScoped
+      ? "Session Rep — auto-revoked after class"
+      : "Permanent Assistant Rep";
+    toast.success(
+      `${scopeLabel} assigned to [${selectedMatric}].`,
+      "Assistant Assigned 👑",
+    );
   });
 }
 
 window.revokeAssistant = async function (matric) {
   if (!activeCourse || !activeCourse.assistants) return;
 
-  if (await showConfirm({ title: "Remove Assistant", message: "Remove this student's assistant badge?", okText: "Remove", cancelText: "Cancel", icon: "👑", danger: true })) {
+  if (
+    await showConfirm({
+      title: "Remove Assistant",
+      message: "Remove this student's assistant badge?",
+      okText: "Remove",
+      cancelText: "Cancel",
+      icon: "👑",
+      danger: true,
+    })
+  ) {
     const targetMatric = normalizeMatric(matric);
     activeCourse.assistants = (activeCourse.assistants || [])
       .map(normalizeMatric)
@@ -1643,10 +1781,14 @@ window.removeStudentFromCourse = async function (matric) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${idToken}`,
         },
-        body: JSON.stringify({ courseId: activeCourse.id, targetMatric: matric }),
+        body: JSON.stringify({
+          courseId: activeCourse.id,
+          targetMatric: matric,
+        }),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Unable to remove student.");
+      if (!response.ok)
+        throw new Error(result.error || "Unable to remove student.");
 
       // Update local state to reflect the removal immediately
       const targetMatric = normalizeMatric(matric);
@@ -1663,7 +1805,10 @@ window.removeStudentFromCourse = async function (matric) {
 
       renderPortalState();
       renderAssistantDropdownAndList();
-      toast.info(`Student [${targetMatric}] has been removed.`, "Student Removed");
+      toast.info(
+        `Student [${targetMatric}] has been removed.`,
+        "Student Removed",
+      );
     } catch (error) {
       console.error("Remove student error:", error);
       toast.error("Unable to remove student. Please try again.");
@@ -1701,7 +1846,8 @@ function renderAssistantDropdownAndList() {
       const memberRecord = (activeCourse.members || []).find(
         (m) => normalizeMatric(m.matric) === matric,
       );
-      const isSession = memberRecord && memberRecord.role === "session_assistant";
+      const isSession =
+        memberRecord && memberRecord.role === "session_assistant";
       const scopeBadge = isSession
         ? `<span style="background: #fd7e14; color: white; padding: 2px 4px; border-radius: 3px; font-size: 0.6rem; margin-left: 4px;">SESSION</span>`
         : `<span style="background: var(--teal); color: white; padding: 2px 4px; border-radius: 3px; font-size: 0.6rem; margin-left: 4px;">PERMANENT</span>`;
@@ -1722,8 +1868,11 @@ function renderLectureHallOptions() {
   if (!selectEl || !activeCourse) return;
 
   const halls = activeCourse.savedHalls || [];
-  const storedPreference = localStorage.getItem(`attendify_last_hall_${activeCourse.id}`);
-  const defaultVal = storedPreference || (halls.length > 0 ? `hall_${halls[0].id}` : "no_gps");
+  const storedPreference = localStorage.getItem(
+    `attendify_last_hall_${activeCourse.id}`,
+  );
+  const defaultVal =
+    storedPreference || (halls.length > 0 ? `hall_${halls[0].id}` : "no_gps");
 
   selectEl.innerHTML = "";
 
@@ -1831,7 +1980,8 @@ function renderSavedHallsList() {
       if (
         await showConfirm({
           title: "Delete Lecture Hall",
-          message: "Are you sure you want to remove this saved lecture hall location?",
+          message:
+            "Are you sure you want to remove this saved lecture hall location?",
           okText: "Delete",
           danger: true,
         })
@@ -1868,7 +2018,8 @@ if (captureHallGpsBtn) {
     if (captureStatus) {
       captureStatus.style.display = "block";
       captureStatus.style.color = "var(--muted)";
-      captureStatus.textContent = "Acquiring satellite lock... Stand near entrance or window.";
+      captureStatus.textContent =
+        "Acquiring satellite lock... Stand near entrance or window.";
     }
 
     navigator.geolocation.getCurrentPosition(
@@ -1884,7 +2035,10 @@ if (captureHallGpsBtn) {
           captureStatus.style.color = "#28a745";
           captureStatus.textContent = `✅ GPS locked with ±${Math.round(pos.coords.accuracy)}m accuracy!`;
         }
-        toast.success(`Coordinates captured (±${Math.round(pos.coords.accuracy)}m).`, "Location Locked 🎯");
+        toast.success(
+          `Coordinates captured (±${Math.round(pos.coords.accuracy)}m).`,
+          "Location Locked 🎯",
+        );
       },
       (err) => {
         captureHallGpsBtn.disabled = false;
@@ -1892,9 +2046,13 @@ if (captureHallGpsBtn) {
         if (captureStatus) {
           captureStatus.style.display = "block";
           captureStatus.style.color = "var(--danger)";
-          captureStatus.textContent = "❌ Could not get GPS. You can enter coordinates manually.";
+          captureStatus.textContent =
+            "❌ Could not get GPS. You can enter coordinates manually.";
         }
-        toast.error("Could not capture GPS. Ensure Location is allowed in browser settings.", "GPS Error");
+        toast.error(
+          "Could not capture GPS. Ensure Location is allowed in browser settings.",
+          "GPS Error",
+        );
       },
       { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
     );
@@ -1910,7 +2068,8 @@ if (addHallForm) {
     const name = document.getElementById("newHallName").value.trim();
     const lat = parseFloat(document.getElementById("newHallLat").value);
     const lon = parseFloat(document.getElementById("newHallLon").value);
-    const radius = parseInt(document.getElementById("newHallRadius").value, 10) || 80;
+    const radius =
+      parseInt(document.getElementById("newHallRadius").value, 10) || 80;
 
     if (!name || isNaN(lat) || isNaN(lon)) {
       toast.error("Please provide valid hall name and coordinates.");
@@ -1980,8 +2139,14 @@ if (generatePinBtn) {
             });
           },
           (err) => {
-            console.warn("Could not capture Rep GPS, starting in PIN-only mode:", err);
-            toast.warning("Could not lock GPS. Starting session in PIN-only mode.", "GPS Fallback");
+            console.warn(
+              "Could not capture Rep GPS, starting in PIN-only mode:",
+              err,
+            );
+            toast.warning(
+              "Could not lock GPS. Starting session in PIN-only mode.",
+              "GPS Fallback",
+            );
             createSession(randomPin, managerMatric, { mode: "no_gps" });
           },
           { enableHighAccuracy: true, timeout: 15000 },
@@ -2026,7 +2191,10 @@ async function createSession(pin, managerMatric, locData = {}) {
     hallName: locData.name || null,
   };
 
-  await setDoc(doc(db, "courses", activeCourse.id, "session", "live"), livePayload);
+  await setDoc(
+    doc(db, "courses", activeCourse.id, "session", "live"),
+    livePayload,
+  );
 
   const secretPayload = {
     pin: pin,
@@ -2037,7 +2205,10 @@ async function createSession(pin, managerMatric, locData = {}) {
     attendees: [managerMatric],
   };
 
-  await setDoc(doc(db, "courses", activeCourse.id, "session", "secret"), secretPayload);
+  await setDoc(
+    doc(db, "courses", activeCourse.id, "session", "secret"),
+    secretPayload,
+  );
 
   activeCourse.activeSession = {
     pin: pin,
@@ -2071,7 +2242,7 @@ function startSessionTimer() {
     }
 
     const deadline =
-      session.localDeadline || (session.expiresAt - serverClockSkewMs);
+      session.localDeadline || session.expiresAt - serverClockSkewMs;
     const msRemaining = deadline - Date.now();
     const timeLeft = Math.max(0, Math.ceil(msRemaining / 1000));
     const liveTimerElement = document.getElementById("countdownTimer");
@@ -2196,7 +2367,10 @@ if (checkInForm) {
           "GPS Permission Denied",
         );
       } else {
-        toast.warning("Precise GPS unavailable. Trying network location...", "GPS Fallback");
+        toast.warning(
+          "Precise GPS unavailable. Trying network location...",
+          "GPS Fallback",
+        );
         navigator.geolocation.getCurrentPosition(
           tryCheckIn,
           () =>
@@ -2209,11 +2383,11 @@ if (checkInForm) {
       }
     };
 
-    navigator.geolocation.getCurrentPosition(
-      tryCheckIn,
-      onGpsError,
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
-    );
+    navigator.geolocation.getCurrentPosition(tryCheckIn, onGpsError, {
+      enableHighAccuracy: true,
+      timeout: 20000,
+      maximumAge: 0,
+    });
   });
 }
 
@@ -2223,14 +2397,17 @@ if (closeClassBtn) {
   closeClassBtn.addEventListener("click", async () => {
     if (!activeCourse) return;
 
-    if (await showConfirm({
-      title: "Close Class",
-      message: "This will save the attendance records and end the active session.",
-      okText: "Close & Save",
-      cancelText: "Cancel",
-      icon: "📁",
-      danger: false,
-    })) {
+    if (
+      await showConfirm({
+        title: "Close Class",
+        message:
+          "This will save the attendance records and end the active session.",
+        okText: "Close & Save",
+        cancelText: "Cancel",
+        icon: "📁",
+        danger: false,
+      })
+    ) {
       try {
         const idToken = await auth.currentUser.getIdToken();
         const response = await fetch("/api/closeSession", {
@@ -2242,7 +2419,8 @@ if (closeClassBtn) {
           body: JSON.stringify({ courseId: activeCourse.id }),
         });
         const result = await response.json();
-        if (!response.ok) throw new Error(result.error || "Unable to close session.");
+        if (!response.ok)
+          throw new Error(result.error || "Unable to close session.");
 
         // Clear local session state
         activeCourse.activeSession = null;
@@ -2252,7 +2430,10 @@ if (closeClassBtn) {
         await loadAttendanceHistory();
 
         renderPortalState();
-        toast.success("Attendance records have been saved to the archive.", "Class Closed 📁");
+        toast.success(
+          "Attendance records have been saved to the archive.",
+          "Class Closed 📁",
+        );
       } catch (error) {
         console.error("Close session error:", error);
         toast.error("Unable to close session. Please try again.");
@@ -2267,14 +2448,16 @@ if (endSemesterBtn) {
   endSemesterBtn.addEventListener("click", async () => {
     if (!activeCourse) return;
 
-    if (await showConfirm({
-      title: "End Semester",
-      message: `This will permanently delete all attendance history for "${activeCourse.name}" and reset the class count to zero.`,
-      okText: "End Semester",
-      cancelText: "Cancel",
-      icon: "🎓",
-      danger: true,
-    })) {
+    if (
+      await showConfirm({
+        title: "End Semester",
+        message: `This will permanently delete all attendance history for "${activeCourse.name}" and reset the class count to zero.`,
+        okText: "End Semester",
+        cancelText: "Cancel",
+        icon: "🎓",
+        danger: true,
+      })
+    ) {
       try {
         const idToken = await auth.currentUser.getIdToken();
         const response = await fetch("/api/endSemester", {
@@ -2286,14 +2469,18 @@ if (endSemesterBtn) {
           body: JSON.stringify({ courseId: activeCourse.id }),
         });
         const result = await response.json();
-        if (!response.ok) throw new Error(result.error || "Unable to end semester.");
+        if (!response.ok)
+          throw new Error(result.error || "Unable to end semester.");
 
         activeCourse.attendanceHistory = [];
         activeCourse.activeSession = null;
         if (countdownInterval) clearInterval(countdownInterval);
 
         renderPortalState();
-        toast.success("All records have been cleared. New semester ready.", "Semester Ended 🎓");
+        toast.success(
+          "All records have been cleared. New semester ready.",
+          "Semester Ended 🎓",
+        );
       } catch (error) {
         console.error("End semester error:", error);
         toast.error("Unable to end semester. Please try again.");
@@ -2374,7 +2561,9 @@ function renderPortalState() {
   const isSessionActive =
     session &&
     !session.expired &&
-    (session.localDeadline ? Date.now() < session.localDeadline : getAccurateNow() < session.expiresAt);
+    (session.localDeadline
+      ? Date.now() < session.localDeadline
+      : getAccurateNow() < session.expiresAt);
 
   const bannerTitle = document.getElementById("bannerTitle");
   const bannerText = document.getElementById("bannerText");
@@ -2390,9 +2579,13 @@ function renderPortalState() {
         bannerTitle.style.color = "#28a745";
       }
       if (bannerText) {
-        const deadline = session.localDeadline || (session.expiresAt - serverClockSkewMs);
+        const deadline =
+          session.localDeadline || session.expiresAt - serverClockSkewMs;
         const msRemaining = deadline - Date.now();
-        const initialSeconds = Math.max(0, Math.min(60, Math.ceil(msRemaining / 1000)));
+        const initialSeconds = Math.max(
+          0,
+          Math.min(60, Math.ceil(msRemaining / 1000)),
+        );
         bannerText.innerHTML = `Time Remaining: <strong id="countdownTimer" style="font-size: 1.2rem;">${initialSeconds}s</strong>`;
       }
     }
@@ -2455,12 +2648,16 @@ function renderPortalState() {
         (m) => normalizeMatric(m.matric) === normalizedM,
       );
       const attendeeRole = memberRecord ? memberRecord.role : "student";
-      const isRepAttendee = activeCourse.repUid === (memberRecord ? memberRecord.uid : null);
+      const isRepAttendee =
+        activeCourse.repUid === (memberRecord ? memberRecord.uid : null);
 
       let badgeHTML = "";
       if (isRepAttendee || attendeeRole === "rep") {
         badgeHTML = `<span style="background: var(--teal); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 6px;">👑 REP</span>`;
-      } else if (attendeeRole === "assistant" || attendeeRole === "session_assistant") {
+      } else if (
+        attendeeRole === "assistant" ||
+        attendeeRole === "session_assistant"
+      ) {
         badgeHTML = `<span style="background: #6f42c1; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 6px;">⭐ ASST</span>`;
       }
 

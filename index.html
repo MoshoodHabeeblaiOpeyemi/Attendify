@@ -8,41 +8,49 @@
   <title>Attendify | Smart Student Attendance</title>
   <link rel="stylesheet" href="style.css">
   <link rel="manifest" href="manifest.json">
+  <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 
 <body>
 
-
   <!-- NAVBAR -->
   <header class="navbar">
     <div class="brand">
-      <span>Attend<span>ify</span> 🎓</span>
+      <span class="brand-word">Attend<span class="brand-suffix">ify</span><span class="brand-node"></span></span>
     </div>
 
     <!-- Mobile Hamburger Button -->
-    <button id="mobileMenuBtn" class="hamburger-btn">☰</button>
+    <button id="mobileMenuBtn" class="hamburger-btn" aria-label="Toggle Menu">
+      <i data-lucide="menu"></i>
+    </button>
 
     <!-- Grouped Nav Links -->
     <div id="navLinks" class="nav-links">
-      <button id="openSettingsBtn" class="theme-btn hidden" title="Account Settings"
-        style="font-size: 0.9rem; padding: 8px 12px;">⚙️</button>
-      <button id="openGuideBtn" class="theme-btn" title="How Attendify Works 📖"
-        style="font-size: 0.9rem; padding: 8px 12px; font-weight: bold;">📖 Guide</button>
-      <button id="themeToggle" class="theme-btn" aria-label="Toggle theme">🌙</button>
+      <button id="openSettingsBtn" class="theme-btn hidden" title="Account Settings" style="padding: 8px 12px;">
+        <i data-lucide="settings"></i>
+      </button>
+      <button id="openGuideBtn" class="theme-btn" title="How Attendify Works"
+        style="padding: 8px 12px; font-weight: 600;">
+        <i data-lucide="book-open"></i> Guide
+      </button>
+      <button id="themeToggle" class="theme-btn" aria-label="Toggle theme">
+        <i data-lucide="moon" id="themeIcon"></i>
+      </button>
       <button id="logoutBtn" class="btn-outline hidden"
-        style="padding: 6px 12px; font-size: 0.85rem; border-color: var(--danger); color: var(--danger);">Logout
-        🚪</button>
+        style="padding: 6px 12px; font-size: 0.85rem; border-color: var(--danger); color: var(--danger);">
+        <i data-lucide="log-out"></i> Logout
+      </button>
     </div>
   </header>
 
   <main class="container">
 
-    <!-- AUTH WRAPPER (Hidden once logged in) -->
+    <!-- AUTH WRAPPER -->
     <div id="authContainer">
 
       <!-- SIGN UP CARD -->
       <section id="signupCard" class="card hidden">
-        <h2>Create Account 🚀</h2>
+        <h2><i data-lucide="user-plus"></i> Create Account</h2>
         <p>Sign up to start managing or joining classes.</p>
 
         <form id="signupForm">
@@ -77,8 +85,8 @@
           <div class="field">
             <label for="signupPassword">Create Password</label>
             <input type="password" id="signupPassword" required placeholder="••••••••">
-            <small style="color: var(--muted); font-size: 0.75rem; display: block; margin-top: 4px;">💡 Use something
-              you can remember—no need for rocket science passwords!</small>
+            <small style="color: var(--muted); font-size: 0.75rem; display: block; margin-top: 4px;">Use something you
+              can remember securely.</small>
           </div>
 
           <!-- COURSE REP CHECKBOX -->
@@ -86,10 +94,10 @@
             <input type="checkbox" id="isRepCheckbox"
               style="width: 20px; height: 20px; accent-color: var(--teal); cursor: pointer;">
             <label for="isRepCheckbox" style="margin-bottom: 0; cursor: pointer; font-size: 0.9rem;">Register as a
-              Course Rep 👑</label>
+              Course Rep</label>
           </div>
 
-          <button type="submit" class="btn">Sign Up 📝</button>
+          <button type="submit" class="btn"><i data-lucide="user-check"></i> Sign Up</button>
         </form>
 
         <p style="text-align: center; margin-top: 15px; font-size: 0.85rem;">
@@ -98,9 +106,9 @@
         </p>
       </section>
 
-      <!-- LOG IN CARD (Initially hidden) -->
+      <!-- LOG IN CARD -->
       <section id="loginCard" class="card">
-        <h2>Welcome Back 👋</h2>
+        <h2><i data-lucide="log-in"></i> Welcome Back</h2>
         <p>Log in to access your course portals.</p>
 
         <form id="loginForm">
@@ -112,12 +120,11 @@
             <label for="loginPassword">Password</label>
             <input type="password" id="loginPassword" required placeholder="••••••••">
           </div>
-          <!-- FORGOT PASSWORD LINK -->
           <div style="text-align: right; margin-bottom: 15px;">
             <a href="#" id="openForgotModal"
-              style="color: var(--teal); font-size: 0.85rem; text-decoration: none;">Forgot password? 🔑</a>
+              style="color: var(--teal); font-size: 0.85rem; text-decoration: none;">Forgot password?</a>
           </div>
-          <button type="submit" class="btn">Log In 🔓</button>
+          <button type="submit" class="btn"><i data-lucide="arrow-right"></i> Log In</button>
         </form>
 
         <p style="text-align: center; margin-top: 15px; font-size: 0.85rem;">
@@ -128,10 +135,10 @@
 
     </div>
 
-    <!-- MAIN DASHBOARD (Hidden once inside portal) -->
+    <!-- MAIN DASHBOARD -->
     <section id="dashboardSection" class="hidden">
       <div class="dashboard-header">
-        <h2>Hey, <span id="displayName">Student</span>! 👋</h2>
+        <h2><i data-lucide="hand-metal"></i> Hey, <span id="displayName">Student</span>!</h2>
         <p style="margin-bottom: 5px;">
           <span style="font-weight: bold; color: var(--navy);">Matric No:</span> <strong id="displayMatric">---</strong>
         </p>
@@ -142,24 +149,28 @@
       </div>
 
       <div class="action-buttons">
-        <button id="openCreateModal" class="btn btn-secondary hidden">➕ Create Course</button>
-        <button id="openJoinModal" class="btn">🤝 Join Course</button>
+        <button id="openCreateModal" class="btn btn-secondary hidden"><i data-lucide="plus-circle"></i> Create
+          Course</button>
+        <button id="openJoinModal" class="btn"><i data-lucide="user-plus"></i> Join Course</button>
       </div>
 
-      <h3 class="section-title">Your Enrolled Courses 📚</h3>
+      <h3 class="section-title"><i data-lucide="book-open"></i> Your Enrolled Courses</h3>
       <div id="courseGrid" class="course-grid"></div>
 
       <div style="margin-top: 40px; text-align: center;">
         <button id="deleteAccountBtn"
-          style="background: transparent; border: none; color: var(--danger); text-decoration: underline; cursor: pointer; font-size: 0.85rem;">Delete
-          My Account ⚠️</button>
+          style="background: transparent; border: none; color: var(--danger); text-decoration: underline; cursor: pointer; font-size: 0.85rem;">
+          <i data-lucide="alert-triangle"></i> Delete My Account
+        </button>
       </div>
     </section>
 
     <!-- COURSE PORTAL SECTION -->
     <section id="portalSection" class="hidden">
       <button id="backToDashboard" class="btn-outline"
-        style="margin-bottom: 20px; width: auto; padding: 8px 16px; font-size: 0.85rem;">← Back to Dashboard</button>
+        style="margin-bottom: 20px; width: auto; padding: 8px 16px; font-size: 0.85rem;">
+        <i data-lucide="arrow-left"></i> Back to Dashboard
+      </button>
 
       <div class="card" style="max-width: 100%;">
         <h2 id="portalCourseTitle">Course Title</h2>
@@ -168,10 +179,12 @@
 
         <hr style="border: 0; border-top: 1px solid var(--border); margin-bottom: 20px;">
 
-        <!-- ACTIVE SESSION TIMER BANNER (Shows when session is live) -->
+        <!-- ACTIVE SESSION TIMER BANNER -->
         <div id="sessionBanner" class="hidden"
           style="background: rgba(40, 167, 69, 0.1); border: 1px solid #28a745; padding: 15px; border-radius: 12px; margin-bottom: 20px; text-align: center;">
-          <h4 id="bannerTitle" style="color: #28a745; margin-bottom: 5px;">🔴 ATTENDANCE SESSION LIVE</h4>
+          <h4 id="bannerTitle" style="color: #28a745; margin-bottom: 5px;">
+            <i data-lucide="radio" style="color: #28a745;"></i> ATTENDANCE SESSION LIVE
+          </h4>
           <p id="bannerText" style="font-size: 0.9rem; margin-bottom: 5px;">Time Remaining: <strong id="countdownTimer"
               style="font-size: 1.2rem;">60s</strong></p>
         </div>
@@ -179,25 +192,34 @@
         <!-- REP CONTROLS -->
         <div id="repControls" class="hidden"
           style="background: var(--bg); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--border);">
-          <h3 style="color: var(--navy); margin-bottom: 10px;">👑 Course Rep Control Center</h3>
-          <p style="font-size: 0.9rem; margin-bottom: 15px;">Generate a 60-second secure PIN for today's lecture
-            attendance.</p>
+          <h3 style="color: var(--navy); margin-bottom: 10px;">
+            <i data-lucide="shield-check"></i> Course Rep Control Center
+          </h3>
+          <p style="font-size: 0.9rem; margin-bottom: 15px;">Generate a secure PIN for today's lecture attendance.</p>
 
           <!-- LECTURE LOCATION SELECTOR -->
-          <div style="margin-bottom: 18px; padding: 14px; background: var(--card-bg); border-radius: 12px; border: 1.5px solid var(--border);">
+          <div
+            style="margin-bottom: 18px; padding: 14px; background: var(--card-bg); border-radius: 12px; border: 1.5px solid var(--border);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-              <label for="repHallSelect" style="font-size: 0.85rem; font-weight: 700; color: var(--navy); margin-bottom: 0;">📍 Lecture Location / Hall:</label>
-              <button id="manageHallsBtn" type="button" style="background: transparent; border: none; color: var(--teal); font-size: 0.8rem; font-weight: 600; cursor: pointer; text-decoration: underline; padding: 0;">⚙️ Manage Halls</button>
+              <label for="repHallSelect"
+                style="font-size: 0.85rem; font-weight: 700; color: var(--navy); margin-bottom: 0;">
+                <i data-lucide="map-pin"></i> Lecture Location / Hall:
+              </label>
+              <button id="manageHallsBtn" type="button"
+                style="background: transparent; border: none; color: var(--teal); font-size: 0.8rem; font-weight: 600; cursor: pointer; text-decoration: underline; padding: 0;">
+                <i data-lucide="sliders"></i> Manage Halls
+              </button>
             </div>
-            <select id="repHallSelect" class="custom-dropdown" style="width: 100%; border-radius: 10px; font-size: 0.9rem;">
-              <!-- Dynamically populated in app.js -->
-            </select>
+            <select id="repHallSelect" class="custom-dropdown"
+              style="width: 100%; border-radius: 10px; font-size: 0.9rem;"></select>
             <div id="hallInfoBadge" class="hall-info-chip">
-              <span>• Smart indoor geofence active</span>
+              <span><i data-lucide="info"></i> Smart indoor geofence active</span>
             </div>
           </div>
 
-          <button id="generatePinBtn" class="btn">Generate Attendance PIN ⏱️</button>
+          <button id="generatePinBtn" class="btn">
+            <i data-lucide="clock"></i> Generate Attendance PIN
+          </button>
 
           <div id="activePinDisplay" class="hidden"
             style="margin-top: 15px; padding: 15px; background: var(--card-bg); border-radius: 8px; text-align: center; border: 2px dashed var(--teal);">
@@ -206,53 +228,55 @@
               style="font-size: 2rem; font-weight: bold; color: var(--teal); letter-spacing: 8px;">----</span>
           </div>
 
-          <!-- PERMANENT REP ACTION: CLOSE CLASS & SAVE -->
+          <!-- CLOSE CLASS & SAVE -->
           <div id="closeClassWrapper" class="hidden"
             style="margin-top: 15px; border-top: 1px solid var(--border); padding-top: 15px;">
             <button id="closeClassBtn" class="btn"
-              style="background: var(--danger); font-size: 0.85rem; padding: 10px 16px; width: 100%;">📁 Close Class &
-              Save Attendance</button>
+              style="background: var(--danger); font-size: 0.85rem; padding: 10px 16px; width: 100%;">
+              <i data-lucide="folder-check"></i> Close Class & Save Attendance
+            </button>
           </div>
         </div>
 
         <!-- REP ASSISTANT MANAGEMENT SECTION -->
         <div id="assistantManagementSection" class="hidden"
-          style="margin-top: 20px; background: var(--bg); padding: 20px; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 20px;">
-          <h3 style="color: var(--navy); margin-bottom: 5px;">👑 Assistant Reps & Group Leads</h3>
+          style="margin-top: 20px; background: var(--bg); padding: 20px; border-radius: 12px; border: 1.5px solid var(--border); margin-bottom: 20px;">
+          <h3 style="color: var(--navy); margin-bottom: 5px;">
+            <i data-lucide="users"></i> Assistant Reps & Group Leads
+          </h3>
           <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Appoint trusted students or team
-            leads who can generate attendance PINs for this course.</p>
+            leads who can generate attendance PINs.</p>
 
           <div class="field" style="margin-bottom: 15px;">
-            <label for="courseStudentSelect" style="font-size: 0.85rem; color: var(--muted);">Select Enrolled Student:</label>
+            <label for="courseStudentSelect" style="font-size: 0.85rem; color: var(--muted);">Select Enrolled
+              Student:</label>
             <select id="courseStudentSelect"
               style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text);">
               <option value="">-- Choose student to appoint --</option>
             </select>
           </div>
 
-          <!-- Scope selection: permanent vs session-only -->
           <div style="margin-bottom: 15px; font-size: 0.85rem;">
             <p style="color: var(--muted); margin-bottom: 8px; font-weight: 600;">Assistant Scope:</p>
             <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; cursor: pointer;">
-              <input type="radio" name="assistantScope" value="permanent" checked
-                style="accent-color: var(--teal);">
-              <span><strong>Permanent</strong> — stays until you remove them (for Group Leads)</span>
+              <input type="radio" name="assistantScope" value="permanent" checked style="accent-color: var(--teal);">
+              <span><strong>Permanent</strong> — stays until removed (Group Leads)</span>
             </label>
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-              <input type="radio" name="assistantScope" value="session"
-                style="accent-color: #fd7e14;">
-              <span><strong>Session Only</strong> — auto-revoked when class closes (for one-off cover)</span>
+              <input type="radio" name="assistantScope" value="session" style="accent-color: #fd7e14;">
+              <span><strong>Session Only</strong> — auto-revoked when class closes</span>
             </label>
           </div>
 
-          <button id="appointAssistantBtn" class="btn" style="font-size: 0.85rem; padding: 8px 14px;">Appoint Assistant Rep ➕</button>
+          <button id="appointAssistantBtn" class="btn" style="font-size: 0.85rem; padding: 8px 14px;">
+            <i data-lucide="user-plus"></i> Appoint Assistant Rep
+          </button>
 
-          <!-- LIST OF CURRENT ASSISTANTS -->
           <div style="margin-top: 20px;">
             <h4 style="font-size: 0.9rem; color: var(--navy); margin-bottom: 8px;">Active Assistants for this Course:
             </h4>
             <ul id="assistantsList" style="list-style: none; padding-left: 0;">
-              <li style="color: var(--muted); font-size: 0.85rem; padding: 5px;">No assistants appointed yet. ⏳</li>
+              <li style="color: var(--muted); font-size: 0.85rem; padding: 5px;">No assistants appointed yet.</li>
             </ul>
           </div>
         </div>
@@ -260,33 +284,36 @@
         <!-- STUDENT CONTROLS -->
         <div id="studentControls" class="hidden"
           style="background: var(--bg); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--border);">
-          <h3 style="color: var(--navy); margin-bottom: 10px;">📍 Student Check-In Portal</h3>
-          <p style="font-size: 0.9rem; margin-bottom: 15px;">Enter the 4-digit PIN announced by your Course Rep before
-            time runs out.</p>
+          <h3 style="color: var(--navy); margin-bottom: 10px;">
+            <i data-lucide="navigation"></i> Student Check-In Portal
+          </h3>
+          <p style="font-size: 0.9rem; margin-bottom: 15px;">Enter the 4-digit PIN announced by your Course Rep.</p>
 
           <form id="checkInForm">
             <div class="field">
               <label for="studentPinInput">Enter 4-Digit PIN</label>
-              <input type="text" id="studentPinInput" maxlength="4" required placeholder="e.g. 4892"
+              <input type="text" id="studentPinInput" maxlength="4" required placeholder="••••"
                 style="font-size: 1.5rem; text-align: center; letter-spacing: 5px;">
             </div>
-            <button type="submit" class="btn">Submit Attendance ✅</button>
+            <button type="submit" class="btn">
+              <i data-lucide="check-circle-2"></i> Submit Attendance
+            </button>
           </form>
 
-
           <div id="eligibilityBanner"
-            style="padding: 10px; border-radius: 6px; font-size: 0.85rem; text-align: center; font-weight: bold;">
-            <!-- Dynamic Status Message -->
+            style="padding: 10px; border-radius: 6px; font-size: 0.85rem; text-align: center; font-weight: bold; margin-top: 15px;">
           </div>
         </div>
       </div>
 
       <!-- STUDENT ATTENDANCE ANALYTICS SECTION -->
       <div id="studentAnalyticsSection" class="hidden"
-        style="margin-top: 20px; background: var(--card-bg); padding: 20px; border-radius: 12px; border: 1px solid var(--border);">
-        <h3 style="color: var(--navy); margin-bottom: 5px;">📈 Your Course Attendance Analytics</h3>
+        style="margin-top: 20px; background: var(--card-bg); padding: 20px; border-radius: 12px; border: 1.5px solid var(--border);">
+        <h3 style="color: var(--navy); margin-bottom: 5px;">
+          <i data-lucide="bar-chart-3"></i> Your Course Attendance Analytics
+        </h3>
         <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Track your lecture presence against
-          university eligibility requirements (Min: 70%).</p>
+          university thresholds (Min: 70%).</p>
 
         <div
           style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 15px;">
@@ -307,37 +334,38 @@
           </div>
         </div>
 
-        <!-- LIVE ROSTER -->
-        <h3 style="margin-bottom: 10px; font-size: 1.1rem; color: var(--navy);">👥 Live Attendance Roster (<span
-            id="rosterCount">0</span>)</h3>
+        <h3 style="margin-bottom: 10px; font-size: 1.1rem; color: var(--navy);">
+          <i data-lucide="users"></i> Live Attendance Roster (<span id="rosterCount">0</span>)
+        </h3>
         <div
           style="background: var(--bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border); max-height: 250px; overflow-y: auto;">
           <ul id="rosterList" style="list-style: none; padding-left: 0;">
-            <li style="color: var(--muted); font-size: 0.9rem; text-align: center; padding: 10px;">No active check-ins
-              yet. Waiting for session to start... ⏳</li>
+            <li style="color: var(--muted); font-size: 0.9rem; text-align: center; padding: 10px;">Waiting for session
+              to start...</li>
           </ul>
         </div>
-
       </div>
     </section>
 
     <!-- REP ARCHIVE & HISTORY SECTION -->
     <div id="repArchiveSection" class="hidden"
-      style="margin-top: 30px; background: var(--bg); padding: 20px; border-radius: 12px; border: 1px solid var(--border);">
-      <h3 style="color: var(--navy); margin-bottom: 5px;">📁 Course Archive & Class History</h3>
+      style="margin-top: 30px; background: var(--bg); padding: 20px; border-radius: 12px; border: 1.5px solid var(--border);">
+      <h3 style="color: var(--navy); margin-bottom: 5px;">
+        <i data-lucide="archive"></i> Course Archive & Class History
+      </h3>
       <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Total Classes Held This Semester: <strong
           id="totalClassesCount" style="color: var(--teal);">0</strong></p>
 
       <div id="archiveListContainer">
         <p style="font-size: 0.9rem; color: var(--muted); text-align: center; padding: 10px;">No archived classes yet.
-          Close a live class to save records here! 🗂️</p>
+        </p>
       </div>
 
-      <!-- END SEMESTER BUTTON -->
       <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border); text-align: right;">
         <button id="endSemesterBtn" class="btn"
-          style="background: var(--danger); font-size: 0.85rem; padding: 8px 14px;">🎓 End Semester & Reset
-          Records</button>
+          style="background: var(--danger); font-size: 0.85rem; padding: 8px 14px; width: auto;">
+          <i data-lucide="rotate-ccw"></i> End Semester & Reset Records
+        </button>
       </div>
     </div>
 
@@ -346,7 +374,7 @@
   <!-- MODAL: FORGOT PASSWORD -->
   <div id="forgotModal" class="modal">
     <div class="modal-card">
-      <h3>Reset Password 🔑</h3>
+      <h3><i data-lucide="key-round"></i> Reset Password</h3>
       <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Enter your registered Email address to
         receive a secure password reset link.</p>
 
@@ -357,30 +385,29 @@
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-outline close-modal">Cancel</button>
-          <button type="submit" class="btn">Send Reset Link 📩</button>
+          <button type="submit" class="btn"><i data-lucide="send"></i> Send Reset Link</button>
         </div>
       </form>
     </div>
   </div>
 
-
   <!-- MODAL: CREATE COURSE -->
   <div id="createModal" class="modal">
     <div class="modal-card">
-      <h3>Create a New Course 🏫</h3>
+      <h3><i data-lucide="folder-plus"></i> Create a New Course</h3>
       <form id="createCourseForm">
         <div class="field">
-          <label for="courseTitle">Course Title (e.g., Geomorphology)</label>
+          <label for="courseTitle">Course Title</label>
           <input type="text" id="courseTitle" required placeholder="e.g., Geomorphology">
         </div>
         <div class="field">
-          <label for="courseCodeInput">Official Course Code (e.g., GEY 204)</label>
+          <label for="courseCodeInput">Official Course Code</label>
           <input type="text" id="courseCodeInput" required placeholder="e.g., GEY 204" autocomplete="off"
             style="text-transform: uppercase;">
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-outline close-modal">Cancel</button>
-          <button type="submit" class="btn">Create Class 🚀</button>
+          <button type="submit" class="btn"><i data-lucide="check"></i> Create Class</button>
         </div>
       </form>
     </div>
@@ -389,55 +416,50 @@
   <!-- MODAL: JOIN COURSE -->
   <div id="joinModal" class="modal">
     <div class="modal-card">
-      <h3>Join a Course 🤝</h3>
+      <h3><i data-lucide="user-plus"></i> Join a Course</h3>
       <form id="joinCourseForm">
         <div class="field">
           <label for="joinCode">Enter Course Code</label>
-          <input type="text" id="joinCode" required placeholder="e.g., MTH-6719">
+          <input type="text" id="joinCode" required placeholder="e.g., MTH 204">
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-outline close-modal">Cancel</button>
-          <button type="submit" class="btn">Join Class 🏃‍♂️</button>
+          <button type="submit" class="btn"><i data-lucide="log-in"></i> Join Class</button>
         </div>
       </form>
     </div>
   </div>
 
-  <!-- MODAL: APP GUIDE / HOW IT WORKS -->
+  <!-- MODAL: APP GUIDE -->
   <div id="guideModal" class="modal">
     <div class="modal-card" style="max-width: 500px; max-height: 85vh; overflow-y: auto;">
-      <h3>📖 How Attendify Works</h3>
+      <h3><i data-lucide="book-open"></i> How Attendify Works</h3>
       <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 20px;">Your complete guide to managing or
-        checking
-        into lectures seamlessly.</p>
+        checking into lectures seamlessly.</p>
 
       <div
         style="text-align: left; font-size: 0.9rem; display: flex; flex-direction: column; gap: 15px; margin-bottom: 20px;">
         <div style="background: var(--bg); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
-          <strong style="color: var(--navy);">🎓 For Students:</strong>
+          <strong style="color: var(--navy);"><i data-lucide="graduation-cap"></i> For Students:</strong>
           <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; margin-bottom: 0;">Join courses using
-            the official code provided by your Department Rep. When a class is live, enter the 4-digit PIN and allow GPS
-            location access to pass the 30m geofence check-in. Keep an eye on your 70% exam eligibility tracker!</p>
+            the official code from your Rep. Enter the 4-digit PIN and pass the location check-in.</p>
         </div>
 
         <div style="background: var(--bg); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
-          <strong style="color: var(--navy);">👑 For Department Reps:</strong>
+          <strong style="color: var(--navy);"><i data-lucide="shield"></i> For Department Reps:</strong>
           <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; margin-bottom: 0;">Register your
-            School, Department, and Level to claim your department's admin slot. Generate 60-second rolling attendance
-            PINs during lectures, manage enrolled students, appoint assistant reps, and export clean CSV attendance
-            reports.</p>
+            Department and Level. Generate 60-second attendance PINs, manage roster members, and export CSV reports.</p>
         </div>
 
         <div style="background: var(--bg); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
-          <strong style="color: var(--navy);">📍 GPS Geofencing & Security:</strong>
-          <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; margin-bottom: 0;">Attendify locks
-            attendance to the lecture hall using GPS coordinates and short-window PINs, completely eliminating proxy
-            sign-ins and fake check-ins.</p>
+          <strong style="color: var(--navy);"><i data-lucide="map-pin"></i> GPS & Security:</strong>
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; margin-bottom: 0;">Prevents proxy
+            sign-ins using rolling windows and geofenced hall parameters.</p>
         </div>
       </div>
 
       <div class="modal-actions">
-        <button type="button" class="btn close-modal" style="width: 100%;">Got it, let's go! 🚀</button>
+        <button type="button" class="btn close-modal" style="width: 100%;">Got it, let's go!</button>
       </div>
     </div>
   </div>
@@ -446,57 +468,70 @@
   <div id="manageHallsModal" class="modal">
     <div class="modal-card" style="max-width: 480px;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-        <h3 style="margin: 0; color: var(--navy);">🏛️ Lecture Hall Locations</h3>
-        <button type="button" class="close-modal" style="background: transparent; border: none; font-size: 1.4rem; cursor: pointer; color: var(--muted); padding: 0 4px;">&times;</button>
+        <h3 style="margin: 0; color: var(--navy);"><i data-lucide="building"></i> Lecture Hall Locations</h3>
+        <button type="button" class="close-modal"
+          style="background: transparent; border: none; font-size: 1.4rem; cursor: pointer; color: var(--muted); padding: 0 4px;">&times;</button>
       </div>
-      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Set up physical lecture halls so students can check in accurately under lecture hall roofs.</p>
+      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Set up physical lecture halls for
+        accurate student verification.</p>
 
-      <!-- CURRENT SAVED HALLS -->
       <div style="margin-bottom: 20px;">
         <h4 style="font-size: 0.9rem; color: var(--navy); margin-bottom: 8px;">Saved Halls for this Course:</h4>
-        <ul id="savedHallsList" style="list-style: none; padding-left: 0; margin: 0; max-height: 160px; overflow-y: auto;">
-          <li style="color: var(--muted); font-size: 0.85rem; padding: 6px;">No saved halls yet. Add one below! 🏛️</li>
+        <ul id="savedHallsList"
+          style="list-style: none; padding-left: 0; margin: 0; max-height: 160px; overflow-y: auto;">
+          <li style="color: var(--muted); font-size: 0.85rem; padding: 6px;">No saved halls yet. Add one below!</li>
         </ul>
       </div>
 
-      <!-- ADD NEW HALL FORM -->
       <div style="background: var(--bg); padding: 14px; border-radius: 8px; border: 1px solid var(--border);">
-        <h4 style="font-size: 0.9rem; color: var(--navy); margin-bottom: 10px;">➕ Add New Lecture Hall</h4>
+        <h4 style="font-size: 0.9rem; color: var(--navy); margin-bottom: 10px;"><i data-lucide="plus-circle"></i> Add
+          New Lecture Hall</h4>
         <form id="addHallForm">
           <div class="field" style="margin-bottom: 10px;">
             <label for="newHallName" style="font-size: 0.8rem; color: var(--muted);">Hall Name</label>
-            <input type="text" id="newHallName" placeholder="e.g., Faculty Lecture Theatre" required style="width: 100%; padding: 8px; font-size: 0.85rem;">
+            <input type="text" id="newHallName" placeholder="e.g., Faculty Lecture Theatre" required
+              style="width: 100%; padding: 8px; font-size: 0.85rem;">
           </div>
 
           <div style="margin-bottom: 12px;">
-            <label style="font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6px;">Location Coordinates:</label>
+            <label style="font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 6px;">Location
+              Coordinates:</label>
             <div style="display: flex; gap: 8px; margin-bottom: 6px;">
-              <button id="captureHallGpsBtn" type="button" class="btn btn-outline" style="flex: 1; font-size: 0.8rem; padding: 7px 10px;">📍 Capture My Current GPS</button>
+              <button id="captureHallGpsBtn" type="button" class="btn btn-outline"
+                style="flex: 1; font-size: 0.8rem; padding: 7px 10px;">
+                <i data-lucide="navigation"></i> Capture Current GPS
+              </button>
             </div>
-            <div id="captureStatus" style="font-size: 0.75rem; color: var(--muted); margin-bottom: 8px; display: none;"></div>
+            <div id="captureStatus" style="font-size: 0.75rem; color: var(--muted); margin-bottom: 8px; display: none;">
+            </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
               <div>
                 <label for="newHallLat" style="font-size: 0.75rem; color: var(--muted);">Latitude</label>
-                <input type="number" id="newHallLat" step="any" required placeholder="6.5244" style="width: 100%; padding: 6px 8px; font-size: 0.85rem;">
+                <input type="number" id="newHallLat" step="any" required placeholder="6.5244"
+                  style="width: 100%; padding: 6px 8px; font-size: 0.85rem;">
               </div>
               <div>
                 <label for="newHallLon" style="font-size: 0.75rem; color: var(--muted);">Longitude</label>
-                <input type="number" id="newHallLon" step="any" required placeholder="3.3792" style="width: 100%; padding: 6px 8px; font-size: 0.85rem;">
+                <input type="number" id="newHallLon" step="any" required placeholder="3.3792"
+                  style="width: 100%; padding: 6px 8px; font-size: 0.85rem;">
               </div>
             </div>
           </div>
 
           <div class="field" style="margin-bottom: 14px;">
-            <label for="newHallRadius" style="font-size: 0.8rem; color: var(--muted);">Hall Size / Allowed Radius</label>
-            <select id="newHallRadius" style="width: 100%; padding: 8px; font-size: 0.85rem; border-radius: 6px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text);">
-              <option value="60">Standard Classroom / Lab (60m radius)</option>
-              <option value="80" selected>Medium / Large Lecture Hall (80m radius)</option>
-              <option value="120">Auditorium / 1000-Seater Complex (120m radius)</option>
+            <label for="newHallRadius" style="font-size: 0.8rem; color: var(--muted);">Hall Radius</label>
+            <select id="newHallRadius"
+              style="width: 100%; padding: 8px; font-size: 0.85rem; border-radius: 6px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text);">
+              <option value="60">Standard Classroom (60m)</option>
+              <option value="80" selected>Medium Lecture Hall (80m)</option>
+              <option value="120">Auditorium Complex (120m)</option>
             </select>
           </div>
 
           <div class="modal-actions" style="margin-top: 10px;">
-            <button type="submit" class="btn" style="width: 100%; font-size: 0.85rem; padding: 10px;">Save Lecture Hall 💾</button>
+            <button type="submit" class="btn" style="width: 100%; font-size: 0.85rem; padding: 10px;">
+              <i data-lucide="save"></i> Save Lecture Hall
+            </button>
           </div>
         </form>
       </div>
@@ -506,9 +541,9 @@
   <!-- MODAL: ACCOUNT SETTINGS -->
   <div id="settingsModal" class="modal">
     <div class="modal-card">
-      <h3>Account Settings ⚙️</h3>
-      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Update your name below. Your matric
-        number is permanently linked to your account for security.</p>
+      <h3><i data-lucide="settings"></i> Account Settings</h3>
+      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Update your name below. Matric number is
+        permanently linked for security.</p>
 
       <form id="settingsForm">
         <div class="field">
@@ -521,7 +556,7 @@
             aria-describedby="matricHelp">
           <small id="matricHelp"
             style="color: var(--muted); font-size: 0.75rem; display: block; margin-top: 4px;">Matric numbers cannot be
-            changed after account creation.</small>
+            changed after registration.</small>
         </div>
         <div class="input-group">
           <label for="settingsLevel">Academic Level</label>
@@ -541,10 +576,13 @@
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-outline close-modal">Cancel</button>
-          <button type="submit" class="btn">Save Changes 💾</button>
+          <button type="submit" class="btn"><i data-lucide="save"></i> Save Changes</button>
         </div>
         <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); text-align: center;">
-          <button id="resetDeviceBindingBtn" type="button" style="background: transparent; border: none; color: var(--teal); font-size: 0.82rem; font-weight: 600; cursor: pointer; text-decoration: underline;">📱 Reset Device Binding (For Testing)</button>
+          <button id="resetDeviceBindingBtn" type="button"
+            style="background: transparent; border: none; color: var(--teal); font-size: 0.82rem; font-weight: 600; cursor: pointer; text-decoration: underline;">
+            <i data-lucide="smartphone"></i> Reset Device Binding (For Testing)
+          </button>
         </div>
       </form>
     </div>
@@ -556,7 +594,7 @@
   <!-- CUSTOM CONFIRM DIALOG -->
   <div id="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
     <div id="confirm-box">
-      <div id="confirm-icon">⚠️</div>
+      <div id="confirm-icon"><i data-lucide="alert-triangle"></i></div>
       <div id="confirm-title">Are you sure?</div>
       <div id="confirm-message"></div>
       <div id="confirm-actions">
@@ -568,12 +606,19 @@
 
   <script type="module" src="app.js"></script>
   <script>
+    // Initialize Lucide icons across the entire DOM once loaded
+    document.addEventListener("DOMContentLoaded", () => {
+      if (typeof lucide !== "undefined") {
+        lucide.createIcons();
+      }
+    });
+
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
         navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" })
           .then((reg) => reg.update())
           .then(() => console.log("Attendify service worker updated"))
-          .catch((err) => console.log("Service Worker registration failed ❌", err));
+          .catch((err) => console.log("Service Worker registration failed", err));
       });
     }
   </script>
