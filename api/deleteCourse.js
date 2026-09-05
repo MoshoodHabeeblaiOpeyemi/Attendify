@@ -69,6 +69,8 @@ module.exports = async (req, res) => {
     await deleteCollection(courseRef.collection("members"));
     await deleteCollection(courseRef.collection("session"));
     await deleteCollection(courseRef.collection("attendance"));
+    await deleteCollection(courseRef.collection("checkins"));
+    await deleteCollection(courseRef.collection("deviceFlags"));
 
     // Now delete the course document itself
     await courseRef.delete();

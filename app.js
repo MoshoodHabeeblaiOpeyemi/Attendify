@@ -60,6 +60,11 @@ function showToast(message, type = "info", title = "") {
     info: "Info",
   };
 
+  const existingMessages = container.querySelectorAll(".toast-message");
+  for (const el of existingMessages) {
+    if (el.textContent === message) return;
+  }
+
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
   toast.innerHTML = `
@@ -168,7 +173,7 @@ let serverClockSkewMs = 0;
 async function syncServerClock() {
   try {
     const start = Date.now();
-    const resp = await fetch("/api/submitAttendance", { method: "OPTIONS" });
+    const resp = await fetch("/", { method: "HEAD", cache: "no-store" });
     const dateHeader = resp.headers.get("date");
     if (dateHeader) {
       const serverTime = new Date(dateHeader).getTime();
@@ -183,6 +188,84 @@ syncServerClock();
 
 function getAccurateNow() {
   return Date.now() + serverClockSkewMs;
+}
+
+function applyPortalCourseUpdate(updated) {
+  if (!updated) return;
+  if (!activeCourse || activeCourse.id !== updated.id) {
+    activeCourse = updated;
+    return;
+  }
+  const prevHistory = activeCourse.attendanceHistory;
+  const prevSession = activeCourse.activeSession;
+  const prevFlags = activeCourse.deviceFlags;
+  activeCourse = {
+    ...updated,
+    attendanceHistory: Array.isArray(prevHistory)
+      ? prevHistory
+      : updated.attendanceHistory || [],
+    deviceFlags: Array.isArray(prevFlags)
+      ? prevFlags
+      : updated.deviceFlags || [],
+  };
+  if (updated.activeSession && prevSession) {
+    activeCourse.activeSession = {
+      ...updated.activeSession,
+      pin: prevSession.pin || updated.activeSession.pin || null,
+      localDeadline:
+        prevSession.localDeadline || updated.activeSession.localDeadline,
+      attendees:
+        prevSession.attendees && prevSession.attendees.length
+          ? prevSession.attendees
+          : updated.activeSession.attendees || [],
+      locationMode:
+        prevSession.locationMode ||
+        updated.activeSession.locationMode ||
+        "no_gps",
+    };
+  }
+}
+
+function getBestGpsPosition(timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject({ code: 2, message: "Geolocation is not supported by your browser." });
+      return;
+    }
+
+    let best = null;
+    let watchId = null;
+    let settled = false;
+
+    const finish = (value, isError) => {
+      if (settled) return;
+      settled = true;
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      if (isError) reject(value);
+      else resolve(value);
+    };
+
+    watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        if (!best || pos.coords.accuracy < best.coords.accuracy) best = pos;
+        if (pos.coords.accuracy <= 50) finish(pos, false);
+      },
+      (err) => {
+        if (best) finish(best, false);
+        else finish(err, true);
+      },
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0 },
+    );
+
+    setTimeout(() => {
+      if (best) finish(best, false);
+      else
+        finish(
+          { code: 3, message: "GPS timed out before a usable lock." },
+          true,
+        );
+    }, timeoutMs);
+  });
 }
 
 function getOrCreateDeviceId() {
@@ -267,6 +350,11 @@ if (mobileMenuBtn && navLinks)
         const members = snap.docs.map((d) => ({ uid: d.id, ...d.data() }));
         const idx = courses.findIndex((c) => c.id === courseId);
         if (idx < 0) return;
+        
+        // Optimize: Check if member data actually changed
+        const existingMembers = courses[idx].members || [];
+        if (JSON.stringify(members) === JSON.stringify(existingMembers)) return;
+        
         courses[idx] = {
           ...courses[idx],
           members,
@@ -285,7 +373,7 @@ if (mobileMenuBtn && navLinks)
           renderCourses();
           if (activeCourse && activeCourse.id === courseId)
           {
-            activeCourse = courses[idx];
+            applyPortalCourseUpdate(courses[idx]);
             renderPortalState();
           }
         }
@@ -356,27 +444,21 @@ if (mobileMenuBtn && navLinks)
             };
           }),
         );
-        courses = loadedCourses;
-        if (currentUser)
-        {
-          renderCourses();
-          if (activeCourse)
+        
+        // Optimize: Only update if courses actually changed
+        if (JSON.stringify(loadedCourses) !== JSON.stringify(courses)) {
+          courses = loadedCourses;
+          if (currentUser)
           {
-            const updated = courses.find((c) => c.id === activeCourse.id);
-            if (updated)
+            renderCourses();
+            if (activeCourse)
             {
-              const prevSession = activeCourse.activeSession;
-              activeCourse = updated;
-              if (
-                prevSession &&
-                prevSession.localDeadline &&
-                activeCourse.activeSession
-              )
+              const updated = courses.find((c) => c.id === activeCourse.id);
+              if (updated)
               {
-                activeCourse.activeSession.localDeadline =
-                  prevSession.localDeadline;
+                applyPortalCourseUpdate(updated);
+                renderPortalState();
               }
-              renderPortalState();
             }
           }
         }
@@ -966,11 +1048,7 @@ if (mobileMenuBtn && navLinks)
 
       activeCourse = null;
       if (countdownInterval) clearInterval(countdownInterval);
-      if (unsubscribeSessionLive)
-      {
-        unsubscribeSessionLive();
-        unsubscribeSessionLive = null;
-      }
+      stopPortalListeners();
 
       stopCourseListener();
       checkAuth();
@@ -1422,8 +1500,11 @@ if (mobileMenuBtn && navLinks)
     }
   };
 
-  // Per-portal live session listener for students — fires when rep starts/stops a session
+  // Per-portal live session listener — students and staff
   let unsubscribeSessionLive = null;
+  let unsubscribeSessionSecret = null;
+  let unsubscribeAttendance = null;
+  let unsubscribeDeviceFlags = null;
 
   function startSessionLiveListener(courseId)
   {
@@ -1447,7 +1528,6 @@ if (mobileMenuBtn && navLinks)
           const isStillActive = data.active && cappedMsLeft > 0;
           if (isStillActive)
           {
-            // If a countdown is already ticking for this session, keep our local monotonic deadline
             const existingDeadline =
               activeCourse.activeSession &&
               activeCourse.activeSession.localDeadline;
@@ -1457,38 +1537,134 @@ if (mobileMenuBtn && navLinks)
                 : Date.now() + cappedMsLeft;
 
             activeCourse.activeSession = {
+              ...(activeCourse.activeSession || {}),
               expiresAt: data.expiresAt,
               localDeadline: localDeadline,
               expired: false,
-              locationMode: data.locationMode || "preset_hall",
+              locationMode: data.locationMode || "no_gps",
               hallName: data.hallName || null,
-              attendees: activeCourse.activeSession
-                ? activeCourse.activeSession.attendees
-                : [],
-              pin: activeCourse.activeSession
-                ? activeCourse.activeSession.pin
-                : null,
             };
-          } else
-          {
-            // Session expired or was closed
-            if (activeCourse.activeSession)
-            {
-              activeCourse.activeSession.expired = true;
-            }
-          }
-        } else
-        {
-          // Doc deleted — session closed
-          if (activeCourse.activeSession)
+          } else if (activeCourse.activeSession)
           {
             activeCourse.activeSession.expired = true;
           }
+        } else if (activeCourse.activeSession)
+        {
+          activeCourse.activeSession.expired = true;
         }
         renderPortalState();
       },
       (err) => console.error("Session live listener error:", err),
     );
+  }
+
+  function startSessionSecretListener(courseId)
+  {
+    if (unsubscribeSessionSecret)
+    {
+      unsubscribeSessionSecret();
+      unsubscribeSessionSecret = null;
+    }
+    unsubscribeSessionSecret = onSnapshot(
+      doc(db, "courses", courseId, "session", "secret"),
+      (snap) =>
+      {
+        if (!activeCourse || activeCourse.id !== courseId) return;
+        if (!snap.exists()) return;
+        const data = snap.data();
+        if (!activeCourse.activeSession)
+        {
+          activeCourse.activeSession = {};
+        }
+        activeCourse.activeSession.pin = String(data.pin || "");
+        activeCourse.activeSession.attendees = data.attendees || [];
+        activeCourse.activeSession.locationMode =
+          data.locationMode || activeCourse.activeSession.locationMode;
+        console.log("Secret listener updated PIN:", activeCourse.activeSession.pin);
+        renderPortalState();
+      },
+      (err) => console.error("Session secret listener error:", err),
+    );
+  }
+
+  function startAttendanceHistoryListener(courseId)
+  {
+    if (unsubscribeAttendance)
+    {
+      unsubscribeAttendance();
+      unsubscribeAttendance = null;
+    }
+    unsubscribeAttendance = onSnapshot(
+      query(
+        collection(db, "courses", courseId, "attendance"),
+        orderBy("closedAt", "asc"),
+      ),
+      (snap) =>
+      {
+        if (!activeCourse || activeCourse.id !== courseId) return;
+        // Optimize: Only update if data actually changed
+        const newHistory = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((record) => Array.isArray(record.attendees));
+
+        // Quick check if data actually changed before re-rendering
+        if (JSON.stringify(newHistory) !== JSON.stringify(activeCourse.attendanceHistory)) {
+          activeCourse.attendanceHistory = newHistory;
+          renderPortalState();
+        }
+      },
+      (err) =>
+      {
+        console.error("Attendance history listener error:", err);
+        loadAttendanceHistory();
+      },
+    );
+  }
+
+  function startDeviceFlagsListener(courseId)
+  {
+    if (unsubscribeDeviceFlags)
+    {
+      unsubscribeDeviceFlags();
+      unsubscribeDeviceFlags = null;
+    }
+    unsubscribeDeviceFlags = onSnapshot(
+      collection(db, "courses", courseId, "deviceFlags"),
+      (snap) =>
+      {
+        if (!activeCourse || activeCourse.id !== courseId) return;
+        activeCourse.deviceFlags = snap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        }));
+        renderPortalState();
+      },
+      (err) => console.error("Device flags listener error:", err),
+    );
+  }
+
+  function stopPortalListeners()
+  {
+    if (unsubscribeSessionLive)
+    {
+      unsubscribeSessionLive();
+      unsubscribeSessionLive = null;
+    }
+    if (unsubscribeSessionSecret)
+    {
+      unsubscribeSessionSecret();
+      unsubscribeSessionSecret = null;
+    }
+    if (unsubscribeAttendance)
+    {
+      unsubscribeAttendance();
+      unsubscribeAttendance = null;
+    }
+    if (unsubscribeDeviceFlags)
+    {
+      unsubscribeDeviceFlags();
+      unsubscribeDeviceFlags = null;
+    }
   }
 
   window.openPortal = function (courseId)
@@ -1558,14 +1734,12 @@ if (mobileMenuBtn && navLinks)
     }
 
     renderPortalState();
-    // Load attendance history from the subcollection now that we know the courseId
-    loadAttendanceHistory().then(() => renderPortalState());
-
-    // Students: subscribe to session/live so the check-in form appears
-    // the moment the rep generates a PIN, without needing a page reload.
-    if (!isRep && !isAssistant)
+    startAttendanceHistoryListener(courseId);
+    startSessionLiveListener(courseId);
+    if (isRep || isAssistant)
     {
-      startSessionLiveListener(courseId);
+      startSessionSecretListener(courseId);
+      startDeviceFlagsListener(courseId);
     }
   };
 
@@ -1587,11 +1761,7 @@ if (mobileMenuBtn && navLinks)
 
       activeCourse = null;
       if (countdownInterval) clearInterval(countdownInterval);
-      if (unsubscribeSessionLive)
-      {
-        unsubscribeSessionLive();
-        unsubscribeSessionLive = null;
-      }
+      stopPortalListeners();
     });
   }
 
@@ -2332,7 +2502,7 @@ if (mobileMenuBtn && navLinks)
 
   if (generatePinBtn)
   {
-    generatePinBtn.addEventListener("click", () =>
+    generatePinBtn.addEventListener("click", async () =>
     {
       if (!activeCourse) return;
 
@@ -2344,65 +2514,87 @@ if (mobileMenuBtn && navLinks)
       const hallSelect = document.getElementById("repHallSelect");
       const selectedVal = hallSelect ? hallSelect.value : "no_gps";
 
+      const confirmNoGps = async (reason) =>
+      {
+        return showConfirm({
+          title: "Start without GPS check?",
+          message:
+            reason +
+            " Students will check in with PIN + device lock only. Anyone with the PIN who is on campus (or not) can mark attendance. Continue?",
+          okText: "Start PIN-only session",
+          cancelText: "Cancel",
+          danger: true,
+          icon: "alert-triangle",
+        });
+      };
+
       if (selectedVal === "no_gps")
       {
-        createSession(randomPin, managerMatric, { mode: "no_gps" });
-      } else if (selectedVal === "live_gps")
+        const ok = await confirmNoGps(
+          "You chose PIN + Device Lock (no GPS).",
+        );
+        if (!ok) return;
+        await createSession(randomPin, managerMatric, { mode: "no_gps" });
+        return;
+      }
+
+      if (selectedVal === "live_gps")
       {
         toast.info("Acquiring GPS for live session...", "GPS Check");
-        if (navigator.geolocation)
+        generatePinBtn.disabled = true;
+        try
         {
-          navigator.geolocation.getCurrentPosition(
-            (pos) =>
-            {
-              createSession(randomPin, managerMatric, {
-                mode: "live_gps",
-                lat: pos.coords.latitude,
-                lon: pos.coords.longitude,
-                radius: 80,
-              });
-            },
-            (err) =>
-            {
-              console.warn(
-                "Could not capture Rep GPS, starting in PIN-only mode:",
-                err,
-              );
-              toast.warning(
-                "Could not lock GPS. Starting session in PIN-only mode.",
-                "GPS Fallback",
-              );
-              createSession(randomPin, managerMatric, { mode: "no_gps" });
-            },
-            { enableHighAccuracy: true, timeout: 15000 },
+          const pos = await getBestGpsPosition(12000);
+          await createSession(randomPin, managerMatric, {
+            mode: "live_gps",
+            lat: pos.coords.latitude,
+            lon: pos.coords.longitude,
+            radius: 80,
+          });
+        } catch (err)
+        {
+          console.warn("Could not capture Rep GPS:", err);
+          const ok = await confirmNoGps(
+            "Could not lock your live GPS. You can still start in PIN-only mode.",
           );
-        } else
+          if (ok)
+          {
+            await createSession(randomPin, managerMatric, { mode: "no_gps" });
+          }
+        } finally
         {
-          createSession(randomPin, managerMatric, { mode: "no_gps" });
+          generatePinBtn.disabled = false;
         }
-      } else if (selectedVal && selectedVal.startsWith("hall_"))
+        return;
+      }
+
+      if (selectedVal && selectedVal.startsWith("hall_"))
       {
         const hallId = selectedVal.replace("hall_", "");
         const hall = (activeCourse.savedHalls || []).find(
           (h) => String(h.id) === String(hallId),
         );
-        if (hall)
+        if (hall && typeof hall.lat === "number" && typeof hall.lon === "number")
         {
-          createSession(randomPin, managerMatric, {
+          await createSession(randomPin, managerMatric, {
             mode: "preset_hall",
             name: hall.name,
             lat: hall.lat,
             lon: hall.lon,
             radius: hall.radius || 80,
           });
-        } else
-        {
-          createSession(randomPin, managerMatric, { mode: "no_gps" });
+          return;
         }
-      } else
-      {
-        createSession(randomPin, managerMatric, { mode: "no_gps" });
+        toast.error(
+          "That saved hall has no usable coordinates. Add the hall again, or choose another mode.",
+        );
+        return;
       }
+
+      const ok = await confirmNoGps(
+        "No lecture hall is selected.",
+      );
+      if (ok) await createSession(randomPin, managerMatric, { mode: "no_gps" });
     });
   }
 
@@ -2413,33 +2605,24 @@ if (mobileMenuBtn && navLinks)
     const now = getAccurateNow();
     const durationSeconds = 60;
     const expiresAt = now + durationSeconds * 1000;
+    const locationMode = locData.mode || "no_gps";
 
     const livePayload = {
       active: true,
       expiresAt: expiresAt,
       durationSeconds: durationSeconds,
-      locationMode: locData.mode || "no_gps",
+      locationMode: locationMode,
       hallName: locData.name || null,
     };
 
-    await setDoc(
-      doc(db, "courses", activeCourse.id, "session", "live"),
-      livePayload,
-    );
-
     const secretPayload = {
       pin: pin,
-      locationMode: locData.mode || "no_gps",
-      lat: locData.lat !== undefined ? locData.lat : null,
-      lon: locData.lon !== undefined ? locData.lon : null,
+      locationMode: locationMode,
+      lat: typeof locData.lat === "number" ? locData.lat : null,
+      lon: typeof locData.lon === "number" ? locData.lon : null,
       radius: locData.radius || 80,
       attendees: [managerMatric],
     };
-
-    await setDoc(
-      doc(db, "courses", activeCourse.id, "session", "secret"),
-      secretPayload,
-    );
 
     activeCourse.activeSession = {
       pin: pin,
@@ -2447,16 +2630,36 @@ if (mobileMenuBtn && navLinks)
       localDeadline: Date.now() + durationSeconds * 1000,
       expired: false,
       attendees: [managerMatric],
-      locationMode: locData.mode || "no_gps",
-      lat: locData.lat,
-      lon: locData.lon,
-      radius: locData.radius || 80,
+      locationMode: locationMode,
+      lat: secretPayload.lat,
+      lon: secretPayload.lon,
+      radius: secretPayload.radius,
       hallName: locData.name || null,
     };
 
-    await updateCourseInFirestore();
     startSessionTimer();
     renderPortalState();
+
+    try
+    {
+      await Promise.all([
+        setDoc(
+          doc(db, "courses", activeCourse.id, "session", "live"),
+          livePayload,
+        ),
+        setDoc(
+          doc(db, "courses", activeCourse.id, "session", "secret"),
+          secretPayload,
+        ),
+      ]);
+      await updateCourseInFirestore();
+    } catch (error)
+    {
+      console.error("Failed to publish session:", error);
+      toast.error(
+        "PIN is showing on this device, but it may not have reached students. Check your connection and generate again.",
+      );
+    }
   }
 
   function startSessionTimer()
@@ -2558,7 +2761,7 @@ if (mobileMenuBtn && navLinks)
         return;
       }
 
-      toast.info("Verifying lecture hall presence...", "📍 Location Check");
+      toast.info("Getting the best GPS lock available...", "📍 Location Check");
 
       const tryCheckIn = async (position) =>
       {
@@ -2566,10 +2769,10 @@ if (mobileMenuBtn && navLinks)
         const studentLon = position.coords.longitude;
         const accuracy = position.coords.accuracy || 999;
 
-        if (accuracy > 200)
+        if (accuracy > 250)
         {
           toast.warning(
-            `Low GPS signal (±${Math.round(accuracy)}m). Ensure you are inside or near the lecture hall.`,
+            `GPS is imprecise (±${Math.round(accuracy)}m). Submitting anyway — indoor signal is often like this.`,
             "Weak Signal",
           );
         }
@@ -2608,38 +2811,27 @@ if (mobileMenuBtn && navLinks)
         }
       };
 
-      const onGpsError = (error) =>
+      try
+      {
+        const position = await getBestGpsPosition(12000);
+        await tryCheckIn(position);
+      } catch (error)
       {
         console.error("GPS error code:", error.code, error.message);
         if (error.code === 1)
         {
           toast.error(
-            "Location access was denied. In Chrome: tap the 🔒 icon in the address bar → Site settings → Location → Allow.",
+            "Location access was denied. In Chrome: tap the lock icon in the address bar → Site settings → Location → Allow.",
             "GPS Permission Denied",
           );
         } else
         {
-          toast.warning(
-            "Precise GPS unavailable. Trying network location...",
-            "GPS Fallback",
-          );
-          navigator.geolocation.getCurrentPosition(
-            tryCheckIn,
-            () =>
-              toast.error(
-                "Could not get your location. Please ensure Location is enabled in phone settings.",
-                "GPS Error",
-              ),
-            { enableHighAccuracy: false, timeout: 15000, maximumAge: 30000 },
+          toast.error(
+            "Could not get your location. Enable Location in phone settings, or ask the Rep to use PIN + Device Lock.",
+            "GPS Error",
           );
         }
-      };
-
-      navigator.geolocation.getCurrentPosition(tryCheckIn, onGpsError, {
-        enableHighAccuracy: true,
-        timeout: 20000,
-        maximumAge: 0,
-      });
+      }
     });
   }
 
@@ -2763,26 +2955,38 @@ if (mobileMenuBtn && navLinks)
           orderBy("closedAt", "asc"),
         ),
       );
-      activeCourse.attendanceHistory = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      }));
+      activeCourse.attendanceHistory = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((record) => Array.isArray(record.attendees));
+      renderPortalState();
     } catch (error)
     {
       console.error("Failed to load attendance history:", error);
-      activeCourse.attendanceHistory = [];
+      activeCourse.attendanceHistory = activeCourse.attendanceHistory || [];
     }
+  }
+
+  function sessionPayloadForCourseDoc(session)
+  {
+    if (!session) return null;
+    return {
+      expiresAt: session.expiresAt || null,
+      expired: !!session.expired,
+      locationMode: session.locationMode || "no_gps",
+      hallName: session.hallName || null,
+      attendees: session.attendees || [],
+      radius: session.radius || 80,
+      lat: typeof session.lat === "number" ? session.lat : null,
+      lon: typeof session.lon === "number" ? session.lon : null,
+    };
   }
 
   async function updateCourseInFirestore()
   {
     if (!activeCourse || !activeCourse.id) return;
     const courseRef = doc(db, "courses", activeCourse.id);
-    // Never overwrite enrolled[] from client state — enrollment is managed
-    // exclusively by the trusted backend (enrollCourse / removeStudent APIs)
-    // to prevent race conditions. Only safe non-enrollment fields go here.
     await updateDoc(courseRef, {
-      activeSession: activeCourse.activeSession || null,
+      activeSession: sessionPayloadForCourseDoc(activeCourse.activeSession),
       assistants: activeCourse.assistants || [],
       savedHalls: activeCourse.savedHalls || [],
     });
@@ -2864,8 +3068,14 @@ if (mobileMenuBtn && navLinks)
       }
       if (isRep || isAssistant)
       {
-        if (activePinDisplay) activePinDisplay.classList.remove("hidden");
-        if (pinCodeText) pinCodeText.textContent = session.pin;
+        if (activePinDisplay) {
+          activePinDisplay.classList.remove("hidden");
+          // Force immediate PIN display
+          if (pinCodeText) {
+            pinCodeText.textContent = session.pin || "----";
+            console.log("PIN displayed:", session.pin);
+          }
+        }
         if (generatePinBtn) generatePinBtn.textContent = "🔄 Regenerate PIN";
         if (closeClassWrapper) closeClassWrapper.classList.remove("hidden");
       }
@@ -2917,11 +3127,52 @@ if (mobileMenuBtn && navLinks)
       }
     }
 
-    if (!rosterList) return;
-    rosterList.innerHTML = "";
+    if (!isRep && !isAssistant)
+    {
+      const studentPinHint = document.querySelector("#studentControls p");
+      if (studentPinHint)
+      {
+        if (isSessionActive && session.locationMode === "no_gps")
+        {
+          studentPinHint.textContent =
+            "GPS is off for this session. Enter the 4-digit PIN announced by your Course Rep.";
+        } else if (isSessionActive)
+        {
+          studentPinHint.textContent =
+            "Enter the 4-digit PIN. Stay in the lecture hall — indoor GPS is often imprecise, keep trying near a window.";
+        } else
+        {
+          studentPinHint.textContent =
+            "Enter the 4-digit PIN announced by your Course Rep.";
+        }
+      }
+    }
 
+    if (!rosterList) return;
+    
     const attendees = session && session.attendees ? session.attendees : [];
     if (rosterCount) rosterCount.textContent = attendees.length;
+
+    // Optimize: Only rebuild roster if attendees count changed
+    const currentCount = rosterList.children.length;
+    const hasEmptyMessage = currentCount === 1 && rosterList.children[0].textContent.includes("No check-ins");
+    
+    if (attendees.length === 0 && hasEmptyMessage) {
+      return; // Skip rebuild if already showing empty message
+    }
+    if (attendees.length > 0 && currentCount === attendees.length + 1) {
+      // Check if the attendees are actually the same
+      const currentAttendees = Array.from(rosterList.children).slice(1).map(li => {
+        const match = li.textContent.match(/\(([^)]+)\)/);
+        return match ? match[1] : null;
+      }).filter(Boolean);
+      
+      if (JSON.stringify(attendees.map(normalizeMatric)) === JSON.stringify(currentAttendees.map(normalizeMatric))) {
+        return; // Skip rebuild if attendees haven't changed
+      }
+    }
+    
+    rosterList.innerHTML = "";
 
     if (attendees.length === 0)
     {

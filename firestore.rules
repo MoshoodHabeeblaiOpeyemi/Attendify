@@ -46,7 +46,7 @@ service cloud.firestore {
         isCourseMember(courseId)
         && get(
           /databases/$(database)/documents/courses/$(courseId)/members/$(request.auth.uid)
-        ).data.role == 'assistant'
+        ).data.role in ['assistant', 'session_assistant', 'rep']
       );
     }
 
@@ -141,10 +141,20 @@ service cloud.firestore {
       }
 
       match /attendance/{attendanceId} {
-        // Rep and assistants can read all records (archive view).
-        // Enrolled students can read to power their personal analytics.
+        // Closed-session summaries only (date + attendees[]).
         allow read: if isCourseStaff(courseId) || isCourseMember(courseId);
-        // All writes go through the trusted backend (Admin SDK), never the client.
+        allow write: if false;
+      }
+
+      match /checkins/{checkinId} {
+        // Per-student live check-in rows. Kept separate from attendance/
+        // so session-summary queries are not mixed with check-in shapes.
+        allow read: if isCourseStaff(courseId) || isCourseMember(courseId);
+        allow write: if false;
+      }
+
+      match /deviceFlags/{flagId} {
+        allow read: if isCourseStaff(courseId);
         allow write: if false;
       }
     }

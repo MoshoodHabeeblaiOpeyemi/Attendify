@@ -63,6 +63,8 @@ module.exports = async (req, res) => {
 
     // Delete all attendance records and clear the live session
     await deleteCollection(courseRef.collection("attendance"));
+    await deleteCollection(courseRef.collection("checkins"));
+    await deleteCollection(courseRef.collection("deviceFlags"));
     await deleteCollection(courseRef.collection("session"));
 
     // Clear activeSession on the course doc (attendanceHistory no longer used)

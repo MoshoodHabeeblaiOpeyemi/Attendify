@@ -40,7 +40,6 @@ module.exports = async (req, res) => {
     if (!targetMatric || typeof targetMatric !== "string")
       return res.status(400).json({ error: "Target matric is required." });
 
-    // Only the course rep is allowed to remove students
     const courseRef = db.collection("courses").doc(courseId);
     const courseSnap = await courseRef.get();
     if (!courseSnap.exists)
@@ -50,21 +49,22 @@ module.exports = async (req, res) => {
       return res.status(403).json({ error: "Only the course rep can remove students." });
 
     const normalizedMatric = String(targetMatric).trim().toUpperCase();
-
-    // Find the members/ doc whose matric matches the target
-    const membersSnap = await courseRef.collection("members").get();
-    const targetMemberDoc = membersSnap.docs.find(
-      (d) => String(d.data().matric || "").trim().toUpperCase() === normalizedMatric,
-    );
+    const membersQuery = courseRef.collection("members");
 
     await db.runTransaction(async (tx) => {
-      // Remove from enrolled[] and assistants[] arrays on the course doc
+      // Move the member lookup inside the transaction to close the race condition
+      const membersSnap = await tx.get(membersQuery);
+      const targetMemberDoc = membersSnap.docs.find(
+        (d) =>
+          String(d.data().matric || "").trim().toUpperCase() ===
+          normalizedMatric,
+      );
+
       tx.update(courseRef, {
         enrolled: FieldValue.arrayRemove(normalizedMatric),
         assistants: FieldValue.arrayRemove(normalizedMatric),
       });
 
-      // Delete the members/ subcollection document if it exists
       if (targetMemberDoc) {
         tx.delete(targetMemberDoc.ref);
       }

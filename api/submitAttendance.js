@@ -38,24 +38,10 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 }
 
 module.exports = async (req, res) => {
-  const allowedOrigins = [
-    "https://attendify-two-green.vercel.app",
-    "http://localhost:3000",
-  ];
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin) || !origin) {
-    res.setHeader("Access-Control-Allow-Origin", origin || "*");
-  }
-  res.setHeader("Access-Control-Allow-Credentials", "true");
-  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
-  if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
 
   try {
-    // 🔐 1. Verify Cryptographic Bearer Token
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res
@@ -67,7 +53,6 @@ module.exports = async (req, res) => {
     const decodedToken = await getAuth().verifyIdToken(idToken);
     const uid = decodedToken.uid;
 
-    // 👤 2. Get User Profile from Database (Never Trust Client Body)
     const userDoc = await db.collection("users").doc(uid).get();
     if (!userDoc.exists) {
       return res.status(404).json({ error: "User profile not found." });
@@ -81,7 +66,6 @@ module.exports = async (req, res) => {
         .json({ error: "User profile has no valid matric number." });
     }
 
-    // 3. Check and validate body parameters
     const { courseId, pin, lat, lon, accuracy, deviceId } = req.body || {};
     if (
       typeof courseId !== "string" ||
@@ -93,19 +77,43 @@ module.exports = async (req, res) => {
         .json({ error: "Missing required check-in fields." });
     }
 
-    // 📱 4. One-Phone = One-Student Device Binding (Anti-Proxy Shield)
+    const courseRef = db.collection("courses").doc(courseId);
+    const courseDoc = await courseRef.get();
+    if (!courseDoc.exists) {
+      return res.status(404).json({ error: "Course not found." });
+    }
+
+    const memberRef = courseRef.collection("members").doc(uid);
+    const memberDoc = await memberRef.get();
+    if (!memberDoc.exists || memberDoc.data().role !== "student") {
+      return res
+        .status(403)
+        .json({ error: "You are not enrolled in this course." });
+    }
+
+    // One-phone binding. A website cannot make this unbreakable (clearing
+    // site data mints a new id). On mismatch we deny AND leave a flag the
+    // rep can review — not a silent drop.
     if (deviceId && typeof deviceId === "string" && deviceId.length >= 8) {
       const deviceRef = db.collection("devices").doc(deviceId);
       const deviceDoc = await deviceRef.get();
       if (deviceDoc.exists) {
-        const boundMatric = String(deviceDoc.data().matric || "").trim().toUpperCase();
+        const boundMatric = String(deviceDoc.data().matric || "")
+          .trim()
+          .toUpperCase();
         if (boundMatric && boundMatric !== matric) {
+          await courseRef.collection("deviceFlags").add({
+            deviceId,
+            attemptedMatric: matric,
+            boundMatric,
+            uid,
+            createdAt: FieldValue.serverTimestamp(),
+          });
           return res.status(403).json({
             error: `Device Locked: This phone is registered to matric [${boundMatric}]. Proxy attendance is strictly prohibited.`,
           });
         }
       } else {
-        // First time check-in from this device — bind it permanently to this matric
         await deviceRef.set({
           matric,
           uid,
@@ -115,22 +123,6 @@ module.exports = async (req, res) => {
       }
     }
 
-    // 📚 5. Check Enrollment
-    const courseRef = db.collection("courses").doc(courseId);
-    const courseDoc = await courseRef.get();
-    if (!courseDoc.exists) {
-      return res.status(404).json({ error: "Course not found." });
-    }
-    const courseData = courseDoc.data();
-    const memberRef = courseRef.collection("members").doc(uid);
-    const memberDoc = await memberRef.get();
-    if (!memberDoc.exists || memberDoc.data().role !== "student") {
-      return res
-        .status(403)
-        .json({ error: "You are not enrolled in this course." });
-    }
-
-    // ⏱️ 6. Server-Side Session & Expiry Check (with 10s network latency grace window)
     const liveRef = courseRef.collection("session").doc("live");
     const liveDoc = await liveRef.get();
     if (!liveDoc.exists || !liveDoc.data().active) {
@@ -138,12 +130,10 @@ module.exports = async (req, res) => {
         .status(404)
         .json({ error: "No active attendance session found." });
     }
-    // 10-second grace window ensures students who submit at :58 on mobile network aren't rejected
     if (Date.now() > liveDoc.data().expiresAt + 10000) {
       return res.status(403).json({ error: "Attendance session has expired!" });
     }
 
-    // 🔑 7. PIN Validation & Session Security Details
     const secretRef = courseRef.collection("session").doc("secret");
     const secretDoc = await secretRef.get();
     if (!secretDoc.exists) {
@@ -156,7 +146,6 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: "Invalid attendance PIN." });
     }
 
-    // 🚫 8. Duplicate Check
     const currentAttendees = sessionData.attendees || [];
     if (currentAttendees.includes(matric)) {
       return res
@@ -164,7 +153,6 @@ module.exports = async (req, res) => {
         .json({ error: "You have already checked in for this session!" });
     }
 
-    // 📍 9. Server Geofence Distance Calculation
     const isNoGpsMode = sessionData.locationMode === "no_gps";
     let distance = 0;
 
@@ -175,44 +163,48 @@ module.exports = async (req, res) => {
         });
       }
 
-      // Allow up to 300m accuracy for indoor cell/Wi-Fi triangulation under concrete roofs
-      if (accuracy !== undefined && accuracy > 300) {
+      const reportedAccuracy =
+        typeof accuracy === "number" && Number.isFinite(accuracy)
+          ? accuracy
+          : 999;
+
+      // Indoor phones often report ±400–900m. That is uncertainty, not proof
+      // the student is kilometres away. Only reject readings that are unusable.
+      if (reportedAccuracy > 1500) {
         return res.status(400).json({
-          error: `GPS signal too weak (±${Math.round(accuracy)}m). Please move closer to a window or door and try again.`,
+          error: `GPS signal unusable (±${Math.round(reportedAccuracy)}m). Move near a window, wait a few seconds, or ask the Rep to start PIN + Device Lock mode.`,
         });
       }
 
       const hallLat = sessionData.lat;
       const hallLon = sessionData.lon;
-      const baseRadius = Number(sessionData.radius) || 70; // Default 70m hall radius
+      const baseRadius = Number(sessionData.radius) || 80;
 
-      if (hallLat !== undefined && hallLon !== undefined) {
+      if (hallLat !== undefined && hallLat !== null && hallLon !== undefined && hallLon !== null) {
         distance = calculateDistance(hallLat, hallLon, lat, lon);
-        // Dynamic indoor tolerance: if indoor accuracy is degraded (e.g. 150m-200m),
-        // adjust allowable radius slightly, capped at 180m to strictly block hostel check-ins.
-        const accuracyTolerance = accuracy > 50 ? (accuracy - 50) * 0.45 : 0;
-        const allowedRadius = Math.min(180, baseRadius + accuracyTolerance);
+        // Allowed radius must include GPS uncertainty, otherwise a student
+        // standing in the hall with ±700m accuracy can never pass a 180m fence.
+        const allowedRadius = Math.min(900, baseRadius + reportedAccuracy);
 
         if (distance > allowedRadius) {
+          const km = (distance / 1000).toFixed(1);
           return res.status(403).json({
-            error: `Too far from lecture hall (~${Math.round(distance)}m). Max radius is ${Math.round(allowedRadius)}m.`,
+            error: `Too far from lecture hall (~${Math.round(distance)}m / ${km}km). Allowed range is ${Math.round(allowedRadius)}m including GPS uncertainty. If you are in the hall, GPS is wrong — ask the Rep to use PIN + Device Lock.`,
           });
         }
       }
     }
 
-    // ✅ 10. Record Attendance Safely
     await secretRef.update({
       attendees: FieldValue.arrayUnion(matric),
     });
 
     const sessionTimestamp = liveDoc.data().expiresAt;
-    const uniqueAttendanceId = `session_${sessionTimestamp}_${matric}`;
-    const attRef = courseRef.collection("attendance").doc(uniqueAttendanceId);
-
-    await attRef.set({
+    const uniqueCheckinId = `session_${sessionTimestamp}_${matric}`;
+    await courseRef.collection("checkins").doc(uniqueCheckinId).set({
       uid,
       matric,
+      sessionExpiresAt: sessionTimestamp,
       timestamp: FieldValue.serverTimestamp(),
       status: "Present",
       location: isNoGpsMode
