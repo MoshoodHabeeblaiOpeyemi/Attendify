@@ -23,6 +23,7 @@ import {
   onSnapshot,
   arrayUnion,
   arrayRemove,
+  serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 // ============================================================
@@ -160,6 +161,31 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
+// ============================================================
+// OPTIONAL HARDENING KEYS (fill these from the Firebase Console)
+// ============================================================
+// App Check: Console → App Check → Apps → register the web app (reCAPTCHA v3),
+// then paste the site key here. Leave empty to run without App Check — the
+// backend only enforces it when ENFORCE_APP_CHECK=true is set on the API env.
+const APP_CHECK_SITE_KEY = "";
+
+// FCM Web Push: Console → Cloud Messaging → Web Push certificates ("VAPID").
+// Leave empty and emergency alerts fall back to in-app toasts + banners only.
+const FCM_VAPID_KEY =
+  "BGnLSA_9ZszaBxhB7eAWnvXJYgxQuDB1m6bN7vdKFolrse2GSMcE1EZRpNXounLaYA7_x8wjqjJqFkhLzs0J8ao";
+
+if (APP_CHECK_SITE_KEY) {
+  import("https://www.gstatic.com/firebasejs/12.18.0/firebase-app-check.js")
+    .then(({ initializeAppCheck, ReCaptchaV3Provider }) => {
+      initializeAppCheck(app, {
+        provider: new ReCaptchaV3Provider(APP_CHECK_SITE_KEY),
+        isTokenAutoRefreshEnabled: true,
+      });
+      console.info("Firebase App Check active.");
+    })
+    .catch((err) => console.warn("App Check init skipped:", err));
+}
+
 // --- GLOBAL APP STATES ---
 let courses = [];
 let currentUser = null;
@@ -212,6 +238,12 @@ function applyPortalCourseUpdate(updated) {
     activeCourse.activeSession = {
       ...updated.activeSession,
       pin: prevSession.pin || updated.activeSession.pin || null,
+      previousPin:
+        prevSession.previousPin || updated.activeSession.previousPin || null,
+      pinRotationTime:
+        prevSession.pinRotationTime ||
+        updated.activeSession.pinRotationTime ||
+        Date.now(),
       localDeadline:
         prevSession.localDeadline || updated.activeSession.localDeadline,
       attendees:
@@ -222,6 +254,14 @@ function applyPortalCourseUpdate(updated) {
         prevSession.locationMode ||
         updated.activeSession.locationMode ||
         "no_gps",
+      sessionDuration:
+        prevSession.sessionDuration ||
+        updated.activeSession.sessionDuration ||
+        60,
+      pinRotationInterval:
+        prevSession.pinRotationInterval ||
+        updated.activeSession.pinRotationInterval ||
+        30,
     };
   }
 }
@@ -229,7 +269,10 @@ function applyPortalCourseUpdate(updated) {
 function getBestGpsPosition(timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
-      reject({ code: 2, message: "Geolocation is not supported by your browser." });
+      reject({
+        code: 2,
+        message: "Geolocation is not supported by your browser.",
+      });
       return;
     }
 
@@ -284,6 +327,149 @@ function getOrCreateDeviceId() {
   return deviceId;
 }
 
+// ============================================================
+// HIDDEN FAIL-SAFE: 3-STRIKE MANUAL OVERRIDE TRACKER
+// Consecutive automated check-in failures are counted silently and
+// NEVER shown to the student. On the 3rd consecutive failure within
+// the same session, the hidden "Request Manual Verification" escape
+// hatch unlocks. A successful check-in wipes the counter instantly.
+// ============================================================
+const MANUAL_OVERRIDE_STRIKES_REQUIRED = 3;
+
+function getFailureState(courseId) {
+  try {
+    const raw = localStorage.getItem(`attendify_failures_${courseId}`);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed.count === "number"
+      ? parsed
+      : { count: 0, sessionKey: "" };
+  } catch (e) {
+    return { count: 0, sessionKey: "" };
+  }
+}
+
+function setFailureState(courseId, state) {
+  try {
+    localStorage.setItem(
+      `attendify_failures_${courseId}`,
+      JSON.stringify(state),
+    );
+  } catch (e) {
+    /* storage unavailable — the override simply stays locked */
+  }
+}
+
+function currentSessionKey(courseId) {
+  const session =
+    activeCourse && activeCourse.id === courseId
+      ? activeCourse.activeSession
+      : null;
+  return session && session.expiresAt
+    ? String(session.expiresAt)
+    : "no_session";
+}
+
+function recordCheckInFailure(courseId) {
+  const sessionKey = currentSessionKey(courseId);
+  const state = getFailureState(courseId);
+  // A brand-new session silently resets the counter.
+  const count = state.sessionKey === sessionKey ? state.count + 1 : 1;
+  setFailureState(courseId, { count, sessionKey });
+  if (count >= MANUAL_OVERRIDE_STRIKES_REQUIRED) {
+    syncManualOverrideUI();
+  }
+}
+
+function resetCheckInFailures(courseId) {
+  setFailureState(courseId, {
+    count: 0,
+    sessionKey: currentSessionKey(courseId),
+  });
+  syncManualOverrideUI();
+}
+
+// Shows the escape hatch ONLY when: student view + 3 strikes this session.
+// The strike count itself is never rendered anywhere.
+function syncManualOverrideUI() {
+  const wrap = document.getElementById("manualOverrideWrap");
+  if (!wrap || !currentUser || !activeCourse) return;
+  const studentControls = document.getElementById("studentControls");
+  if (!studentControls || studentControls.classList.contains("hidden")) {
+    wrap.classList.add("hidden");
+    return;
+  }
+  const state = getFailureState(activeCourse.id);
+  const unlocked =
+    state.sessionKey === currentSessionKey(activeCourse.id) &&
+    state.count >= MANUAL_OVERRIDE_STRIKES_REQUIRED;
+  wrap.classList.toggle("hidden", !unlocked);
+  if (unlocked) refreshIcons();
+}
+
+// Student submits a manual verification request (one per course, uid-keyed).
+async function submitManualRequest() {
+  if (!currentUser || !activeCourse || !auth.currentUser) return;
+  const reasonInput = document.getElementById("manualReasonInput");
+  const sendBtn = document.getElementById("sendManualRequestBtn");
+  const statusEl = document.getElementById("manualRequestStatus");
+  const reason = reasonInput ? reasonInput.value.trim() : "";
+  if (!reason) {
+    toast.warning(
+      "Please type a short reason so your Rep knows what happened.",
+    );
+    return;
+  }
+
+  try {
+    if (sendBtn) {
+      sendBtn.disabled = true;
+      sendBtn.textContent = "Sending...";
+    }
+    await setDoc(
+      doc(
+        db,
+        "courses",
+        activeCourse.id,
+        "manualRequests",
+        auth.currentUser.uid,
+      ),
+      {
+        uid: auth.currentUser.uid,
+        name: currentUser.name || "Student",
+        matric: normalizeMatric(currentUser.matric),
+        reason,
+        status: "pending",
+        sessionExpiresAt:
+          activeCourse.activeSession && activeCourse.activeSession.expiresAt
+            ? activeCourse.activeSession.expiresAt
+            : null,
+        requestedAt: serverTimestamp(),
+      },
+    );
+    if (reasonInput) reasonInput.value = "";
+    toast.success(
+      "Request sent. Raise your hand so your Rep can see you.",
+      "Manual Request Sent",
+    );
+    if (statusEl) {
+      statusEl.classList.remove("hidden");
+      statusEl.style.background = "rgba(253, 126, 20, 0.1)";
+      statusEl.style.color = "#fd7e14";
+      statusEl.textContent =
+        "⏳ Request sent — waiting for your Rep to verify you.";
+    }
+  } catch (error) {
+    console.error("Manual request error:", error);
+    toast.error(error.message || "Could not send your request. Try again.");
+  } finally {
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.innerHTML = '<i data-lucide="send"></i> Send Request to Rep';
+      refreshIcons();
+    }
+  }
+}
+
 // --- DATA NORMALIZERS (v0 Fixes) ---
 function normalizeMatric(value) {
   return String(value || "")
@@ -314,10 +500,8 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // --- HAMBURGER MENU LOGIC ---
-if (mobileMenuBtn && navLinks)
-{
-  mobileMenuBtn.addEventListener("click", () =>
-  {
+if (mobileMenuBtn && navLinks) {
+  mobileMenuBtn.addEventListener("click", () => {
     navLinks.classList.toggle("show-menu");
     mobileMenuBtn.innerHTML = navLinks.classList.contains("show-menu")
       ? '<i data-lucide="x"></i>'
@@ -325,10 +509,8 @@ if (mobileMenuBtn && navLinks)
     refreshIcons();
   });
 
-  navLinks.addEventListener("click", (e) =>
-  {
-    if (e.target.tagName === "BUTTON")
-    {
+  navLinks.addEventListener("click", (e) => {
+    if (e.target.tagName === "BUTTON") {
       navLinks.classList.remove("show-menu");
       mobileMenuBtn.innerHTML = '<i data-lucide="menu"></i>'; // 👈 FIXED
       refreshIcons(); // 👈 FIXED
@@ -340,21 +522,19 @@ if (mobileMenuBtn && navLinks)
   // Map of courseId → unsubscribe function for per-course member listeners
   const memberListeners = {};
 
-  function startMemberListener(courseId)
-  {
+  function startMemberListener(courseId) {
     if (memberListeners[courseId]) return; // already listening
     memberListeners[courseId] = onSnapshot(
       collection(db, "courses", courseId, "members"),
-      (snap) =>
-      {
+      (snap) => {
         const members = snap.docs.map((d) => ({ uid: d.id, ...d.data() }));
         const idx = courses.findIndex((c) => c.id === courseId);
         if (idx < 0) return;
-        
+
         // Optimize: Check if member data actually changed
         const existingMembers = courses[idx].members || [];
         if (JSON.stringify(members) === JSON.stringify(existingMembers)) return;
-        
+
         courses[idx] = {
           ...courses[idx],
           members,
@@ -368,11 +548,9 @@ if (mobileMenuBtn && navLinks)
             )
             .map((m) => normalizeMatric(m.matric)),
         };
-        if (currentUser)
-        {
+        if (currentUser) {
           renderCourses();
-          if (activeCourse && activeCourse.id === courseId)
-          {
+          if (activeCourse && activeCourse.id === courseId) {
             applyPortalCourseUpdate(courses[idx]);
             renderPortalState();
           }
@@ -382,29 +560,24 @@ if (mobileMenuBtn && navLinks)
     );
   }
 
-  function stopAllMemberListeners()
-  {
+  function stopAllMemberListeners() {
     Object.values(memberListeners).forEach((unsub) => unsub());
     Object.keys(memberListeners).forEach((k) => delete memberListeners[k]);
   }
 
-  function startCourseListener()
-  {
+  function startCourseListener() {
     if (unsubscribeCourses) return;
     unsubscribeCourses = onSnapshot(
       collection(db, "courses"),
-      async (snapshot) =>
-      {
+      async (snapshot) => {
         const loadedCourses = await Promise.all(
-          snapshot.docs.map(async (docSnap) =>
-          {
+          snapshot.docs.map(async (docSnap) => {
             const course = { id: docSnap.id, ...docSnap.data() };
 
             // If a member listener is already running for this course, it owns
             // the enrolled/assistants/members fields — don't overwrite them with
             // a one-time getDocs that may race against an in-flight transaction.
-            if (memberListeners[docSnap.id])
-            {
+            if (memberListeners[docSnap.id]) {
               const existing = courses.find((c) => c.id === docSnap.id);
               startMemberListener(docSnap.id); // no-op since guard is already set
               return {
@@ -431,7 +604,8 @@ if (mobileMenuBtn && navLinks)
               // Include rep role so rep counts in enrolled total and analytics
               enrolled: members
                 .filter(
-                  (member) => member.role === "student" || member.role === "rep",
+                  (member) =>
+                    member.role === "student" || member.role === "rep",
                 )
                 .map((member) => normalizeMatric(member.matric)),
               assistants: members
@@ -444,40 +618,37 @@ if (mobileMenuBtn && navLinks)
             };
           }),
         );
-        
+
         // Optimize: Only update if courses actually changed
         if (JSON.stringify(loadedCourses) !== JSON.stringify(courses)) {
           courses = loadedCourses;
-          if (currentUser)
-          {
+          if (currentUser) {
             renderCourses();
-            if (activeCourse)
-            {
+            if (activeCourse) {
               const updated = courses.find((c) => c.id === activeCourse.id);
-              if (updated)
-              {
+              if (updated) {
                 applyPortalCourseUpdate(updated);
                 renderPortalState();
               }
             }
           }
         }
+        // QR scan deep-link: a scanned ?code=&qrpin= link can only be routed
+        // once the student's course list has loaded — try on every snapshot
+        // until it resolves.
+        tryHandlePendingQrScan();
       },
-      (error) =>
-      {
+      (error) => {
         console.error("Course listener error:", error);
-        if (courseGrid)
-        {
+        if (courseGrid) {
           courseGrid.innerHTML = `<p style="color: var(--danger);">⚠️ Couldn't load your courses. Check your connection and try refreshing.</p>`;
         }
       },
     );
   }
 
-  function stopCourseListener()
-  {
-    if (unsubscribeCourses)
-    {
+  function stopCourseListener() {
+    if (unsubscribeCourses) {
       unsubscribeCourses();
       unsubscribeCourses = null;
     }
@@ -486,10 +657,8 @@ if (mobileMenuBtn && navLinks)
 
   // --- THEME TOGGLE LOGIC ---
   const themeToggleBtn = document.getElementById("themeToggle");
-  if (themeToggleBtn)
-  {
-    themeToggleBtn.addEventListener("click", () =>
-    {
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener("click", () => {
       const currentTheme = htmlElement.getAttribute("data-theme");
       const newTheme = currentTheme === "light" ? "dark" : "light";
       htmlElement.setAttribute("data-theme", newTheme);
@@ -667,19 +836,16 @@ if (mobileMenuBtn && navLinks)
     "600 Level",
   ];
 
-  function setupAutocomplete(inputId, suggestionsId, dataList)
-  {
+  function setupAutocomplete(inputId, suggestionsId, dataList) {
     const input = document.getElementById(inputId);
     const box = document.getElementById(suggestionsId);
     if (!input || !box) return;
 
-    function renderMatches()
-    {
+    function renderMatches() {
       const query = input.value.trim().toLowerCase();
       box.innerHTML = "";
 
-      if (!query)
-      {
+      if (!query) {
         box.classList.add("hidden");
         return;
       }
@@ -687,19 +853,16 @@ if (mobileMenuBtn && navLinks)
       const matches = dataList
         .filter((item) => item.toLowerCase().includes(query))
         .slice(0, 8);
-      if (matches.length === 0)
-      {
+      if (matches.length === 0) {
         box.classList.add("hidden");
         return;
       }
 
-      matches.forEach((match) =>
-      {
+      matches.forEach((match) => {
         const item = document.createElement("div");
         item.className = "suggestion-item";
         item.textContent = match;
-        item.addEventListener("mousedown", (e) =>
-        {
+        item.addEventListener("mousedown", (e) => {
           e.preventDefault();
           input.value = match;
           box.classList.add("hidden");
@@ -712,12 +875,10 @@ if (mobileMenuBtn && navLinks)
     }
 
     input.addEventListener("input", renderMatches);
-    input.addEventListener("focus", () =>
-    {
+    input.addEventListener("focus", () => {
       if (input.value.trim()) renderMatches();
     });
-    input.addEventListener("blur", () =>
-    {
+    input.addEventListener("blur", () => {
       setTimeout(() => box.classList.add("hidden"), 100);
     });
   }
@@ -735,12 +896,10 @@ if (mobileMenuBtn && navLinks)
   setupAutocomplete("signupLevel", "levelSuggestions", ACADEMIC_LEVELS);
 
   // --- INPUT MASKS ---
-  function maskCourseCodeInput(id)
-  {
+  function maskCourseCodeInput(id) {
     const el = document.getElementById(id);
     if (!el) return;
-    el.addEventListener("input", () =>
-    {
+    el.addEventListener("input", () => {
       const raw = el.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
       const letters = raw.slice(0, 3).replace(/[0-9]/g, "");
       const numbers = raw
@@ -751,12 +910,10 @@ if (mobileMenuBtn && navLinks)
     });
   }
 
-  function maskMatricInput(id)
-  {
+  function maskMatricInput(id) {
     const el = document.getElementById(id);
     if (!el) return;
-    el.addEventListener("input", () =>
-    {
+    el.addEventListener("input", () => {
       const cursor = el.selectionStart;
       el.value = el.value.toUpperCase();
       el.setSelectionRange(cursor, cursor);
@@ -779,10 +936,8 @@ if (mobileMenuBtn && navLinks)
   const deleteAccountBtn = document.getElementById("deleteAccountBtn");
 
   const showLoginBtn = document.getElementById("showLogin");
-  if (showLoginBtn)
-  {
-    showLoginBtn.addEventListener("click", (e) =>
-    {
+  if (showLoginBtn) {
+    showLoginBtn.addEventListener("click", (e) => {
       e.preventDefault();
       signupCard.classList.add("hidden");
       loginCard.classList.remove("hidden");
@@ -790,20 +945,16 @@ if (mobileMenuBtn && navLinks)
   }
 
   const showSignupBtn = document.getElementById("showSignup");
-  if (showSignupBtn)
-  {
-    showSignupBtn.addEventListener("click", (e) =>
-    {
+  if (showSignupBtn) {
+    showSignupBtn.addEventListener("click", (e) => {
       e.preventDefault();
       loginCard.classList.add("hidden");
       signupCard.classList.remove("hidden");
     });
   }
 
-  function checkAuth()
-  {
-    if (currentUser)
-    {
+  function checkAuth() {
+    if (currentUser) {
       authContainer.classList.add("hidden");
       dashboardSection.classList.remove("hidden");
       logoutBtn.classList.remove("hidden");
@@ -813,31 +964,26 @@ if (mobileMenuBtn && navLinks)
       displayMatric.textContent = currentUser.matric;
 
       const displaySchoolInfo = document.getElementById("displaySchoolInfo");
-      if (displaySchoolInfo)
-      {
+      if (displaySchoolInfo) {
         displaySchoolInfo.textContent = `${currentUser.institution || "GEN"} • ${currentUser.department || "GEN"} • ${currentUser.level || "GEN"}`;
       }
 
       const openCreateModalBtn = document.getElementById("openCreateModal");
-      if (openCreateModalBtn)
-      {
+      if (openCreateModalBtn) {
         const userMatric = normalizeMatric(currentUser.matric);
         const isAnywhereAssistant = courses.some((c) =>
           (c.assistants || []).map(normalizeMatric).includes(userMatric),
         );
 
-        if (currentUser.isRep || isAnywhereAssistant)
-        {
+        if (currentUser.isRep || isAnywhereAssistant) {
           openCreateModalBtn.classList.remove("hidden");
-        } else
-        {
+        } else {
           openCreateModalBtn.classList.add("hidden");
         }
       }
 
       renderCourses();
-    } else
-    {
+    } else {
       authContainer.classList.remove("hidden");
       dashboardSection.classList.add("hidden");
       logoutBtn.classList.add("hidden");
@@ -849,10 +995,8 @@ if (mobileMenuBtn && navLinks)
 
   // --- FIREBASE AUTHENTICATION LOGIC ---
   const signupForm = document.getElementById("signupForm");
-  if (signupForm)
-  {
-    signupForm.addEventListener("submit", async (e) =>
-    {
+  if (signupForm) {
+    signupForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       const submitBtn = signupForm.querySelector("button[type='submit']");
       const name = document.getElementById("signupName").value.trim();
@@ -882,10 +1026,8 @@ if (mobileMenuBtn && navLinks)
 
       isCreatingAccount = true; // 🔒 LOCK THE BLOCKER
 
-      try
-      {
-        if (submitBtn)
-        {
+      try {
+        if (submitBtn) {
           submitBtn.disabled = true;
           submitBtn.innerHTML =
             '<i data-lucide="loader" class="lucide-spin" style="margin-right:6px; vertical-align:-3px;"></i> Creating Account...';
@@ -899,8 +1041,7 @@ if (mobileMenuBtn && navLinks)
         );
         const uid = userCredential.user.uid;
 
-        if (isRep)
-        {
+        if (isRep) {
           const cleanInst = institution.replace(/[^a-zA-Z0-9]/g, "_");
           const cleanDept = department
             .replace(/[^a-zA-Z0-9]/g, "_")
@@ -910,8 +1051,7 @@ if (mobileMenuBtn && navLinks)
           const repSlotRef = doc(db, "departmentReps", repSlotId);
           const repSlotSnap = await getDoc(repSlotRef);
 
-          if (repSlotSnap.exists())
-          {
+          if (repSlotSnap.exists()) {
             await userCredential.user.delete();
             throw new Error(
               `A department representative already exists for ${institution} - ${department} (${level}).`,
@@ -937,15 +1077,12 @@ if (mobileMenuBtn && navLinks)
           "Your account is ready. Welcome to Attendify!",
           "Account Created 🎉",
         );
-      } catch (error)
-      {
+      } catch (error) {
         console.error("Signup error:", error);
         toast.error(error.message, "Something went wrong");
-      } finally
-      {
+      } finally {
         isCreatingAccount = false; // 🔓 UNLOCK THE BLOCKER NO MATTER WHAT
-        if (submitBtn)
-        {
+        if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.innerHTML =
             '<i data-lucide="user-check" style="margin-right:6px; vertical-align:-3px;"></i> Sign Up';
@@ -956,10 +1093,8 @@ if (mobileMenuBtn && navLinks)
   }
 
   const loginForm = document.getElementById("loginForm");
-  if (loginForm)
-  {
-    loginForm.addEventListener("submit", async (e) =>
-    {
+  if (loginForm) {
+    loginForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       const submitBtn = loginForm.querySelector("button[type='submit']");
       const email = document
@@ -968,25 +1103,21 @@ if (mobileMenuBtn && navLinks)
         .toLowerCase();
       const password = document.getElementById("loginPassword").value;
 
-      try
-      {
-        if (submitBtn)
-        {
+      try {
+        if (submitBtn) {
           submitBtn.disabled = true;
           submitBtn.textContent = "Logging in... ⏳";
         }
 
         await signInWithEmailAndPassword(auth, email, password);
         loginForm.reset();
-      } catch (error)
-      {
+      } catch (error) {
         console.error("Login error:", error);
         toast.error(
           "Invalid email or password. Please check your credentials.",
           "Login Failed",
         );
-        if (submitBtn)
-        {
+        if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.textContent = "Log In 🔓";
         }
@@ -995,36 +1126,29 @@ if (mobileMenuBtn && navLinks)
   }
 
   // 🛡️ v0 Logout Fix: Let onAuthStateChanged handle UI updates cleanly
-  if (logoutBtn)
-  {
-    logoutBtn.addEventListener("click", async () =>
-    {
-      try
-      {
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", async () => {
+      try {
         await signOut(auth);
-      } catch (error)
-      {
+      } catch (error) {
         console.error("Logout error:", error);
         toast.error("Unable to log out. Please try again.");
       }
     });
   }
 
-  onAuthStateChanged(auth, async (user) =>
-  {
+  onAuthStateChanged(auth, async (user) => {
     if (isCreatingAccount) return; // 🛑 Ignore during active registration sequence!
 
-    if (user)
-    {
+    if (user) {
       const userDoc = await getDoc(doc(db, "users", user.uid));
 
-      if (userDoc.exists())
-      {
+      if (userDoc.exists()) {
         currentUser = userDoc.data();
         startCourseListener();
+        startNotificationsListener();
         checkAuth();
-      } else
-      {
+      } else {
         console.warn("Ghost user blocked: No Firestore profile found.");
         toast.error(
           "Your account data could not be found. It may have been deleted.",
@@ -1034,8 +1158,7 @@ if (mobileMenuBtn && navLinks)
         currentUser = null;
         checkAuth();
       }
-    } else
-    {
+    } else {
       currentUser = null;
       if (portalSection) portalSection.classList.add("hidden");
       const repArchiveSection = document.getElementById("repArchiveSection");
@@ -1055,10 +1178,8 @@ if (mobileMenuBtn && navLinks)
     }
   });
 
-  if (deleteAccountBtn)
-  {
-    deleteAccountBtn.addEventListener("click", async () =>
-    {
+  if (deleteAccountBtn) {
+    deleteAccountBtn.addEventListener("click", async () => {
       if (
         await showConfirm({
           title: "Delete Account",
@@ -1069,10 +1190,8 @@ if (mobileMenuBtn && navLinks)
           icon: "🗑️",
           danger: true,
         })
-      )
-      {
-        try
-        {
+      ) {
+        try {
           const uid = auth.currentUser.uid;
           const idToken = await auth.currentUser.getIdToken();
 
@@ -1080,10 +1199,8 @@ if (mobileMenuBtn && navLinks)
           // trusted backend endpoint leaveCourse uses — one course at a
           // time, each cleaned atomically instead of leaving stale matric
           // entries behind.
-          for (const course of courses)
-          {
-            try
-            {
+          for (const course of courses) {
+            try {
               const response = await fetch("/api/leaveCourse", {
                 method: "POST",
                 headers: {
@@ -1092,16 +1209,14 @@ if (mobileMenuBtn && navLinks)
                 },
                 body: JSON.stringify({ courseId: course.id }),
               });
-              if (!response.ok)
-              {
+              if (!response.ok) {
                 const result = await response.json().catch(() => ({}));
                 console.warn(
                   `Could not leave course ${course.id}:`,
                   result.error,
                 );
               }
-            } catch (courseError)
-            {
+            } catch (courseError) {
               console.warn(`Could not leave course ${course.id}:`, courseError);
             }
           }
@@ -1111,11 +1226,9 @@ if (mobileMenuBtn && navLinks)
           localStorage.removeItem("attendify_device_uuid");
 
           // Attempt to delete the Firebase Auth user (if recent login), otherwise force sign out
-          try
-          {
+          try {
             await auth.currentUser.delete();
-          } catch (error)
-          {
+          } catch (error) {
             console.warn(
               "Requires recent login to delete auth object. Signing out instead.",
             );
@@ -1126,8 +1239,7 @@ if (mobileMenuBtn && navLinks)
             "Your account has been deleted. Goodbye! 👋",
             "Account Deleted",
           );
-        } catch (error)
-        {
+        } catch (error) {
           console.error("Delete account error:", error);
           toast.error(
             "Something went wrong while deleting your account. Please check your connection.",
@@ -1147,54 +1259,42 @@ if (mobileMenuBtn && navLinks)
   const openGuideBtn = document.getElementById("openGuideBtn");
 
   const openCreateModalBtn = document.getElementById("openCreateModal");
-  if (openCreateModalBtn)
-  {
-    openCreateModalBtn.addEventListener("click", () =>
-    {
+  if (openCreateModalBtn) {
+    openCreateModalBtn.addEventListener("click", () => {
       if (createModal) createModal.classList.add("show");
     });
   }
 
   const openJoinModalBtn = document.getElementById("openJoinModal");
-  if (openJoinModalBtn)
-  {
-    openJoinModalBtn.addEventListener("click", () =>
-    {
+  if (openJoinModalBtn) {
+    openJoinModalBtn.addEventListener("click", () => {
       if (joinModal) joinModal.classList.add("show");
     });
   }
 
   const openForgotModalBtn = document.getElementById("openForgotModal");
-  if (openForgotModalBtn)
-  {
-    openForgotModalBtn.addEventListener("click", (e) =>
-    {
+  if (openForgotModalBtn) {
+    openForgotModalBtn.addEventListener("click", (e) => {
       e.preventDefault();
       if (forgotModal) forgotModal.classList.add("show");
     });
   }
 
-  document.querySelectorAll(".close-modal").forEach((btn) =>
-  {
-    btn.addEventListener("click", () =>
-    {
+  document.querySelectorAll(".close-modal").forEach((btn) => {
+    btn.addEventListener("click", () => {
       const parentModal = btn.closest(".modal");
       if (parentModal) parentModal.classList.remove("show");
     });
   });
 
-  document.querySelectorAll(".modal").forEach((modal) =>
-  {
-    modal.addEventListener("click", (e) =>
-    {
+  document.querySelectorAll(".modal").forEach((modal) => {
+    modal.addEventListener("click", (e) => {
       if (e.target === modal) modal.classList.remove("show");
     });
   });
 
-  if (openGuideBtn && guideModal)
-  {
-    openGuideBtn.addEventListener("click", () =>
-    {
+  if (openGuideBtn && guideModal) {
+    openGuideBtn.addEventListener("click", () => {
       guideModal.classList.add("show");
     });
   }
@@ -1202,10 +1302,8 @@ if (mobileMenuBtn && navLinks)
   // --- ACCOUNT SETTINGS MODAL ---
   const settingsForm = document.getElementById("settingsForm");
 
-  if (openSettingsBtn && settingsModal)
-  {
-    openSettingsBtn.addEventListener("click", () =>
-    {
+  if (openSettingsBtn && settingsModal) {
+    openSettingsBtn.addEventListener("click", () => {
       if (!currentUser) return;
       const settingsNameInput = document.getElementById("settingsName");
       const settingsMatricInput = document.getElementById("settingsMatric");
@@ -1214,16 +1312,15 @@ if (mobileMenuBtn && navLinks)
       if (settingsNameInput) settingsNameInput.value = currentUser.name || "";
       if (settingsMatricInput)
         settingsMatricInput.value = currentUser.matric || "";
-      if (settingsLevelInput) settingsLevelInput.value = currentUser.level || ""; // NEW
+      if (settingsLevelInput)
+        settingsLevelInput.value = currentUser.level || ""; // NEW
 
       settingsModal.classList.add("show");
     });
   }
 
-  if (settingsForm)
-  {
-    settingsForm.addEventListener("submit", async (e) =>
-    {
+  if (settingsForm) {
+    settingsForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       const submitBtn = settingsForm.querySelector("button[type='submit']");
       const newName = document.getElementById("settingsName").value.trim();
@@ -1236,10 +1333,8 @@ if (mobileMenuBtn && navLinks)
 
       if (!newName || !newMatric || !currentUser || !auth.currentUser) return;
 
-      try
-      {
-        if (submitBtn)
-        {
+      try {
+        if (submitBtn) {
           submitBtn.disabled = true;
           submitBtn.textContent = "Saving... ⏳";
         }
@@ -1273,21 +1368,17 @@ if (mobileMenuBtn && navLinks)
         if (displayMatric) displayMatric.textContent = newMatric;
 
         const displaySchoolInfo = document.getElementById("displaySchoolInfo");
-        if (displaySchoolInfo)
-        {
+        if (displaySchoolInfo) {
           displaySchoolInfo.textContent = `${currentUser.institution || "GEN"} • ${currentUser.department || "GEN"} • ${currentUser.level || "GEN"}`;
         }
 
         settingsModal.classList.remove("show");
         toast.success("Your profile has been updated.", "Profile Saved");
-      } catch (error)
-      {
+      } catch (error) {
         console.error("Settings update error:", error);
         toast.error(error.message, "Something went wrong");
-      } finally
-      {
-        if (submitBtn)
-        {
+      } finally {
+        if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.textContent = "Save Changes 💾";
         }
@@ -1295,11 +1386,11 @@ if (mobileMenuBtn && navLinks)
     });
   }
 
-  const resetDeviceBindingBtn = document.getElementById("resetDeviceBindingBtn");
-  if (resetDeviceBindingBtn)
-  {
-    resetDeviceBindingBtn.addEventListener("click", () =>
-    {
+  const resetDeviceBindingBtn = document.getElementById(
+    "resetDeviceBindingBtn",
+  );
+  if (resetDeviceBindingBtn) {
+    resetDeviceBindingBtn.addEventListener("click", () => {
       localStorage.removeItem("attendify_device_uuid");
       toast.success(
         "Device binding removed from this phone. Next check-in will register as a new phone.",
@@ -1309,21 +1400,19 @@ if (mobileMenuBtn && navLinks)
   }
 
   const forgotPasswordForm = document.getElementById("forgotPasswordForm");
-  if (forgotPasswordForm)
-  {
-    forgotPasswordForm.addEventListener("submit", async (e) =>
-    {
+  if (forgotPasswordForm) {
+    forgotPasswordForm.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const submitBtn = forgotPasswordForm.querySelector("button[type='submit']");
+      const submitBtn = forgotPasswordForm.querySelector(
+        "button[type='submit']",
+      );
       const email = document
         .getElementById("forgotEmail")
         .value.trim()
         .toLowerCase();
 
-      try
-      {
-        if (submitBtn)
-        {
+      try {
+        if (submitBtn) {
           submitBtn.disabled = true;
           submitBtn.textContent = "Sending Link... ⏳";
         }
@@ -1335,14 +1424,11 @@ if (mobileMenuBtn && navLinks)
         );
         forgotPasswordForm.reset();
         if (forgotModal) forgotModal.classList.remove("show");
-      } catch (error)
-      {
+      } catch (error) {
         console.error("Password reset error:", error);
         toast.error(error.message, "Something went wrong");
-      } finally
-      {
-        if (submitBtn)
-        {
+      } finally {
+        if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.textContent = "Update Password 🔄";
         }
@@ -1354,15 +1440,13 @@ if (mobileMenuBtn && navLinks)
   const courseGrid = document.getElementById("courseGrid");
   const portalSection = document.getElementById("portalSection");
 
-  function renderCourses()
-  {
+  function renderCourses() {
     if (!courseGrid) return;
     courseGrid.innerHTML = "";
 
     const userMatric = normalizeMatric(currentUser ? currentUser.matric : "");
 
-    const myCourses = courses.filter((course) =>
-    {
+    const myCourses = courses.filter((course) => {
       if (!currentUser) return false;
       const isRep = course.repUid === currentUser.uid; // Strict UID check
       const isAssistant = (course.assistants || [])
@@ -1374,14 +1458,12 @@ if (mobileMenuBtn && navLinks)
       return isRep || isAssistant || isEnrolled;
     });
 
-    if (myCourses.length === 0)
-    {
+    if (myCourses.length === 0) {
       courseGrid.innerHTML = `<p style="color: var(--muted);">No courses joined yet. Create or join one above! 🚀</p>`;
       return;
     }
 
-    myCourses.forEach((course) =>
-    {
+    myCourses.forEach((course) => {
       const card = document.createElement("div");
       card.className = "card";
       card.style.maxHeight = "none";
@@ -1421,8 +1503,7 @@ if (mobileMenuBtn && navLinks)
     refreshIcons();
   }
 
-  window.deleteCourse = async function (courseId)
-  {
+  window.deleteCourse = async function (courseId) {
     const course = courses.find((c) => c.id === courseId);
     if (
       await showConfirm({
@@ -1433,10 +1514,8 @@ if (mobileMenuBtn && navLinks)
         icon: "🗑️",
         danger: true,
       })
-    )
-    {
-      try
-      {
+    ) {
+      try {
         const idToken = await auth.currentUser.getIdToken();
         const response = await fetch("/api/deleteCourse", {
           method: "POST",
@@ -1452,16 +1531,14 @@ if (mobileMenuBtn && navLinks)
         // Remove from local state immediately
         courses = courses.filter((c) => c.id !== courseId);
         renderCourses();
-      } catch (error)
-      {
+      } catch (error) {
         console.error("Delete course error:", error);
         toast.error("Unable to delete course. Please try again.");
       }
     }
   };
 
-  window.leaveCourse = async function (courseId)
-  {
+  window.leaveCourse = async function (courseId) {
     const course = courses.find((c) => c.id === courseId);
     if (!course || !auth.currentUser) return;
 
@@ -1474,10 +1551,8 @@ if (mobileMenuBtn && navLinks)
         icon: "🚪",
         danger: false,
       })
-    )
-    {
-      try
-      {
+    ) {
+      try {
         const idToken = await auth.currentUser.getIdToken();
         const response = await fetch("/api/leaveCourse", {
           method: "POST",
@@ -1492,8 +1567,7 @@ if (mobileMenuBtn && navLinks)
           throw new Error(result.error || "Unable to leave course.");
 
         toast.info(`You have left ${course.name}.`, "Left Course 👋");
-      } catch (error)
-      {
+      } catch (error) {
         console.error("Leave course error:", error);
         toast.error("Unable to leave course. Please check your connection.");
       }
@@ -1505,29 +1579,29 @@ if (mobileMenuBtn && navLinks)
   let unsubscribeSessionSecret = null;
   let unsubscribeAttendance = null;
   let unsubscribeDeviceFlags = null;
+  let unsubscribeManualRequests = null;
+  let unsubscribeMyManualRequest = null;
+  let unsubscribeAbsentFlags = null;
+  let unsubscribeMyAbsentFlag = null;
+  let unsubscribeNotifications = null;
 
-  function startSessionLiveListener(courseId)
-  {
-    if (unsubscribeSessionLive)
-    {
+  function startSessionLiveListener(courseId) {
+    if (unsubscribeSessionLive) {
       unsubscribeSessionLive();
       unsubscribeSessionLive = null;
     }
     unsubscribeSessionLive = onSnapshot(
       doc(db, "courses", courseId, "session", "live"),
-      (snap) =>
-      {
+      (snap) => {
         if (!activeCourse || activeCourse.id !== courseId) return;
-        if (snap.exists())
-        {
+        if (snap.exists()) {
           const data = snap.data();
           const accurateNow = getAccurateNow();
           const duration = (data.durationSeconds || 60) * 1000;
           const rawMsLeft = (data.expiresAt || 0) - accurateNow;
           const cappedMsLeft = Math.max(0, Math.min(rawMsLeft, duration));
           const isStillActive = data.active && cappedMsLeft > 0;
-          if (isStillActive)
-          {
+          if (isStillActive) {
             const existingDeadline =
               activeCourse.activeSession &&
               activeCourse.activeSession.localDeadline;
@@ -1544,12 +1618,10 @@ if (mobileMenuBtn && navLinks)
               locationMode: data.locationMode || "no_gps",
               hallName: data.hallName || null,
             };
-          } else if (activeCourse.activeSession)
-          {
+          } else if (activeCourse.activeSession) {
             activeCourse.activeSession.expired = true;
           }
-        } else if (activeCourse.activeSession)
-        {
+        } else if (activeCourse.activeSession) {
           activeCourse.activeSession.expired = true;
         }
         renderPortalState();
@@ -1558,39 +1630,39 @@ if (mobileMenuBtn && navLinks)
     );
   }
 
-  function startSessionSecretListener(courseId)
-  {
-    if (unsubscribeSessionSecret)
-    {
+  function startSessionSecretListener(courseId) {
+    if (unsubscribeSessionSecret) {
       unsubscribeSessionSecret();
       unsubscribeSessionSecret = null;
     }
     unsubscribeSessionSecret = onSnapshot(
       doc(db, "courses", courseId, "session", "secret"),
-      (snap) =>
-      {
+      (snap) => {
         if (!activeCourse || activeCourse.id !== courseId) return;
         if (!snap.exists()) return;
         const data = snap.data();
-        if (!activeCourse.activeSession)
-        {
+        if (!activeCourse.activeSession) {
           activeCourse.activeSession = {};
         }
         activeCourse.activeSession.pin = String(data.pin || "");
+        activeCourse.activeSession.previousPin = data.previousPin || null;
+        activeCourse.activeSession.pinRotationTime =
+          data.pinRotationTime || Date.now();
         activeCourse.activeSession.attendees = data.attendees || [];
         activeCourse.activeSession.locationMode =
           data.locationMode || activeCourse.activeSession.locationMode;
-        console.log("Secret listener updated PIN:", activeCourse.activeSession.pin);
+        console.log(
+          "Secret listener updated PIN:",
+          activeCourse.activeSession.pin,
+        );
         renderPortalState();
       },
       (err) => console.error("Session secret listener error:", err),
     );
   }
 
-  function startAttendanceHistoryListener(courseId)
-  {
-    if (unsubscribeAttendance)
-    {
+  function startAttendanceHistoryListener(courseId) {
+    if (unsubscribeAttendance) {
       unsubscribeAttendance();
       unsubscribeAttendance = null;
     }
@@ -1599,8 +1671,7 @@ if (mobileMenuBtn && navLinks)
         collection(db, "courses", courseId, "attendance"),
         orderBy("closedAt", "asc"),
       ),
-      (snap) =>
-      {
+      (snap) => {
         if (!activeCourse || activeCourse.id !== courseId) return;
         // Optimize: Only update if data actually changed
         const newHistory = snap.docs
@@ -1608,30 +1679,29 @@ if (mobileMenuBtn && navLinks)
           .filter((record) => Array.isArray(record.attendees));
 
         // Quick check if data actually changed before re-rendering
-        if (JSON.stringify(newHistory) !== JSON.stringify(activeCourse.attendanceHistory)) {
+        if (
+          JSON.stringify(newHistory) !==
+          JSON.stringify(activeCourse.attendanceHistory)
+        ) {
           activeCourse.attendanceHistory = newHistory;
           renderPortalState();
         }
       },
-      (err) =>
-      {
+      (err) => {
         console.error("Attendance history listener error:", err);
         loadAttendanceHistory();
       },
     );
   }
 
-  function startDeviceFlagsListener(courseId)
-  {
-    if (unsubscribeDeviceFlags)
-    {
+  function startDeviceFlagsListener(courseId) {
+    if (unsubscribeDeviceFlags) {
       unsubscribeDeviceFlags();
       unsubscribeDeviceFlags = null;
     }
     unsubscribeDeviceFlags = onSnapshot(
       collection(db, "courses", courseId, "deviceFlags"),
-      (snap) =>
-      {
+      (snap) => {
         if (!activeCourse || activeCourse.id !== courseId) return;
         activeCourse.deviceFlags = snap.docs.map((d) => ({
           id: d.id,
@@ -1643,32 +1713,597 @@ if (mobileMenuBtn && navLinks)
     );
   }
 
-  function stopPortalListeners()
-  {
-    if (unsubscribeSessionLive)
-    {
-      unsubscribeSessionLive();
-      unsubscribeSessionLive = null;
+  // --- FAIL-SAFE OVERRIDE: staff request queue + student status ---
+  function startManualRequestsListener(courseId) {
+    if (unsubscribeManualRequests) {
+      unsubscribeManualRequests();
+      unsubscribeManualRequests = null;
     }
-    if (unsubscribeSessionSecret)
-    {
-      unsubscribeSessionSecret();
-      unsubscribeSessionSecret = null;
+    unsubscribeManualRequests = onSnapshot(
+      collection(db, "courses", courseId, "manualRequests"),
+      (snap) => {
+        if (!activeCourse || activeCourse.id !== courseId) return;
+        const requests = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        renderManualRequestQueue(requests);
+      },
+      (err) => console.error("Manual requests listener error:", err),
+    );
+  }
+
+  function renderManualRequestQueue(requests) {
+    const panel = document.getElementById("manualRequestsPanel");
+    if (!panel) return;
+    const pending = requests.filter((r) => r.status === "pending");
+    const countEl = document.getElementById("manualRequestsCount");
+    const listContainer = document.getElementById(
+      "manualRequestsListContainer",
+    );
+    if (countEl) countEl.textContent = pending.length;
+    panel.classList.toggle("hidden", requests.length === 0);
+    if (!listContainer) return;
+
+    if (pending.length === 0) {
+      listContainer.innerHTML = `<p style="font-size: 0.85rem; color: var(--muted); text-align: center; padding: 8px;">No pending manual requests. 👍</p>`;
+      return;
     }
-    if (unsubscribeAttendance)
-    {
-      unsubscribeAttendance();
-      unsubscribeAttendance = null;
-    }
-    if (unsubscribeDeviceFlags)
-    {
-      unsubscribeDeviceFlags();
-      unsubscribeDeviceFlags = null;
+
+    listContainer.innerHTML = "";
+    pending.forEach((request) => {
+      const card = document.createElement("div");
+      card.style.cssText =
+        "background: var(--card-bg); padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; border: 1px solid #fd7e14;";
+      const whenText =
+        request.requestedAt && request.requestedAt.toDate
+          ? request.requestedAt.toDate().toLocaleTimeString()
+          : "Just now";
+      card.innerHTML = `
+        <div style="font-size: 0.85rem;">
+          ✋ <strong>${request.name || "Student"}</strong> (${request.matric || "?"})
+        </div>
+        <div style="font-size: 0.8rem; color: var(--muted); margin-top: 3px;">"${request.reason || ""}" — ${whenText}</div>
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <button data-approve-uid="${request.id}" class="btn" style="background: #28a745; font-size: 0.78rem; padding: 6px 12px; width: auto;">✅ Approve (I can see them)</button>
+          <button data-reject-uid="${request.id}" class="btn" style="background: var(--danger); font-size: 0.78rem; padding: 6px 12px; width: auto;">🚩 Reject</button>
+        </div>
+      `;
+      listContainer.appendChild(card);
+    });
+
+    listContainer
+      .querySelectorAll("[data-approve-uid]")
+      .forEach((btn) =>
+        btn.addEventListener("click", () =>
+          approveManualRequest(btn.dataset.approveUid),
+        ),
+      );
+    listContainer
+      .querySelectorAll("[data-reject-uid]")
+      .forEach((btn) =>
+        btn.addEventListener("click", () =>
+          rejectManualRequest(btn.dataset.rejectUid),
+        ),
+      );
+    refreshIcons();
+  }
+
+  // Rep/assistant approves — the server records attendance as manual_override.
+  async function approveManualRequest(targetUid) {
+    if (!activeCourse || !auth.currentUser) return;
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const response = await fetch("/api/approveManualAttendance", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ courseId: activeCourse.id, targetUid }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Approval failed.");
+      toast.success(
+        result.message || "Manual attendance approved and logged.",
+        "Approved ✅",
+      );
+    } catch (error) {
+      console.error("Approve manual request error:", error);
+      toast.error(error.message);
     }
   }
 
-  window.openPortal = function (courseId)
-  {
+  // Rep/assistant rejects — decision is final and permanently logged.
+  async function rejectManualRequest(targetUid) {
+    if (!activeCourse || !auth.currentUser) return;
+    const ok = await showConfirm({
+      title: "Reject Manual Request",
+      message:
+        "Reject this manual verification request? The student will be told their Rep could not verify them. This decision is final and permanently logged.",
+      okText: "Reject Request",
+      danger: true,
+      icon: "flag",
+    });
+    if (!ok) return;
+    try {
+      await updateDoc(
+        doc(db, "courses", activeCourse.id, "manualRequests", targetUid),
+        {
+          status: "rejected",
+          reviewedAt: serverTimestamp(),
+          reviewedByUid: auth.currentUser.uid,
+        },
+      );
+      toast.info("Request rejected and permanently logged.", "Rejected");
+    } catch (error) {
+      console.error("Reject manual request error:", error);
+      toast.error(error.message || "Could not reject the request.");
+    }
+  }
+
+  // Student-side: live status of their own manual verification request.
+  function startMyManualRequestListener(courseId) {
+    if (unsubscribeMyManualRequest) {
+      unsubscribeMyManualRequest();
+      unsubscribeMyManualRequest = null;
+    }
+    if (!currentUser) return;
+    unsubscribeMyManualRequest = onSnapshot(
+      doc(db, "courses", courseId, "manualRequests", currentUser.uid),
+      (snap) => {
+        const statusEl = document.getElementById("manualRequestStatus");
+        if (!statusEl) return;
+        if (!snap.exists()) {
+          statusEl.classList.add("hidden");
+          return;
+        }
+        const data = snap.data();
+        statusEl.classList.remove("hidden");
+        if (data.status === "pending") {
+          statusEl.style.background = "rgba(253, 126, 20, 0.1)";
+          statusEl.style.color = "#fd7e14";
+          statusEl.textContent =
+            "⏳ Request sent — waiting for your Rep to verify you.";
+        } else if (data.status === "approved") {
+          statusEl.style.background = "rgba(40, 167, 69, 0.1)";
+          statusEl.style.color = "#28a745";
+          statusEl.textContent =
+            "✅ Your Rep verified you. Attendance recorded!";
+        } else if (data.status === "rejected") {
+          statusEl.style.background = "rgba(220, 53, 69, 0.1)";
+          statusEl.style.color = "#dc3545";
+          statusEl.textContent =
+            "❌ Your Rep could not verify you for this session. The decision is final.";
+        }
+      },
+      (err) => console.error("My manual request listener error:", err),
+    );
+  }
+
+  // --- ANTI-BEEF: absent flags (rep roster badges + student emergency alert) ---
+  function startAbsentFlagsListener(courseId) {
+    if (unsubscribeAbsentFlags) {
+      unsubscribeAbsentFlags();
+      unsubscribeAbsentFlags = null;
+    }
+    unsubscribeAbsentFlags = onSnapshot(
+      collection(db, "courses", courseId, "absentFlags"),
+      (snap) => {
+        if (!activeCourse || activeCourse.id !== courseId) return;
+        activeCourse.absentFlags = snap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        }));
+        renderPortalState();
+      },
+      (err) => console.error("Absent flags listener error:", err),
+    );
+  }
+
+  // Student-side: the emergency alert for THEIR OWN flag (uid-keyed doc).
+  // The flag badge lives in the student controls — impossible to miss.
+  function startMyAbsentFlagListener(courseId) {
+    if (unsubscribeMyAbsentFlag) {
+      unsubscribeMyAbsentFlag();
+      unsubscribeMyAbsentFlag = null;
+    }
+    if (!currentUser) return;
+    unsubscribeMyAbsentFlag = onSnapshot(
+      doc(db, "courses", courseId, "absentFlags", currentUser.uid),
+      (snap) => {
+        const banner = document.getElementById("absentFlagBanner");
+        if (!banner) return;
+        const msgEl = document.getElementById("absentFlagMessage");
+        if (!snap.exists() || snap.data().status !== "flagged") {
+          banner.classList.add("hidden");
+          return;
+        }
+        banner.classList.remove("hidden");
+        if (msgEl) {
+          const data = snap.data();
+          const flaggedWhen =
+            data.flaggedAt && data.flaggedAt.toDate
+              ? data.flaggedAt.toDate().toLocaleTimeString()
+              : "just now";
+          msgEl.textContent = `You have been flagged absent for this lecture. If you are present, see your Rep immediately (flagged at ${flaggedWhen}).`;
+        }
+      },
+      (err) => console.error("My absent flag listener error:", err),
+    );
+  }
+
+  // Global (app-wide) emergency notification listener — the push-style alert
+  // fires even if the student is browsing another course's portal. Each
+  // notification toasts exactly once per login.
+  const shownNotificationIds = new Set();
+  function startNotificationsListener() {
+    if (unsubscribeNotifications) {
+      unsubscribeNotifications();
+      unsubscribeNotifications = null;
+    }
+    if (!auth.currentUser) return;
+    unsubscribeNotifications = onSnapshot(
+      query(
+        collection(db, "users", auth.currentUser.uid, "notifications"),
+        where("read", "==", false),
+      ),
+      (snap) => {
+        snap.docs.forEach((d) => {
+          if (shownNotificationIds.has(d.id)) return;
+          shownNotificationIds.add(d.id);
+          const data = d.data();
+          if (data.type === "absent_flag") {
+            toast.error(
+              data.message ||
+                "You have been flagged absent for this lecture. If you are present, see your Rep immediately.",
+              "⚠️ Flagged Absent",
+            );
+          }
+        });
+      },
+      (err) => console.error("Notifications listener error:", err),
+    );
+  }
+
+  // ============================================================
+  // MODE 2: DYNAMIC ROTATING QR (PROJECTOR / LARGE HALL MODE)
+  // ============================================================
+  let qrLibPromise = null;
+  function loadQrLibrary() {
+    if (!qrLibPromise) {
+      qrLibPromise = import("https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm");
+    }
+    return qrLibPromise;
+  }
+
+  function buildQrPayload(pin) {
+    // The 4-digit PIN is the real secret — it rotates every 30s and dies with
+    // the session, so screenshots are as useless as shouting the PIN late.
+    // The t= nonce just makes every refresh render a unique code visually.
+    // The check-in pipeline only reads code + pin (all guardrails still run).
+    const nonce = Math.floor(Date.now() / 15000);
+    const courseCode = activeCourse ? activeCourse.code : "";
+    return `${location.origin}${location.pathname}?code=${encodeURIComponent(
+      courseCode,
+    )}&qrpin=${encodeURIComponent(pin)}&t=${nonce}`;
+  }
+
+  async function renderQrOverlay() {
+    const overlay = document.getElementById("qrModeOverlay");
+    const canvas = document.getElementById("qrCanvas");
+    if (!overlay || overlay.classList.contains("hidden") || !canvas) return;
+    const session = activeCourse ? activeCourse.activeSession : null;
+    const pin = session ? session.pin : "";
+    if (!pin) return;
+
+    const courseTitle = document.getElementById("qrCourseTitle");
+    const pinText = document.getElementById("qrPinText");
+    if (courseTitle && activeCourse)
+      courseTitle.textContent = activeCourse.name;
+    if (pinText) pinText.textContent = pin;
+
+    try {
+      const lib = await loadQrLibrary();
+      const QRCode = lib.default || lib;
+      await QRCode.toCanvas(canvas, buildQrPayload(pin), {
+        width: Math.min(420, window.innerWidth - 60),
+        margin: 1,
+      });
+    } catch (err) {
+      console.warn(
+        "QR library unavailable — the live PIN is still displayed:",
+        err,
+      );
+    }
+  }
+
+  window.closeQrMode = function () {
+    const overlay = document.getElementById("qrModeOverlay");
+    if (overlay) overlay.classList.add("hidden");
+    if (window.__qrCountdownInterval) {
+      clearInterval(window.__qrCountdownInterval);
+      window.__qrCountdownInterval = null;
+    }
+  };
+
+  window.showQrMode = function () {
+    const overlay = document.getElementById("qrModeOverlay");
+    if (!overlay || !activeCourse) return;
+    const session = activeCourse.activeSession;
+    if (!session || !session.pin) {
+      toast.warning(
+        "Generate a PIN first — the QR code carries the live rotating code.",
+        "No Active PIN",
+      );
+      return;
+    }
+    overlay.classList.remove("hidden");
+    renderQrOverlay();
+
+    // Live countdown to the next rotation, driven by the secret doc timestamp.
+    if (window.__qrCountdownInterval)
+      clearInterval(window.__qrCountdownInterval);
+    window.__qrCountdownInterval = setInterval(() => {
+      const hint = document.getElementById("qrRotationHint");
+      if (!hint || overlay.classList.contains("hidden")) {
+        clearInterval(window.__qrCountdownInterval);
+        window.__qrCountdownInterval = null;
+        return;
+      }
+      const current = activeCourse ? activeCourse.activeSession : null;
+      if (!current || !current.pin) {
+        hint.textContent = "";
+        return;
+      }
+      const rotationMs = 30000;
+      const base = current.pinRotationTime || Date.now();
+      const msLeft = Math.max(
+        0,
+        rotationMs - ((Date.now() - base) % rotationMs),
+      );
+      hint.textContent = `Next code in: ${Math.ceil(msLeft / 1000)}s`;
+    }, 1000);
+  };
+
+  const showQrBtn = document.getElementById("showQrBtn");
+  if (showQrBtn) showQrBtn.addEventListener("click", () => window.showQrMode());
+  const closeQrBtn = document.getElementById("closeQrBtn");
+  if (closeQrBtn)
+    closeQrBtn.addEventListener("click", () => window.closeQrMode());
+
+  // ============================================================
+  // FCM EMERGENCY PUSH (phone buzzes even when the app is closed)
+  // ============================================================
+  window.enablePushNotifications = async function () {
+    if (!("Notification" in window) || !("serviceWorker" in navigator)) {
+      toast.error("This phone's browser doesn't support push notifications.");
+      return;
+    }
+    if (!FCM_VAPID_KEY) {
+      toast.warning(
+        "Push isn't configured yet — paste your Web Push certificate key into FCM_VAPID_KEY in app.js. In-app alerts still work.",
+        "Setup Needed",
+      );
+      return;
+    }
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        toast.warning(
+          "Allow notifications in your browser settings to get emergency alerts.",
+          "Permission Needed",
+        );
+        return;
+      }
+      const { isSupported, getMessaging, getToken } =
+        await import("https://www.gstatic.com/firebasejs/12.18.0/firebase-messaging.js");
+      if (!(await isSupported())) {
+        toast.warning(
+          "Push messaging isn't supported on this browser.",
+          "Not Supported",
+        );
+        return;
+      }
+      const registration = await navigator.serviceWorker.register(
+        "/firebase-messaging-sw.js",
+        { type: "module" },
+      );
+      const messaging = getMessaging(app);
+      const token = await getToken(messaging, {
+        vapidKey: FCM_VAPID_KEY,
+        serviceWorkerRegistration: registration,
+      });
+      if (!token) throw new Error("No FCM token was returned.");
+      await setDoc(doc(db, "users", auth.currentUser.uid, "fcmTokens", token), {
+        token,
+        userAgent: navigator.userAgent || "",
+        createdAt: serverTimestamp(),
+      });
+      toast.success(
+        "Your phone will now buzz if you're ever flagged absent.",
+        "Push Enabled 🔔",
+      );
+    } catch (err) {
+      console.error("Push enable error:", err);
+      toast.error(err.message || "Could not enable push notifications.");
+    }
+  };
+
+  const enablePushBtn = document.getElementById("enablePushBtn");
+  if (enablePushBtn) {
+    enablePushBtn.addEventListener("click", () =>
+      window.enablePushNotifications(),
+    );
+  }
+
+  // ============================================================
+  // REP AUDIT PAGE: permanent removal log + flag history
+  // ============================================================
+  let unsubscribeAudit = null;
+
+  function startAuditListener(courseId) {
+    if (unsubscribeAudit) {
+      unsubscribeAudit();
+      unsubscribeAudit = null;
+    }
+    unsubscribeAudit = onSnapshot(
+      collection(db, "courses", courseId, "removalLog"),
+      (snap) => {
+        if (!activeCourse || activeCourse.id !== courseId) return;
+        activeCourse.removalLog = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .sort(
+            (a, b) =>
+              ((b.removedAt && b.removedAt.seconds) || 0) -
+              ((a.removedAt && a.removedAt.seconds) || 0),
+          );
+        renderAuditSection();
+      },
+      (err) => console.error("Audit listener error:", err),
+    );
+  }
+
+  function renderAuditSection() {
+    const container = document.getElementById("auditLogContainer");
+    if (!container || !activeCourse) return;
+
+    const removals = activeCourse.removalLog || [];
+    const flags = (activeCourse.absentFlags || []).filter(
+      (f) => f.status === "flagged",
+    );
+
+    if (removals.length === 0 && flags.length === 0) {
+      container.innerHTML = `<p style="font-size: 0.85rem; color: var(--muted); text-align: center; padding: 8px;">No audit events yet. 👍</p>`;
+      return;
+    }
+
+    const removalRows = removals
+      .map((r) => {
+        const when =
+          r.removedAt && r.removedAt.toDate
+            ? r.removedAt.toDate().toLocaleString()
+            : "unknown date";
+        return `<li style="font-size: 0.85rem; padding: 4px 0;">🚪 <strong>${r.matric}</strong> was removed on ${when}</li>`;
+      })
+      .join("");
+    const flagRows = flags
+      .map((f) => {
+        const when =
+          f.flaggedAt && f.flaggedAt.toDate
+            ? f.flaggedAt.toDate().toLocaleString()
+            : "just now";
+        return `<li style="font-size: 0.85rem; padding: 4px 0;">🚩 <strong>${f.matric}</strong> flagged absent on ${when} (by ${f.flaggedByRole || "rep"}, flagged ${f.flagCount || 1}× total)</li>`;
+      })
+      .join("");
+
+    container.innerHTML = `
+      ${removals.length ? `<h4 style="font-size: 0.85rem; color: var(--navy); margin: 8px 0 4px;">Removed Students (${removals.length})</h4><ul style="list-style: none; padding-left: 0; margin: 0 0 10px;">${removalRows}</ul>` : ""}
+      ${flags.length ? `<h4 style="font-size: 0.85rem; color: #dc3545; margin: 8px 0 4px;">Absent Flags (${flags.length})</h4><ul style="list-style: none; padding-left: 0; margin: 0;">${flagRows}</ul>` : ""}
+    `;
+  }
+
+  function stopPortalListeners() {
+    if (unsubscribeSessionLive) {
+      unsubscribeSessionLive();
+      unsubscribeSessionLive = null;
+    }
+    if (unsubscribeSessionSecret) {
+      unsubscribeSessionSecret();
+      unsubscribeSessionSecret = null;
+    }
+    if (unsubscribeAttendance) {
+      unsubscribeAttendance();
+      unsubscribeAttendance = null;
+    }
+    if (unsubscribeDeviceFlags) {
+      unsubscribeDeviceFlags();
+      unsubscribeDeviceFlags = null;
+    }
+    if (unsubscribeManualRequests) {
+      unsubscribeManualRequests();
+      unsubscribeManualRequests = null;
+    }
+    if (unsubscribeMyManualRequest) {
+      unsubscribeMyManualRequest();
+      unsubscribeMyManualRequest = null;
+    }
+    if (unsubscribeAbsentFlags) {
+      unsubscribeAbsentFlags();
+      unsubscribeAbsentFlags = null;
+    }
+    if (unsubscribeMyAbsentFlag) {
+      unsubscribeMyAbsentFlag();
+      unsubscribeMyAbsentFlag = null;
+    }
+    if (unsubscribeNotifications) {
+      unsubscribeNotifications();
+      unsubscribeNotifications = null;
+    }
+    if (unsubscribeAudit) {
+      unsubscribeAudit();
+      unsubscribeAudit = null;
+    }
+    // Leaving the portal (or logging out) must also kill the projector view.
+    if (window.closeQrMode) window.closeQrMode();
+  }
+
+  // ============================================================
+  // QR SCAN ENTRY: ?code=XXX&qrpin=1234 → open portal → auto check-in
+  // ============================================================
+  let pendingQrScan = null;
+  let qrScanHandled = false;
+  (function parseQrScanParams() {
+    try {
+      const params = new URLSearchParams(location.search);
+      const code = (params.get("code") || "").trim().toUpperCase();
+      const pin = (params.get("qrpin") || "").trim();
+      if (code && /^\d{4}$/.test(pin)) {
+        pendingQrScan = { code, pin };
+        // Strip the params so a refresh doesn't re-trigger the flow.
+        history.replaceState(null, "", location.pathname);
+      }
+    } catch (err) {
+      /* no-op */
+    }
+  })();
+
+  function tryHandlePendingQrScan() {
+    if (qrScanHandled || !pendingQrScan || !currentUser) return;
+    const match = courses.find(
+      (c) => (c.code || "").toUpperCase() === pendingQrScan.code,
+    );
+    if (!match) return; // courses not loaded yet — the next snapshot retries
+    qrScanHandled = true;
+    const { pin } = pendingQrScan;
+
+    window.openPortal(match.id);
+    const portalSection = document.getElementById("portalSection");
+    if (portalSection && portalSection.classList.contains("hidden")) {
+      // openPortal rejected us (not enrolled / not staff) — it already toasts.
+      return;
+    }
+
+    const pinInput = document.getElementById("studentPinInput");
+    const form = document.getElementById("checkInForm");
+    if (pinInput && form) {
+      pinInput.value = pin;
+      toast.success(`Scanned code ${pin} — checking you in...`, "QR Scan 📸");
+      // Give the portal a beat to settle, then auto-submit through the SAME
+      // pipeline (UUID lock + geofence + PIN validation). If GPS or network is
+      // slow, the PIN stays filled for a manual retry.
+      setTimeout(() => {
+        try {
+          if (typeof form.requestSubmit === "function") {
+            form.requestSubmit();
+          } else {
+            form.dispatchEvent(new Event("submit", { cancelable: true }));
+          }
+        } catch (err) {
+          console.warn("QR auto-submit skipped:", err);
+        }
+      }, 400);
+    }
+  }
+
+  window.openPortal = function (courseId) {
     const selectedCourse = courses.find((c) => c.id === courseId);
     if (!selectedCourse) return;
 
@@ -1676,13 +2311,14 @@ if (mobileMenuBtn && navLinks)
     const isRep = currentUser && selectedCourse.repUid === currentUser.uid;
     const isAssistant =
       currentUser &&
-      (selectedCourse.assistants || []).map(normalizeMatric).includes(userMatric);
+      (selectedCourse.assistants || [])
+        .map(normalizeMatric)
+        .includes(userMatric);
     const isEnrolled =
       currentUser &&
       (selectedCourse.enrolled || []).map(normalizeMatric).includes(userMatric);
 
-    if (!isRep && !isAssistant && !isEnrolled)
-    {
+    if (!isRep && !isAssistant && !isEnrolled) {
       toast.warning(
         `You are not enrolled in "${selectedCourse.name}". Join using code [${selectedCourse.code}] first.`,
         "Access Denied",
@@ -1695,7 +2331,8 @@ if (mobileMenuBtn && navLinks)
     if (dashboardSection) dashboardSection.classList.add("hidden");
     if (portalSection) portalSection.classList.remove("hidden");
 
-    document.getElementById("portalCourseTitle").textContent = activeCourse.name;
+    document.getElementById("portalCourseTitle").textContent =
+      activeCourse.name;
     document.getElementById("portalCourseCode").textContent = activeCourse.code;
     document.getElementById("portalCourseRep").textContent = activeCourse.rep;
 
@@ -1706,26 +2343,23 @@ if (mobileMenuBtn && navLinks)
       "assistantManagementSection",
     );
 
-    if (isRep || isAssistant)
-    {
+    if (isRep || isAssistant) {
       if (repControls) repControls.classList.remove("hidden");
       if (studentControls) studentControls.classList.add("hidden");
 
-      if (isRep)
-      {
+      if (isRep) {
         if (repArchiveSection) repArchiveSection.classList.remove("hidden");
         if (assistantManagementSection)
           assistantManagementSection.classList.remove("hidden");
         renderAssistantDropdownAndList();
-      } else
-      {
+        startAuditListener(courseId);
+      } else {
         if (repArchiveSection) repArchiveSection.classList.add("hidden");
         if (assistantManagementSection)
           assistantManagementSection.classList.add("hidden");
       }
       renderLectureHallOptions();
-    } else
-    {
+    } else {
       if (repControls) repControls.classList.add("hidden");
       if (studentControls) studentControls.classList.remove("hidden");
       if (repArchiveSection) repArchiveSection.classList.add("hidden");
@@ -1736,18 +2370,21 @@ if (mobileMenuBtn && navLinks)
     renderPortalState();
     startAttendanceHistoryListener(courseId);
     startSessionLiveListener(courseId);
-    if (isRep || isAssistant)
-    {
+    if (isRep || isAssistant) {
       startSessionSecretListener(courseId);
       startDeviceFlagsListener(courseId);
+      startManualRequestsListener(courseId);
+      startAbsentFlagsListener(courseId);
+    } else {
+      startMyManualRequestListener(courseId);
+      startMyAbsentFlagListener(courseId);
+      syncManualOverrideUI();
     }
   };
 
   const backToDashboardBtn = document.getElementById("backToDashboard");
-  if (backToDashboardBtn)
-  {
-    backToDashboardBtn.addEventListener("click", () =>
-    {
+  if (backToDashboardBtn) {
+    backToDashboardBtn.addEventListener("click", () => {
       if (portalSection) portalSection.classList.add("hidden");
       if (dashboardSection) dashboardSection.classList.remove("hidden");
 
@@ -1767,10 +2404,8 @@ if (mobileMenuBtn && navLinks)
 
   // --- CREATE COURSE FORM ---
   const createCourseForm = document.getElementById("createCourseForm");
-  if (createCourseForm)
-  {
-    createCourseForm.addEventListener("submit", async (e) =>
-    {
+  if (createCourseForm) {
+    createCourseForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       const submitBtn = createCourseForm.querySelector("button[type='submit']");
       const originalBtnText = submitBtn ? submitBtn.textContent : "";
@@ -1791,18 +2426,15 @@ if (mobileMenuBtn && navLinks)
         currentUser ? currentUser.matric : "",
       );
 
-      if (!studentMatric)
-      {
+      if (!studentMatric) {
         toast.warning(
           "Your profile isn't fully loaded yet. Please wait a moment and try again.",
         );
         return;
       }
 
-      try
-      {
-        if (submitBtn)
-        {
+      try {
+        if (submitBtn) {
           submitBtn.disabled = true;
           submitBtn.textContent = "Creating... ⏳";
         }
@@ -1825,8 +2457,7 @@ if (mobileMenuBtn && navLinks)
             repDepartment.toLowerCase(),
         );
 
-        if (duplicateExists)
-        {
+        if (duplicateExists) {
           toast.warning(
             `Course code "${code}" already exists in your department (${repDepartment} - ${repLevel}).`,
             "Course Code Taken",
@@ -1874,16 +2505,13 @@ if (mobileMenuBtn && navLinks)
           `"${name}" is ready. Share the code with your class!`,
           "Course Created 🚀",
         );
-      } catch (error)
-      {
+      } catch (error) {
         console.error("Create course error:", error);
         toast.error(
           "Something went wrong while creating the course. Check your connection.",
         );
-      } finally
-      {
-        if (submitBtn)
-        {
+      } finally {
+        if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.textContent = originalBtnText;
         }
@@ -1893,21 +2521,19 @@ if (mobileMenuBtn && navLinks)
 
   // --- JOIN COURSE FORM ---
   const joinCourseForm = document.getElementById("joinCourseForm");
-  if (joinCourseForm)
-  {
-    joinCourseForm.addEventListener("submit", async (e) =>
-    {
+  if (joinCourseForm) {
+    joinCourseForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       const submitBtn = joinCourseForm.querySelector("button[type='submit']");
-      const code = normalizeCourseCode(document.getElementById("joinCode").value);
+      const code = normalizeCourseCode(
+        document.getElementById("joinCode").value,
+      );
       const studentMatric = normalizeMatric(
         currentUser ? currentUser.matric : "",
       );
 
-      try
-      {
-        if (submitBtn)
-        {
+      try {
+        if (submitBtn) {
           submitBtn.disabled = true;
           submitBtn.textContent = "Checking... ⏳";
         }
@@ -1918,8 +2544,7 @@ if (mobileMenuBtn && navLinks)
         );
         const querySnap = await getDocs(codeQuery);
 
-        if (querySnap.empty)
-        {
+        if (querySnap.empty) {
           toast.warning(
             `Course code "${code}" was not found. Double-check and try again.`,
             "Not Found",
@@ -1930,8 +2555,7 @@ if (mobileMenuBtn && navLinks)
         const foundDoc = querySnap.docs[0];
         const found = { id: foundDoc.id, ...foundDoc.data() };
 
-        if (!auth.currentUser || !studentMatric)
-        {
+        if (!auth.currentUser || !studentMatric) {
           throw new Error("Your account is missing a valid matric number.");
         }
 
@@ -1954,25 +2578,23 @@ if (mobileMenuBtn && navLinks)
         // using the data we already have from the join — no extra Firestore read needed.
         const myMatric = normalizeMatric(currentUser ? currentUser.matric : "");
         const existingIdx = courses.findIndex((c) => c.id === result.courseId);
-        if (existingIdx >= 0)
-        {
+        if (existingIdx >= 0) {
           // Add student's own matric to enrolled[] in local state
           const alreadyIn = (courses[existingIdx].enrolled || [])
             .map(normalizeMatric)
             .includes(myMatric);
-          if (!alreadyIn)
-          {
+          if (!alreadyIn) {
             courses[existingIdx] = {
               ...courses[existingIdx],
               enrolled: [...(courses[existingIdx].enrolled || []), myMatric],
             };
           }
-        } else
-        {
+        } else {
           // Course wasn't in local array yet — fetch the full course doc and add it
-          const courseDocSnap = await getDoc(doc(db, "courses", result.courseId));
-          if (courseDocSnap.exists())
-          {
+          const courseDocSnap = await getDoc(
+            doc(db, "courses", result.courseId),
+          );
+          if (courseDocSnap.exists()) {
             courses.push({
               id: courseDocSnap.id,
               ...courseDocSnap.data(),
@@ -1986,16 +2608,13 @@ if (mobileMenuBtn && navLinks)
 
         renderCourses();
         toast.success(`You are now enrolled in ${found.name}!`, "Joined! 🎉");
-      } catch (error)
-      {
+      } catch (error) {
         console.error("Join course error:", error);
         toast.error(
           "Something went wrong while joining. Please check your connection.",
         );
-      } finally
-      {
-        if (submitBtn)
-        {
+      } finally {
+        if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.textContent = "Join Class 🏃‍♂️";
         }
@@ -2007,10 +2626,8 @@ if (mobileMenuBtn && navLinks)
 
   // --- ASSISTANT REPS MANAGEMENT LOGIC ---
   const appointAssistantBtn = document.getElementById("appointAssistantBtn");
-  if (appointAssistantBtn)
-  {
-    appointAssistantBtn.addEventListener("click", async () =>
-    {
+  if (appointAssistantBtn) {
+    appointAssistantBtn.addEventListener("click", async () => {
       if (!activeCourse) return;
 
       const selectEl = document.getElementById("courseStudentSelect");
@@ -2021,8 +2638,7 @@ if (mobileMenuBtn && navLinks)
       );
       const isSessionScoped = scopeEl && scopeEl.value === "session";
 
-      if (!selectedMatric)
-      {
+      if (!selectedMatric) {
         toast.warning("Please select an enrolled student to appoint.");
         return;
       }
@@ -2030,8 +2646,7 @@ if (mobileMenuBtn && navLinks)
       if (!activeCourse.assistants) activeCourse.assistants = [];
 
       const currentAssistants = activeCourse.assistants.map(normalizeMatric);
-      if (currentAssistants.includes(selectedMatric))
-      {
+      if (currentAssistants.includes(selectedMatric)) {
         toast.warning("This student is already an appointed assistant.");
         return;
       }
@@ -2045,16 +2660,13 @@ if (mobileMenuBtn && navLinks)
         (m) => normalizeMatric(m.matric) === selectedMatric,
       );
 
-      if (memberRecord)
-      {
-        try
-        {
+      if (memberRecord) {
+        try {
           await updateDoc(
             doc(db, "courses", activeCourse.id, "members", memberRecord.uid),
             { role: newRole },
           );
-        } catch (err)
-        {
+        } catch (err) {
           console.error("Could not update member role:", err);
           toast.error("Failed to assign assistant. Please try again.");
           return;
@@ -2077,8 +2689,7 @@ if (mobileMenuBtn && navLinks)
     });
   }
 
-  window.revokeAssistant = async function (matric)
-  {
+  window.revokeAssistant = async function (matric) {
     if (!activeCourse || !activeCourse.assistants) return;
 
     if (
@@ -2090,8 +2701,7 @@ if (mobileMenuBtn && navLinks)
         icon: "👑",
         danger: true,
       })
-    )
-    {
+    ) {
       const targetMatric = normalizeMatric(matric);
       activeCourse.assistants = (activeCourse.assistants || [])
         .map(normalizeMatric)
@@ -2105,8 +2715,7 @@ if (mobileMenuBtn && navLinks)
     }
   };
 
-  window.removeStudentFromCourse = async function (matric)
-  {
+  window.removeStudentFromCourse = async function (matric) {
     if (!activeCourse) return;
 
     if (
@@ -2118,10 +2727,8 @@ if (mobileMenuBtn && navLinks)
         icon: "🚪",
         danger: true,
       })
-    )
-    {
-      try
-      {
+    ) {
+      try {
         const idToken = await auth.currentUser.getIdToken();
         const response = await fetch("/api/removeStudent", {
           method: "POST",
@@ -2140,14 +2747,12 @@ if (mobileMenuBtn && navLinks)
 
         // Update local state to reflect the removal immediately
         const targetMatric = normalizeMatric(matric);
-        if (activeCourse.enrolled)
-        {
+        if (activeCourse.enrolled) {
           activeCourse.enrolled = activeCourse.enrolled
             .map(normalizeMatric)
             .filter((m) => m !== targetMatric);
         }
-        if (activeCourse.assistants)
-        {
+        if (activeCourse.assistants) {
           activeCourse.assistants = activeCourse.assistants
             .map(normalizeMatric)
             .filter((m) => m !== targetMatric);
@@ -2159,16 +2764,14 @@ if (mobileMenuBtn && navLinks)
           `Student [${targetMatric}] has been removed.`,
           "Student Removed",
         );
-      } catch (error)
-      {
+      } catch (error) {
         console.error("Remove student error:", error);
         toast.error("Unable to remove student. Please try again.");
       }
     }
   };
 
-  function renderAssistantDropdownAndList()
-  {
+  function renderAssistantDropdownAndList() {
     if (!activeCourse) return;
 
     const selectEl = document.getElementById("courseStudentSelect");
@@ -2179,8 +2782,7 @@ if (mobileMenuBtn && navLinks)
     const assistants = (activeCourse.assistants || []).map(normalizeMatric);
 
     // Only show students (not the rep, not already-assistants) in the dropdown
-    (activeCourse.members || []).forEach((member) =>
-    {
+    (activeCourse.members || []).forEach((member) => {
       if (member.role !== "student") return; // skip rep, existing assistants
       const matric = normalizeMatric(member.matric);
       if (assistants.includes(matric)) return;
@@ -2190,14 +2792,11 @@ if (mobileMenuBtn && navLinks)
       selectEl.appendChild(opt);
     });
 
-    if (assistants.length === 0)
-    {
+    if (assistants.length === 0) {
       listEl.innerHTML = `<li style="color: var(--muted); font-size: 0.85rem; padding: 5px;">No assistants appointed yet. ⏳</li>`;
-    } else
-    {
+    } else {
       listEl.innerHTML = "";
-      assistants.forEach((matric) =>
-      {
+      assistants.forEach((matric) => {
         // Find member record to determine scope
         const memberRecord = (activeCourse.members || []).find(
           (m) => normalizeMatric(m.matric) === matric,
@@ -2218,8 +2817,7 @@ if (mobileMenuBtn && navLinks)
   }
 
   // --- LECTURE HALL MANAGEMENT LOGIC ---
-  function renderLectureHallOptions()
-  {
+  function renderLectureHallOptions() {
     const selectEl = document.getElementById("repHallSelect");
     const badgeEl = document.getElementById("hallInfoBadge");
     if (!selectEl || !activeCourse) return;
@@ -2234,17 +2832,16 @@ if (mobileMenuBtn && navLinks)
     selectEl.innerHTML = "";
 
     // Group 1: Saved Lecture Halls
-    if (halls.length > 0)
-    {
+    if (halls.length > 0) {
       const hallGroup = document.createElement("optgroup");
       hallGroup.label = "🏛️ Saved Lecture Halls";
-      halls.forEach((hall) =>
-      {
+      halls.forEach((hall) => {
         const opt = document.createElement("option");
         opt.value = `hall_${hall.id}`;
-        opt.textContent = `🏛️ ${hall.name} (${hall.radius || 80}m radius)`;
-        if (opt.value === defaultVal || String(hall.id) === defaultVal)
-        {
+        const displayRadius =
+          hall.name === "Current Location" ? 200 : hall.radius || 80;
+        opt.textContent = `🏛️ ${hall.name} (${displayRadius}m radius)`;
+        if (opt.value === defaultVal || String(hall.id) === defaultVal) {
           opt.selected = true;
         }
         hallGroup.appendChild(opt);
@@ -2275,33 +2872,29 @@ if (mobileMenuBtn && navLinks)
 
     selectEl.appendChild(modeGroup);
 
-    const updateBadge = () =>
-    {
+    const updateBadge = () => {
       const val = selectEl.value;
-      if (val === "add_new")
-      {
+      if (val === "add_new") {
         openManageHallsModal();
         selectEl.value = defaultVal;
         return;
       }
       localStorage.setItem(`attendify_last_hall_${activeCourse.id}`, val);
       if (!badgeEl) return;
-      if (val === "no_gps")
-      {
+      if (val === "no_gps") {
         badgeEl.className = "hall-info-chip badge-emergency";
         badgeEl.innerHTML = `<span>⚡ <strong>Emergency Mode:</strong> GPS check disabled. One-phone device lock active.</span>`;
-      } else if (val === "live_gps")
-      {
+      } else if (val === "live_gps") {
         badgeEl.className = "hall-info-chip badge-live";
         badgeEl.innerHTML = `<span>📍 <strong>Live GPS:</strong> Captures Rep's current position upon generating PIN.</span>`;
-      } else if (val.startsWith("hall_"))
-      {
+      } else if (val.startsWith("hall_")) {
         const hId = val.replace("hall_", "");
         const h = halls.find((item) => String(item.id) === String(hId));
-        if (h)
-        {
+        if (h) {
+          const displayRadius =
+            h.name === "Current Location" ? 200 : h.radius || 80;
           badgeEl.className = "hall-info-chip badge-hall";
-          badgeEl.innerHTML = `<span>🏛️ <strong>Hall Active:</strong> ${h.name} (${h.radius || 80}m indoor boundary).</span>`;
+          badgeEl.innerHTML = `<span>🏛️ <strong>Hall Active:</strong> ${h.name} (${displayRadius}m indoor boundary).</span>`;
         }
       }
     };
@@ -2310,27 +2903,23 @@ if (mobileMenuBtn && navLinks)
     updateBadge();
   }
 
-  function openManageHallsModal()
-  {
+  function openManageHallsModal() {
     const modal = document.getElementById("manageHallsModal");
     if (!modal || !activeCourse) return;
     renderSavedHallsList();
     modal.classList.add("show");
   }
 
-  function renderSavedHallsList()
-  {
+  function renderSavedHallsList() {
     const listEl = document.getElementById("savedHallsList");
     if (!listEl || !activeCourse) return;
     const halls = activeCourse.savedHalls || [];
-    if (halls.length === 0)
-    {
+    if (halls.length === 0) {
       listEl.innerHTML = `<li style="color: var(--muted); font-size: 0.85rem; padding: 6px;">No saved halls yet. Add one below! 🏛️</li>`;
       return;
     }
     listEl.innerHTML = "";
-    halls.forEach((hall) =>
-    {
+    halls.forEach((hall) => {
       const li = document.createElement("li");
       li.style.cssText =
         "display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: var(--bg); border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem; border: 1px solid var(--border);";
@@ -2344,10 +2933,8 @@ if (mobileMenuBtn && navLinks)
       listEl.appendChild(li);
     });
 
-    listEl.querySelectorAll(".delete-hall-btn").forEach((btn) =>
-    {
-      btn.addEventListener("click", async () =>
-      {
+    listEl.querySelectorAll(".delete-hall-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
         const hId = btn.getAttribute("data-hall-id");
         if (
           await showConfirm({
@@ -2357,8 +2944,7 @@ if (mobileMenuBtn && navLinks)
             okText: "Delete",
             danger: true,
           })
-        )
-        {
+        ) {
           activeCourse.savedHalls = (activeCourse.savedHalls || []).filter(
             (h) => String(h.id) !== String(hId),
           );
@@ -2372,29 +2958,100 @@ if (mobileMenuBtn && navLinks)
   }
 
   const manageHallsBtn = document.getElementById("manageHallsBtn");
-  if (manageHallsBtn)
-  {
-    manageHallsBtn.addEventListener("click", () =>
-    {
+  if (manageHallsBtn) {
+    manageHallsBtn.addEventListener("click", () => {
       openManageHallsModal();
+    });
+  }
+
+  const setLocationBtn = document.getElementById("setLocationBtn");
+  const setLocationStatus = document.getElementById("setLocationStatus");
+  if (setLocationBtn) {
+    setLocationBtn.addEventListener("click", async () => {
+      if (!activeCourse) return;
+
+      if (!navigator.geolocation) {
+        toast.error("Geolocation is not supported by your browser.");
+        return;
+      }
+
+      setLocationBtn.disabled = true;
+      setLocationBtn.textContent = "Getting Location...";
+      if (setLocationStatus) {
+        setLocationStatus.style.display = "block";
+        setLocationStatus.style.color = "var(--muted)";
+        setLocationStatus.textContent = "Acquiring GPS position...";
+      }
+
+      try {
+        const pos = await getBestGpsPosition(15000); // 15 seconds for accurate lock
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        const accuracy = pos.coords.accuracy;
+
+        // Create a temporary hall entry for this session
+        const tempHall = {
+          id: "temp_" + Date.now(),
+          name: "Current Location",
+          lat: lat,
+          lon: lon,
+          radius: 200, // 200m radius for realistic indoor GPS
+        };
+
+        // Add to saved halls temporarily
+        activeCourse.savedHalls = activeCourse.savedHalls || [];
+        activeCourse.savedHalls.push(tempHall);
+
+        // Select this hall automatically
+        const hallSelect = document.getElementById("repHallSelect");
+        if (hallSelect) {
+          hallSelect.value = `hall_${tempHall.id}`;
+          hallSelect.dispatchEvent(new Event("change"));
+        }
+
+        if (setLocationStatus) {
+          setLocationStatus.style.display = "block";
+          setLocationStatus.style.color = "#28a745";
+          setLocationStatus.textContent = `✅ Location locked (±${Math.round(accuracy)}m accuracy). Ready to start session.`;
+        }
+
+        toast.success(
+          `Location captured with ±${Math.round(accuracy)}m accuracy. 200m geofence active.`,
+          "Location Set 🎯",
+        );
+
+        // Save the updated halls to Firestore
+        await updateCourseInFirestore();
+      } catch (err) {
+        console.error("Could not capture location:", err);
+        if (setLocationStatus) {
+          setLocationStatus.style.display = "block";
+          setLocationStatus.style.color = "var(--danger)";
+          setLocationStatus.textContent =
+            "❌ Could not get GPS. Move near window or try again.";
+        }
+        toast.error(
+          "Could not capture location. Move near a window or use a saved hall.",
+          "GPS Error",
+        );
+      } finally {
+        setLocationBtn.disabled = false;
+        setLocationBtn.textContent = "Set Current Location";
+      }
     });
   }
 
   const captureHallGpsBtn = document.getElementById("captureHallGpsBtn");
   const captureStatus = document.getElementById("captureStatus");
-  if (captureHallGpsBtn)
-  {
-    captureHallGpsBtn.addEventListener("click", () =>
-    {
-      if (!navigator.geolocation)
-      {
+  if (captureHallGpsBtn) {
+    captureHallGpsBtn.addEventListener("click", () => {
+      if (!navigator.geolocation) {
         toast.error("Geolocation is not supported by your browser.");
         return;
       }
       captureHallGpsBtn.disabled = true;
       captureHallGpsBtn.textContent = "Acquiring GPS... ⏳";
-      if (captureStatus)
-      {
+      if (captureStatus) {
         captureStatus.style.display = "block";
         captureStatus.style.color = "var(--muted)";
         captureStatus.textContent =
@@ -2402,16 +3059,14 @@ if (mobileMenuBtn && navLinks)
       }
 
       navigator.geolocation.getCurrentPosition(
-        (pos) =>
-        {
+        (pos) => {
           captureHallGpsBtn.disabled = false;
           captureHallGpsBtn.textContent = "📍 Re-Capture GPS";
           const latInput = document.getElementById("newHallLat");
           const lonInput = document.getElementById("newHallLon");
           if (latInput) latInput.value = pos.coords.latitude.toFixed(6);
           if (lonInput) lonInput.value = pos.coords.longitude.toFixed(6);
-          if (captureStatus)
-          {
+          if (captureStatus) {
             captureStatus.style.display = "block";
             captureStatus.style.color = "#28a745";
             captureStatus.textContent = `✅ GPS locked with ±${Math.round(pos.coords.accuracy)}m accuracy!`;
@@ -2421,12 +3076,10 @@ if (mobileMenuBtn && navLinks)
             "Location Locked 🎯",
           );
         },
-        (err) =>
-        {
+        (err) => {
           captureHallGpsBtn.disabled = false;
           captureHallGpsBtn.textContent = "📍 Capture Current GPS";
-          if (captureStatus)
-          {
+          if (captureStatus) {
             captureStatus.style.display = "block";
             captureStatus.style.color = "var(--danger)";
             captureStatus.textContent =
@@ -2443,10 +3096,8 @@ if (mobileMenuBtn && navLinks)
   }
 
   const addHallForm = document.getElementById("addHallForm");
-  if (addHallForm)
-  {
-    addHallForm.addEventListener("submit", async (e) =>
-    {
+  if (addHallForm) {
+    addHallForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!activeCourse) return;
 
@@ -2456,8 +3107,7 @@ if (mobileMenuBtn && navLinks)
       const radius =
         parseInt(document.getElementById("newHallRadius").value, 10) || 80;
 
-      if (!name || isNaN(lat) || isNaN(lon))
-      {
+      if (!name || isNaN(lat) || isNaN(lon)) {
         toast.error("Please provide valid hall name and coordinates.");
         return;
       }
@@ -2473,8 +3123,7 @@ if (mobileMenuBtn && navLinks)
       activeCourse.savedHalls = activeCourse.savedHalls || [];
       activeCourse.savedHalls.push(newHall);
 
-      try
-      {
+      try {
         await updateCourseInFirestore();
         addHallForm.reset();
         if (captureStatus) captureStatus.style.display = "none";
@@ -2483,8 +3132,7 @@ if (mobileMenuBtn && navLinks)
         const manageModal = document.getElementById("manageHallsModal");
         if (manageModal) manageModal.classList.remove("show");
         toast.success(`"${name}" saved for this course.`, "Hall Added 🏛️");
-      } catch (err)
-      {
+      } catch (err) {
         console.error("Error saving hall:", err);
         toast.error("Could not save lecture hall. Please try again.");
       }
@@ -2500,10 +3148,8 @@ if (mobileMenuBtn && navLinks)
   const rosterList = document.getElementById("rosterList");
   const rosterCount = document.getElementById("rosterCount");
 
-  if (generatePinBtn)
-  {
-    generatePinBtn.addEventListener("click", async () =>
-    {
+  if (generatePinBtn) {
+    generatePinBtn.addEventListener("click", async () => {
       if (!activeCourse) return;
 
       const randomPin = Math.floor(1000 + Math.random() * 9000).toString();
@@ -2514,8 +3160,7 @@ if (mobileMenuBtn && navLinks)
       const hallSelect = document.getElementById("repHallSelect");
       const selectedVal = hallSelect ? hallSelect.value : "no_gps";
 
-      const confirmNoGps = async (reason) =>
-      {
+      const confirmNoGps = async (reason) => {
         return showConfirm({
           title: "Start without GPS check?",
           message:
@@ -2528,22 +3173,17 @@ if (mobileMenuBtn && navLinks)
         });
       };
 
-      if (selectedVal === "no_gps")
-      {
-        const ok = await confirmNoGps(
-          "You chose PIN + Device Lock (no GPS).",
-        );
+      if (selectedVal === "no_gps") {
+        const ok = await confirmNoGps("You chose PIN + Device Lock (no GPS).");
         if (!ok) return;
         await createSession(randomPin, managerMatric, { mode: "no_gps" });
         return;
       }
 
-      if (selectedVal === "live_gps")
-      {
+      if (selectedVal === "live_gps") {
         toast.info("Acquiring GPS for live session...", "GPS Check");
         generatePinBtn.disabled = true;
-        try
-        {
+        try {
           const pos = await getBestGpsPosition(12000);
           await createSession(randomPin, managerMatric, {
             mode: "live_gps",
@@ -2551,31 +3191,30 @@ if (mobileMenuBtn && navLinks)
             lon: pos.coords.longitude,
             radius: 80,
           });
-        } catch (err)
-        {
+        } catch (err) {
           console.warn("Could not capture Rep GPS:", err);
           const ok = await confirmNoGps(
             "Could not lock your live GPS. You can still start in PIN-only mode.",
           );
-          if (ok)
-          {
+          if (ok) {
             await createSession(randomPin, managerMatric, { mode: "no_gps" });
           }
-        } finally
-        {
+        } finally {
           generatePinBtn.disabled = false;
         }
         return;
       }
 
-      if (selectedVal && selectedVal.startsWith("hall_"))
-      {
+      if (selectedVal && selectedVal.startsWith("hall_")) {
         const hallId = selectedVal.replace("hall_", "");
         const hall = (activeCourse.savedHalls || []).find(
           (h) => String(h.id) === String(hallId),
         );
-        if (hall && typeof hall.lat === "number" && typeof hall.lon === "number")
-        {
+        if (
+          hall &&
+          typeof hall.lat === "number" &&
+          typeof hall.lon === "number"
+        ) {
           await createSession(randomPin, managerMatric, {
             mode: "preset_hall",
             name: hall.name,
@@ -2591,32 +3230,48 @@ if (mobileMenuBtn && navLinks)
         return;
       }
 
-      const ok = await confirmNoGps(
-        "No lecture hall is selected.",
-      );
+      const ok = await confirmNoGps("No lecture hall is selected.");
       if (ok) await createSession(randomPin, managerMatric, { mode: "no_gps" });
     });
   }
 
-  async function createSession(pin, managerMatric, locData = {})
-  {
+  async function createSession(pin, managerMatric, locData = {}) {
     if (!activeCourse || !activeCourse.id) return;
 
+    const sessionMode = locData.mode || "no_gps";
+
+    if (sessionMode === "no_gps") {
+      const proceed = await showConfirm({
+        title: "Start Session Without Location Check?",
+        message:
+          "This session will NOT verify where students are physically located — anyone with the PIN can check in from anywhere, including off-campus. Only proceed if that's genuinely what you want for this class.",
+        okText: "Start Anyway",
+        cancelText: "Cancel",
+        danger: true,
+        icon: "map-pin-off",
+      });
+      if (!proceed) return;
+    }
+
     const now = getAccurateNow();
-    const durationSeconds = 60;
-    const expiresAt = now + durationSeconds * 1000;
+    const sessionDurationSeconds = 300; // 5 minutes total session duration
+    const pinRotationIntervalSeconds = 30; // PIN changes every 30 seconds
+    const expiresAt = now + sessionDurationSeconds * 1000;
     const locationMode = locData.mode || "no_gps";
 
     const livePayload = {
       active: true,
       expiresAt: expiresAt,
-      durationSeconds: durationSeconds,
+      durationSeconds: sessionDurationSeconds,
+      pinRotationInterval: pinRotationIntervalSeconds,
       locationMode: locationMode,
       hallName: locData.name || null,
     };
 
     const secretPayload = {
       pin: pin,
+      previousPin: null,
+      pinRotationTime: now,
       locationMode: locationMode,
       lat: typeof locData.lat === "number" ? locData.lat : null,
       lon: typeof locData.lon === "number" ? locData.lon : null,
@@ -2626,8 +3281,10 @@ if (mobileMenuBtn && navLinks)
 
     activeCourse.activeSession = {
       pin: pin,
+      previousPin: null,
+      pinRotationTime: now,
       expiresAt: expiresAt,
-      localDeadline: Date.now() + durationSeconds * 1000,
+      localDeadline: Date.now() + sessionDurationSeconds * 1000,
       expired: false,
       attendees: [managerMatric],
       locationMode: locationMode,
@@ -2635,13 +3292,14 @@ if (mobileMenuBtn && navLinks)
       lon: secretPayload.lon,
       radius: secretPayload.radius,
       hallName: locData.name || null,
+      sessionDuration: sessionDurationSeconds,
+      pinRotationInterval: pinRotationIntervalSeconds,
     };
 
     startSessionTimer();
     renderPortalState();
 
-    try
-    {
+    try {
       await Promise.all([
         setDoc(
           doc(db, "courses", activeCourse.id, "session", "live"),
@@ -2653,8 +3311,7 @@ if (mobileMenuBtn && navLinks)
         ),
       ]);
       await updateCourseInFirestore();
-    } catch (error)
-    {
+    } catch (error) {
       console.error("Failed to publish session:", error);
       toast.error(
         "PIN is showing on this device, but it may not have reached students. Check your connection and generate again.",
@@ -2662,17 +3319,14 @@ if (mobileMenuBtn && navLinks)
     }
   }
 
-  function startSessionTimer()
-  {
+  function startSessionTimer() {
     if (countdownInterval) clearInterval(countdownInterval);
 
     if (!activeCourse || !activeCourse.activeSession) return;
 
-    const tick = async () =>
-    {
+    const tick = async () => {
       const session = activeCourse ? activeCourse.activeSession : null;
-      if (!session)
-      {
+      if (!session) {
         if (countdownInterval) clearInterval(countdownInterval);
         countdownInterval = null;
         return;
@@ -2684,21 +3338,65 @@ if (mobileMenuBtn && navLinks)
       const timeLeft = Math.max(0, Math.ceil(msRemaining / 1000));
       const liveTimerElement = document.getElementById("countdownTimer");
 
-      if (timeLeft <= 0)
-      {
+      // PIN Rotation Logic
+      const pinRotationInterval = (session.pinRotationInterval || 30) * 1000; // 30 seconds default
+      const timeSinceRotation =
+        Date.now() - (session.pinRotationTime || Date.now());
+      const timeUntilRotation = Math.max(
+        0,
+        pinRotationInterval - timeSinceRotation,
+      );
+      const pinRotationElement = document.getElementById("pinRotationTimer");
+
+      if (timeUntilRotation <= 0 && !session.expired) {
+        // Time to rotate the PIN
+        const newPin = Math.floor(1000 + Math.random() * 9000).toString();
+        const oldPin = session.pin;
+
+        // Update local state
+        session.previousPin = oldPin;
+        session.pin = newPin;
+        session.pinRotationTime = Date.now();
+
+        // Update server
+        try {
+          const secretRef = doc(
+            db,
+            "courses",
+            activeCourse.id,
+            "session",
+            "secret",
+          );
+          await updateDoc(secretRef, {
+            pin: newPin,
+            previousPin: oldPin,
+            pinRotationTime: session.pinRotationTime,
+          });
+          console.log("PIN rotated:", oldPin, "→", newPin);
+        } catch (error) {
+          console.error("Failed to rotate PIN on server:", error);
+        }
+
+        renderPortalState();
+      } else {
+        // Update rotation countdown display
+        if (pinRotationElement) {
+          const rotationSeconds = Math.ceil(timeUntilRotation / 1000);
+          pinRotationElement.textContent = `${rotationSeconds}s`;
+        }
+      }
+
+      if (timeLeft <= 0) {
         if (countdownInterval) clearInterval(countdownInterval);
         countdownInterval = null;
         session.expired = true;
         const isRep = currentUser && activeCourse.repUid === currentUser.uid;
-        if (isRep)
-        {
+        if (isRep) {
           await updateCourseInFirestore();
         }
         renderPortalState();
-      } else
-      {
-        if (liveTimerElement)
-        {
+      } else {
+        if (liveTimerElement) {
           liveTimerElement.textContent = `${timeLeft}s`;
         }
       }
@@ -2708,12 +3406,12 @@ if (mobileMenuBtn && navLinks)
     countdownInterval = setInterval(tick, 1000);
   }
 
-  if (checkInForm)
-  {
-    checkInForm.addEventListener("submit", async (e) =>
-    {
+  if (checkInForm) {
+    checkInForm.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const enteredPin = document.getElementById("studentPinInput").value.trim();
+      const enteredPin = document
+        .getElementById("studentPinInput")
+        .value.trim();
       if (!enteredPin) return;
 
       const deviceId = getOrCreateDeviceId();
@@ -2722,11 +3420,9 @@ if (mobileMenuBtn && navLinks)
         activeCourse.activeSession.locationMode === "no_gps";
 
       // Fast path: If session has No GPS requirement, submit immediately!
-      if (isNoGps)
-      {
+      if (isNoGps) {
         toast.info("Submitting attendance...", "Checking In");
-        try
-        {
+        try {
           const idToken = await auth.currentUser.getIdToken();
           const response = await fetch("/api/submitAttendance", {
             method: "POST",
@@ -2744,41 +3440,40 @@ if (mobileMenuBtn && navLinks)
           const result = await response.json();
           if (!response.ok) throw new Error(result.error || "Check-in failed.");
 
+          // Success instantly clears the hidden strike counter.
+          resetCheckInFailures(activeCourse.id);
           toast.success("Your attendance has been recorded!", "Checked In! 🎉");
           checkInForm.reset();
-        } catch (error)
-        {
+        } catch (error) {
           toast.error(error.message);
           console.error(error);
+          // Silent strike — never surfaced until the 3rd one unlocks the override.
+          recordCheckInFailure(activeCourse.id);
         }
         return;
       }
 
       // GPS Geofence path:
-      if (!navigator.geolocation)
-      {
+      if (!navigator.geolocation) {
         toast.error("Geolocation is not supported by your browser.");
         return;
       }
 
       toast.info("Getting the best GPS lock available...", "📍 Location Check");
 
-      const tryCheckIn = async (position) =>
-      {
+      const tryCheckIn = async (position) => {
         const studentLat = position.coords.latitude;
         const studentLon = position.coords.longitude;
         const accuracy = position.coords.accuracy || 999;
 
-        if (accuracy > 250)
-        {
+        if (accuracy > 250) {
           toast.warning(
             `GPS is imprecise (±${Math.round(accuracy)}m). Submitting anyway — indoor signal is often like this.`,
             "Weak Signal",
           );
         }
 
-        try
-        {
+        try {
           const idToken = await auth.currentUser.getIdToken();
           const response = await fetch("/api/submitAttendance", {
             method: "POST",
@@ -2797,35 +3492,36 @@ if (mobileMenuBtn && navLinks)
           });
 
           const result = await response.json();
-          if (!response.ok)
-          {
+          if (!response.ok) {
             throw new Error(result.error || "Check-in failed.");
           }
 
+          // Success instantly clears the hidden strike counter.
+          resetCheckInFailures(activeCourse.id);
           toast.success("Your attendance has been recorded!", "Checked In! 🎉");
           checkInForm.reset();
-        } catch (error)
-        {
+        } catch (error) {
           toast.error(error.message);
           console.error(error);
+          // Silent strike — never surfaced until the 3rd one unlocks the override.
+          recordCheckInFailure(activeCourse.id);
         }
       };
 
-      try
-      {
+      try {
         const position = await getBestGpsPosition(12000);
         await tryCheckIn(position);
-      } catch (error)
-      {
+      } catch (error) {
+        // A dead GPS chip or denied permission is exactly the situation the
+        // fail-safe exists for — this silent strike also counts.
+        recordCheckInFailure(activeCourse.id);
         console.error("GPS error code:", error.code, error.message);
-        if (error.code === 1)
-        {
+        if (error.code === 1) {
           toast.error(
             "Location access was denied. In Chrome: tap the lock icon in the address bar → Site settings → Location → Allow.",
             "GPS Permission Denied",
           );
-        } else
-        {
+        } else {
           toast.error(
             "Could not get your location. Enable Location in phone settings, or ask the Rep to use PIN + Device Lock.",
             "GPS Error",
@@ -2835,12 +3531,142 @@ if (mobileMenuBtn && navLinks)
     });
   }
 
+  // --- HIDDEN FAIL-SAFE OVERRIDE: student-side UI wiring ---
+  const requestManualBtn = document.getElementById("requestManualBtn");
+  const sendManualRequestBtn = document.getElementById("sendManualRequestBtn");
+  if (requestManualBtn) {
+    requestManualBtn.addEventListener("click", () => {
+      const panel = document.getElementById("manualOverridePanel");
+      if (panel) {
+        panel.classList.toggle("hidden");
+        refreshIcons();
+      }
+    });
+  }
+  if (sendManualRequestBtn) {
+    sendManualRequestBtn.addEventListener("click", submitManualRequest);
+  }
+
+  // --- PHYSICAL PRESENCE CHECK (headcount) wiring ---
+  const conductHeadcountBtn = document.getElementById("conductHeadcountBtn");
+  if (conductHeadcountBtn) {
+    conductHeadcountBtn.addEventListener("click", () => {
+      const panel = document.getElementById("headcountPanel");
+      if (panel) {
+        panel.classList.toggle("hidden");
+        refreshIcons();
+      }
+    });
+  }
+
+  const saveHeadcountBtn = document.getElementById("saveHeadcountBtn");
+  if (saveHeadcountBtn) {
+    saveHeadcountBtn.addEventListener("click", () => {
+      const input = document.getElementById("physicalCountInput");
+      if (!input || !activeCourse || !activeCourse.activeSession) return;
+      const value = parseInt(input.value, 10);
+      if (isNaN(value) || value < 0) {
+        toast.warning("Enter a valid body count first.", "Invalid Count");
+        return;
+      }
+      activeCourse.activeSession.physicalHeadcount = value;
+      syncHeadcountUI();
+      toast.success(
+        `Physical count saved: ${value}. Comparison updated.`,
+        "Headcount 🧍",
+      );
+    });
+  }
+
+  // Live comparison of bodies-in-hall vs system check-ins for this session.
+  function syncHeadcountUI() {
+    const presenceCheckPanel = document.getElementById("presenceCheckPanel");
+    if (!presenceCheckPanel) return;
+    const session = activeCourse ? activeCourse.activeSession : null;
+    const hasSession =
+      session &&
+      (session.pin || (session.attendees && session.attendees.length > 0));
+    presenceCheckPanel.classList.toggle("hidden", !hasSession);
+
+    const comparisonEl = document.getElementById("headcountComparison");
+    if (!comparisonEl) return;
+    const physical =
+      session && typeof session.physicalHeadcount === "number"
+        ? session.physicalHeadcount
+        : null;
+    if (physical === null) {
+      comparisonEl.classList.add("hidden");
+      return;
+    }
+    const systemCount =
+      session && session.attendees ? session.attendees.length : 0;
+    const diff = systemCount - physical;
+    comparisonEl.classList.remove("hidden");
+    if (diff === 0) {
+      comparisonEl.style.background = "rgba(40, 167, 69, 0.1)";
+      comparisonEl.style.color = "#28a745";
+      comparisonEl.textContent = `🧍 Physical: ${physical} | 💻 System: ${systemCount} — perfect match. Close class to archive.`;
+    } else if (diff > 0) {
+      comparisonEl.style.background = "rgba(220, 53, 69, 0.08)";
+      comparisonEl.style.color = "#dc3545";
+      comparisonEl.textContent = `🧍 Physical: ${physical} | 💻 System: ${systemCount} — ${diff} ghost check-in(s). Spot the empty seat on the roster and 🚩 Flag Absent.`;
+    } else {
+      comparisonEl.style.background = "rgba(253, 126, 20, 0.1)";
+      comparisonEl.style.color = "#fd7e14";
+      comparisonEl.textContent = `🧍 Physical: ${physical} | 💻 System: ${systemCount} — ${Math.abs(diff)} body(ies) may not have checked in. Point them to the manual override (3 failed attempts) or approve them from the manual requests queue.`;
+    }
+  }
+
+  // --- ANTI-BEEF: flag a suspicious check-in absent. Attendance is NEVER
+  // deleted — the student gets an emergency alert and the act is logged. ---
+  window.flagStudentAbsent = async function (matric) {
+    if (!activeCourse || !auth.currentUser) return;
+    const member = (activeCourse.members || []).find(
+      (m) => normalizeMatric(m.matric) === normalizeMatric(matric),
+    );
+    if (!member) {
+      toast.error("Member record not found for this student.", "Cannot Flag");
+      return;
+    }
+    const ok = await showConfirm({
+      title: "🚩 Flag Absent",
+      message: `Flag [${matric}] as physically absent? Their phone gets an emergency alert to see you immediately. Attendance is NOT deleted — this decision is final and permanently logged.`,
+      okText: "Flag Absent",
+      cancelText: "Cancel",
+      icon: "flag",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const response = await fetch("/api/flagAbsent", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          courseId: activeCourse.id,
+          targetUid: member.uid,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error || "Unable to flag student.");
+      toast.success(
+        result.message || "Student flagged — emergency alert sent.",
+        "Flagged 🚩",
+      );
+    } catch (error) {
+      console.error("Flag absent error:", error);
+      toast.error(error.message);
+    }
+  };
+
   const closeClassBtn = document.getElementById("closeClassBtn");
 
-  if (closeClassBtn)
-  {
-    closeClassBtn.addEventListener("click", async () =>
-    {
+  if (closeClassBtn) {
+    closeClassBtn.addEventListener("click", async () => {
       if (!activeCourse) return;
 
       if (
@@ -2853,10 +3679,8 @@ if (mobileMenuBtn && navLinks)
           icon: "📁",
           danger: false,
         })
-      )
-      {
-        try
-        {
+      ) {
+        try {
           const idToken = await auth.currentUser.getIdToken();
           const response = await fetch("/api/closeSession", {
             method: "POST",
@@ -2864,7 +3688,14 @@ if (mobileMenuBtn && navLinks)
               "Content-Type": "application/json",
               Authorization: `Bearer ${idToken}`,
             },
-            body: JSON.stringify({ courseId: activeCourse.id }),
+            body: JSON.stringify({
+              courseId: activeCourse.id,
+              physicalHeadcount:
+                activeCourse.activeSession &&
+                typeof activeCourse.activeSession.physicalHeadcount === "number"
+                  ? activeCourse.activeSession.physicalHeadcount
+                  : null,
+            }),
           });
           const result = await response.json();
           if (!response.ok)
@@ -2882,8 +3713,7 @@ if (mobileMenuBtn && navLinks)
             "Attendance records have been saved to the archive.",
             "Class Closed 📁",
           );
-        } catch (error)
-        {
+        } catch (error) {
           console.error("Close session error:", error);
           toast.error("Unable to close session. Please try again.");
         }
@@ -2893,10 +3723,8 @@ if (mobileMenuBtn && navLinks)
 
   const endSemesterBtn = document.getElementById("endSemesterBtn");
 
-  if (endSemesterBtn)
-  {
-    endSemesterBtn.addEventListener("click", async () =>
-    {
+  if (endSemesterBtn) {
+    endSemesterBtn.addEventListener("click", async () => {
       if (!activeCourse) return;
 
       if (
@@ -2908,10 +3736,8 @@ if (mobileMenuBtn && navLinks)
           icon: "🎓",
           danger: true,
         })
-      )
-      {
-        try
-        {
+      ) {
+        try {
           const idToken = await auth.currentUser.getIdToken();
           const response = await fetch("/api/endSemester", {
             method: "POST",
@@ -2934,8 +3760,7 @@ if (mobileMenuBtn && navLinks)
             "All records have been cleared. New semester ready.",
             "Semester Ended 🎓",
           );
-        } catch (error)
-        {
+        } catch (error) {
           console.error("End semester error:", error);
           toast.error("Unable to end semester. Please try again.");
         }
@@ -2944,11 +3769,9 @@ if (mobileMenuBtn && navLinks)
   }
 
   // Load attendance history from the attendance/ subcollection (source of truth)
-  async function loadAttendanceHistory()
-  {
+  async function loadAttendanceHistory() {
     if (!activeCourse || !activeCourse.id) return;
-    try
-    {
+    try {
       const snap = await getDocs(
         query(
           collection(db, "courses", activeCourse.id, "attendance"),
@@ -2959,15 +3782,13 @@ if (mobileMenuBtn && navLinks)
         .map((d) => ({ id: d.id, ...d.data() }))
         .filter((record) => Array.isArray(record.attendees));
       renderPortalState();
-    } catch (error)
-    {
+    } catch (error) {
       console.error("Failed to load attendance history:", error);
       activeCourse.attendanceHistory = activeCourse.attendanceHistory || [];
     }
   }
 
-  function sessionPayloadForCourseDoc(session)
-  {
+  function sessionPayloadForCourseDoc(session) {
     if (!session) return null;
     return {
       expiresAt: session.expiresAt || null,
@@ -2981,8 +3802,7 @@ if (mobileMenuBtn && navLinks)
     };
   }
 
-  async function updateCourseInFirestore()
-  {
+  async function updateCourseInFirestore() {
     if (!activeCourse || !activeCourse.id) return;
     const courseRef = doc(db, "courses", activeCourse.id);
     await updateDoc(courseRef, {
@@ -2992,8 +3812,7 @@ if (mobileMenuBtn && navLinks)
     });
   }
 
-  window.downloadAttendance = function (index)
-  {
+  window.downloadAttendance = function (index) {
     if (
       !activeCourse ||
       !activeCourse.attendanceHistory ||
@@ -3004,8 +3823,7 @@ if (mobileMenuBtn && navLinks)
     const sessionRecord = activeCourse.attendanceHistory[index];
     let csvContent = "data:text/csv;charset=utf-8,Matric Number,Status\n";
 
-    sessionRecord.attendees.forEach((matric) =>
-    {
+    sessionRecord.attendees.forEach((matric) => {
       csvContent += `"${matric}","Present"\r\n`;
     });
 
@@ -3021,8 +3839,7 @@ if (mobileMenuBtn && navLinks)
     document.body.removeChild(link);
   };
 
-  function renderPortalState()
-  {
+  function renderPortalState() {
     if (!activeCourse) return;
 
     const userMatric = normalizeMatric(currentUser ? currentUser.matric : "");
@@ -3042,20 +3859,16 @@ if (mobileMenuBtn && navLinks)
     const bannerText = document.getElementById("bannerText");
     const closeClassWrapper = document.getElementById("closeClassWrapper");
 
-    if (isSessionActive)
-    {
-      if (sessionBanner)
-      {
+    if (isSessionActive) {
+      if (sessionBanner) {
         sessionBanner.classList.remove("hidden");
         sessionBanner.style.borderColor = "#28a745";
         sessionBanner.style.background = "rgba(40, 167, 69, 0.1)";
-        if (bannerTitle)
-        {
+        if (bannerTitle) {
           bannerTitle.textContent = "🔴 ATTENDANCE SESSION LIVE";
           bannerTitle.style.color = "#28a745";
         }
-        if (bannerText)
-        {
+        if (bannerText) {
           const deadline =
             session.localDeadline || session.expiresAt - serverClockSkewMs;
           const msRemaining = deadline - Date.now();
@@ -3066,8 +3879,7 @@ if (mobileMenuBtn && navLinks)
           bannerText.innerHTML = `Time Remaining: <strong id="countdownTimer" style="font-size: 1.2rem;">${initialSeconds}s</strong>`;
         }
       }
-      if (isRep || isAssistant)
-      {
+      if (isRep || isAssistant) {
         if (activePinDisplay) {
           activePinDisplay.classList.remove("hidden");
           // Force immediate PIN display
@@ -3078,70 +3890,67 @@ if (mobileMenuBtn && navLinks)
         }
         if (generatePinBtn) generatePinBtn.textContent = "🔄 Regenerate PIN";
         if (closeClassWrapper) closeClassWrapper.classList.remove("hidden");
+
+        const showQrBtnEl = document.getElementById("showQrBtn");
+        if (showQrBtnEl) showQrBtnEl.classList.remove("hidden");
+        // Projector view open? Re-render the QR for the fresh PIN.
+        const qrOverlayEl = document.getElementById("qrModeOverlay");
+        if (qrOverlayEl && !qrOverlayEl.classList.contains("hidden")) {
+          renderQrOverlay();
+        }
       }
       startSessionTimer();
-    } else
-    {
-      if (sessionBanner)
-      {
-        if (session && session.expired)
-        {
+    } else {
+      if (sessionBanner) {
+        if (session && session.expired) {
           sessionBanner.classList.remove("hidden");
           sessionBanner.style.borderColor = "#dc3545";
           sessionBanner.style.background = "rgba(220, 53, 69, 0.1)";
-          if (bannerTitle)
-          {
+          if (bannerTitle) {
             bannerTitle.textContent = "⏹️ ATTENDANCE SESSION CLOSED";
             bannerTitle.style.color = "#dc3545";
           }
-          if (bannerText)
-          {
-            if (isRep || isAssistant)
-            {
+          if (bannerText) {
+            if (isRep || isAssistant) {
               bannerText.textContent =
                 "The 60-second window has expired. PIN is no longer valid, but you can review and close class.";
-            } else
-            {
+            } else {
               bannerText.textContent =
                 "The attendance window for this session has closed. PIN is no longer valid.";
             }
           }
-        } else
-        {
+        } else {
           sessionBanner.classList.add("hidden");
         }
       }
-      if (isRep || isAssistant)
-      {
+      if (isRep || isAssistant) {
         if (activePinDisplay) activePinDisplay.classList.add("hidden");
         if (generatePinBtn)
           generatePinBtn.textContent = "Generate Attendance PIN ⏱️";
 
-        if (session && session.attendees && session.attendees.length > 0)
-        {
+        if (session && session.attendees && session.attendees.length > 0) {
           if (closeClassWrapper) closeClassWrapper.classList.remove("hidden");
-        } else
-        {
+        } else {
           if (closeClassWrapper) closeClassWrapper.classList.add("hidden");
         }
+
+        const showQrBtnEl = document.getElementById("showQrBtn");
+        if (showQrBtnEl) showQrBtnEl.classList.add("hidden");
+        // No live session → nothing to project.
+        if (window.closeQrMode) window.closeQrMode();
       }
     }
 
-    if (!isRep && !isAssistant)
-    {
+    if (!isRep && !isAssistant) {
       const studentPinHint = document.querySelector("#studentControls p");
-      if (studentPinHint)
-      {
-        if (isSessionActive && session.locationMode === "no_gps")
-        {
+      if (studentPinHint) {
+        if (isSessionActive && session.locationMode === "no_gps") {
           studentPinHint.textContent =
             "GPS is off for this session. Enter the 4-digit PIN announced by your Course Rep.";
-        } else if (isSessionActive)
-        {
+        } else if (isSessionActive) {
           studentPinHint.textContent =
             "Enter the 4-digit PIN. Stay in the lecture hall — indoor GPS is often imprecise, keep trying near a window.";
-        } else
-        {
+        } else {
           studentPinHint.textContent =
             "Enter the 4-digit PIN announced by your Course Rep.";
         }
@@ -3149,38 +3958,58 @@ if (mobileMenuBtn && navLinks)
     }
 
     if (!rosterList) return;
-    
+
     const attendees = session && session.attendees ? session.attendees : [];
     if (rosterCount) rosterCount.textContent = attendees.length;
+    syncHeadcountUI();
+
+    // Anti-beef flags change the roster rows too — rebuild whenever the set
+    // of flagged students changes, not just when attendees change.
+    const flagsSignature = JSON.stringify(
+      (activeCourse.absentFlags || [])
+        .filter((f) => f.status === "flagged")
+        .map((f) => normalizeMatric(f.matric))
+        .sort(),
+    );
+    const flagsChanged = rosterList.dataset.flagsSignature !== flagsSignature;
 
     // Optimize: Only rebuild roster if attendees count changed
     const currentCount = rosterList.children.length;
-    const hasEmptyMessage = currentCount === 1 && rosterList.children[0].textContent.includes("No check-ins");
-    
-    if (attendees.length === 0 && hasEmptyMessage) {
+    const hasEmptyMessage =
+      currentCount === 1 &&
+      rosterList.children[0].textContent.includes("No check-ins");
+
+    if (!flagsChanged && attendees.length === 0 && hasEmptyMessage) {
       return; // Skip rebuild if already showing empty message
     }
-    if (attendees.length > 0 && currentCount === attendees.length + 1) {
+    if (
+      !flagsChanged &&
+      attendees.length > 0 &&
+      currentCount === attendees.length + 1
+    ) {
       // Check if the attendees are actually the same
-      const currentAttendees = Array.from(rosterList.children).slice(1).map(li => {
-        const match = li.textContent.match(/\(([^)]+)\)/);
-        return match ? match[1] : null;
-      }).filter(Boolean);
-      
-      if (JSON.stringify(attendees.map(normalizeMatric)) === JSON.stringify(currentAttendees.map(normalizeMatric))) {
+      const currentAttendees = Array.from(rosterList.children)
+        .slice(1)
+        .map((li) => {
+          const match = li.textContent.match(/\(([^)]+)\)/);
+          return match ? match[1] : null;
+        })
+        .filter(Boolean);
+
+      if (
+        JSON.stringify(attendees.map(normalizeMatric)) ===
+        JSON.stringify(currentAttendees.map(normalizeMatric))
+      ) {
         return; // Skip rebuild if attendees haven't changed
       }
     }
-    
+
     rosterList.innerHTML = "";
 
-    if (attendees.length === 0)
-    {
+    if (attendees.length === 0) {
       rosterList.innerHTML = `<li style="color: var(--muted); font-size: 0.9rem; text-align: center; padding: 10px;">No check-ins recorded yet. ⏳</li>`;
-    } else
-    {
-      attendees.forEach((matric) =>
-      {
+    } else {
+      attendees.forEach((matric) => {
         const normalizedM = normalizeMatric(matric);
         // Find this attendee's member record to get their actual role
         const memberRecord = (activeCourse.members || []).find(
@@ -3191,31 +4020,45 @@ if (mobileMenuBtn && navLinks)
           activeCourse.repUid === (memberRecord ? memberRecord.uid : null);
 
         let badgeHTML = "";
-        if (isRepAttendee || attendeeRole === "rep")
-        {
+        if (isRepAttendee || attendeeRole === "rep") {
           badgeHTML = `<span style="background: var(--teal); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 6px;">👑 REP</span>`;
         } else if (
           attendeeRole === "assistant" ||
           attendeeRole === "session_assistant"
-        )
-        {
+        ) {
           badgeHTML = `<span style="background: #6f42c1; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 6px;">⭐ ASST</span>`;
         }
 
+        const flagRecord = (activeCourse.absentFlags || []).find(
+          (f) =>
+            normalizeMatric(f.matric) === normalizedM && f.status === "flagged",
+        );
+        const statusHTML = flagRecord
+          ? `<span style="color: #dc3545; font-weight: bold;">🚩 Flagged Absent</span>`
+          : `<span style="color: #28a745; font-weight: bold;">Present ✅</span>`;
+        const flagBtnHTML =
+          (isRep || isAssistant) && !flagRecord
+            ? `<button onclick="flagStudentAbsent('${matric}')" title="Empty seat linked to this check-in? Flag it — the student gets an emergency alert and cannot be quietly deleted" style="background: transparent; border: 1px solid #dc3545; color: #dc3545; border-radius: 6px; cursor: pointer; font-size: 0.72rem; font-weight: bold; padding: 3px 8px; margin-left: 8px;">🚩 Flag Absent</button>`
+            : "";
+
         const li = document.createElement("li");
         li.style.cssText =
-          "display: flex; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem;";
-        li.innerHTML = `<span>🎓 <strong>${attendeeRole === "rep" || isRepAttendee ? "Rep" : "Student"}</strong> (${matric}) ${badgeHTML}</span> <span style="color: #28a745; font-weight: bold;">Present ✅</span>`;
+          "display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem;";
+        li.innerHTML = `<span>🎓 <strong>${attendeeRole === "rep" || isRepAttendee ? "Rep" : "Student"}</strong> (${matric}) ${badgeHTML}</span> <span style="display: flex; align-items: center; gap: 6px;">${statusHTML}${flagBtnHTML}</span>`;
         rosterList.appendChild(li);
       });
     }
 
-    if (isRep)
-    {
-      let enrolledListDiv = document.getElementById("repEnrolledStudentsSection");
+    rosterList.dataset.flagsSignature = flagsSignature;
 
-      if (!enrolledListDiv && portalSection)
-      {
+    if (isRep) renderAuditSection();
+
+    if (isRep) {
+      let enrolledListDiv = document.getElementById(
+        "repEnrolledStudentsSection",
+      );
+
+      if (!enrolledListDiv && portalSection) {
         enrolledListDiv = document.createElement("div");
         enrolledListDiv.id = "repEnrolledStudentsSection";
         enrolledListDiv.style.cssText =
@@ -3226,18 +4069,14 @@ if (mobileMenuBtn && navLinks)
         targetParent.appendChild(enrolledListDiv);
       }
 
-      if (enrolledListDiv)
-      {
+      if (enrolledListDiv) {
         const enrolledMatrics = activeCourse.enrolled || [];
         let studentRowsHTML = "";
 
-        if (enrolledMatrics.length === 0)
-        {
+        if (enrolledMatrics.length === 0) {
           studentRowsHTML = `<p style="color: var(--muted); font-size: 0.85rem;">No students enrolled yet.</p>`;
-        } else
-        {
-          enrolledMatrics.forEach((matric) =>
-          {
+        } else {
+          enrolledMatrics.forEach((matric) => {
             const isRepMatric = userMatric === normalizeMatric(matric);
             studentRowsHTML += `
             <li style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: var(--bg); border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem;">
@@ -3250,7 +4089,7 @@ if (mobileMenuBtn && navLinks)
 
         enrolledListDiv.innerHTML = `
         <h4 style="color: var(--navy); margin-bottom: 10px; font-size: 1rem;">👥 Manage Enrolled Students (${enrolledMatrics.length})</h4>
-        <p style="font-size: 0.8rem; color: var(--muted); margin-bottom: 10px;">Remove any unauthorized student who joined your course code.</p>
+        <p style="font-size: 0.8rem; color: var(--muted); margin-bottom: 10px;">Remove unauthorized students who joined your course code. While a session is LIVE, removals are blocked — use 🚩 Flag Absent on the roster instead.</p>
         <ul style="list-style: none; padding: 0; max-height: 180px; overflow-y: auto;">
           ${studentRowsHTML}
         </ul>
@@ -3259,8 +4098,7 @@ if (mobileMenuBtn && navLinks)
     }
 
     const repArchiveSection = document.getElementById("repArchiveSection");
-    if (isRep && repArchiveSection)
-    {
+    if (isRep && repArchiveSection) {
       const totalClassesCount = document.getElementById("totalClassesCount");
       const archiveListContainer = document.getElementById(
         "archiveListContainer",
@@ -3269,30 +4107,38 @@ if (mobileMenuBtn && navLinks)
       const history = activeCourse.attendanceHistory || [];
       if (totalClassesCount) totalClassesCount.textContent = history.length;
 
-      if (history.length === 0)
-      {
+      if (history.length === 0) {
         archiveListContainer.innerHTML = `<p style="font-size: 0.9rem; color: var(--muted); text-align: center; padding: 10px;">No archived classes yet. Close a live class to save records here! 🗂️</p>`;
-      } else
-      {
+      } else {
         archiveListContainer.innerHTML = "";
-        history.forEach((sessionRecord, archiveIndex) =>
-        {
+        history.forEach((sessionRecord, archiveIndex) => {
           const archiveCard = document.createElement("div");
           archiveCard.style.cssText =
             "background: var(--card-bg); padding: 12px; border-radius: 8px; margin-bottom: 10px; border: 1px solid var(--border);";
 
           const attendeesListHTML = sessionRecord.attendees
-            .map((m) =>
-            {
+            .map((m) => {
               return `<li style="font-size: 0.85rem; padding: 2px 0;">🎓 Student (${m})</li>`;
             })
             .join("");
+
+          const headcountBadgeHTML =
+            sessionRecord.physicalHeadcount !== null &&
+            sessionRecord.physicalHeadcount !== undefined
+              ? `<span style="font-size: 0.8rem; background: #6f42c1; color: white; padding: 2px 6px; border-radius: 4px;">🧍 ${sessionRecord.physicalHeadcount}/${sessionRecord.systemCount !== undefined ? sessionRecord.systemCount : sessionRecord.attendees.length}</span>`
+              : "";
+          const flagsBadgeHTML =
+            sessionRecord.flaggedAbsent && sessionRecord.flaggedAbsent.length
+              ? `<span style="font-size: 0.8rem; background: #dc3545; color: white; padding: 2px 6px; border-radius: 4px;">🚩 ${sessionRecord.flaggedAbsent.length} Flagged</span>`
+              : "";
 
           archiveCard.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
             <strong>📅 Session on ${sessionRecord.date}</strong>
             <div style="display: flex; gap: 8px; align-items: center;">
               <span style="font-size: 0.8rem; background: var(--teal); color: white; padding: 2px 6px; border-radius: 4px;">${sessionRecord.attendees.length} Present</span>
+              ${headcountBadgeHTML}
+              ${flagsBadgeHTML}
               <button onclick="downloadAttendance(${archiveIndex})" class="btn" style="padding: 4px 10px; font-size: 0.75rem; width: auto;" title="Download CSV">📥 CSV</button>
             </div>
           </div>
@@ -3304,6 +4150,45 @@ if (mobileMenuBtn && navLinks)
           archiveListContainer.appendChild(archiveCard);
         });
       }
+
+      const deviceFlagsCount = document.getElementById("deviceFlagsCount");
+      const deviceFlagsListContainer = document.getElementById(
+        "deviceFlagsListContainer",
+      );
+      const flags = activeCourse.deviceFlags || [];
+      if (deviceFlagsCount) deviceFlagsCount.textContent = flags.length;
+
+      if (deviceFlagsListContainer) {
+        if (flags.length === 0) {
+          deviceFlagsListContainer.innerHTML = `<p style="font-size: 0.85rem; color: var(--muted); text-align: center; padding: 8px;">No flagged attempts. 👍</p>`;
+        } else {
+          // Newest first — most relevant to a rep checking in on things right now
+          const sortedFlags = [...flags].sort((a, b) => {
+            const aTime =
+              a.createdAt && a.createdAt.toMillis ? a.createdAt.toMillis() : 0;
+            const bTime =
+              b.createdAt && b.createdAt.toMillis ? b.createdAt.toMillis() : 0;
+            return bTime - aTime;
+          });
+          deviceFlagsListContainer.innerHTML = "";
+          sortedFlags.forEach((flag) => {
+            const flagCard = document.createElement("div");
+            flagCard.style.cssText =
+              "background: var(--card-bg); padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; border: 1px solid var(--danger);";
+            const whenText =
+              flag.createdAt && flag.createdAt.toDate
+                ? flag.createdAt.toDate().toLocaleString()
+                : "Just now";
+            flagCard.innerHTML = `
+              <div style="font-size: 0.85rem;">
+                🚫 <strong>${flag.attemptedMatric || "Unknown"}</strong> tried checking in on a device locked to <strong>${flag.boundMatric || "Unknown"}</strong>
+              </div>
+              <div style="font-size: 0.75rem; color: var(--muted); margin-top: 3px;">${whenText}</div>
+            `;
+            deviceFlagsListContainer.appendChild(flagCard);
+          });
+        }
+      }
     }
 
     const studentAnalyticsSection = document.getElementById(
@@ -3313,8 +4198,7 @@ if (mobileMenuBtn && navLinks)
       .map(normalizeMatric)
       .includes(userMatric);
 
-    if (isEnrolled && studentAnalyticsSection)
-    {
+    if (isEnrolled && studentAnalyticsSection) {
       studentAnalyticsSection.classList.remove("hidden");
 
       const history = activeCourse.attendanceHistory || [];
@@ -3323,8 +4207,7 @@ if (mobileMenuBtn && navLinks)
       let attendedCount = 0;
       let historyListHTML = "";
 
-      history.forEach((sessionRecord) =>
-      {
+      history.forEach((sessionRecord) => {
         const normalizedAttendees = (sessionRecord.attendees || []).map(
           normalizeMatric,
         );
@@ -3342,15 +4225,18 @@ if (mobileMenuBtn && navLinks)
       });
 
       const percentage =
-        totalClasses > 0 ? Math.round((attendedCount / totalClasses) * 100) : 100;
+        totalClasses > 0
+          ? Math.round((attendedCount / totalClasses) * 100)
+          : 100;
 
       document.getElementById("statAttendedCount").textContent = attendedCount;
       document.getElementById("statTotalClasses").textContent = totalClasses;
       document.getElementById("statPercentage").textContent = `${percentage}%`;
 
-      let personalLogContainer = document.getElementById("personalLogContainer");
-      if (!personalLogContainer)
-      {
+      let personalLogContainer = document.getElementById(
+        "personalLogContainer",
+      );
+      if (!personalLogContainer) {
         personalLogContainer = document.createElement("div");
         personalLogContainer.id = "personalLogContainer";
         personalLogContainer.style.cssText =
@@ -3366,25 +4252,21 @@ if (mobileMenuBtn && navLinks)
     `;
 
       const eligibilityBanner = document.getElementById("eligibilityBanner");
-      if (totalClasses === 0)
-      {
+      if (totalClasses === 0) {
         eligibilityBanner.style.background = "rgba(108, 117, 125, 0.1)";
         eligibilityBanner.style.color = "var(--muted)";
         eligibilityBanner.textContent =
           "⏳ No archived classes yet. Analytics will update as classes are held.";
-      } else if (percentage >= 70)
-      {
+      } else if (percentage >= 70) {
         eligibilityBanner.style.background = "rgba(40, 167, 69, 0.1)";
         eligibilityBanner.style.color = "#28a745";
         eligibilityBanner.textContent = `✅ ELIGIBLE: You meet the 70% attendance threshold (${percentage}%).`;
-      } else
-      {
+      } else {
         eligibilityBanner.style.background = "rgba(220, 53, 69, 0.1)";
         eligibilityBanner.style.color = "#dc3545";
         eligibilityBanner.textContent = `⚠️ WARNING: Your attendance is at ${percentage}%. You are below the 70% exam eligibility requirement!`;
       }
-    } else if (studentAnalyticsSection)
-    {
+    } else if (studentAnalyticsSection) {
       studentAnalyticsSection.classList.add("hidden");
     }
   }

@@ -48,6 +48,22 @@ module.exports = async (req, res) => {
     if (courseSnap.data().repUid !== decoded.uid)
       return res.status(403).json({ error: "Only the course rep can remove students." });
 
+    // 🚫 ANTI-BEEF GUARDRAIL: while a session is live, a rep cannot quietly
+    // hard-delete a student who may be sitting in the hall. If there is a
+    // mismatch, the rep must use the 🚩 Flag Absent flow instead — it alerts
+    // the student and is permanently logged, instead of silently erasing them.
+    const liveSnap = await courseRef.collection("session").doc("live").get();
+    if (
+      liveSnap.exists &&
+      liveSnap.data().active &&
+      Date.now() <= (liveSnap.data().expiresAt || 0) + 10000
+    ) {
+      return res.status(409).json({
+        error:
+          "Anti-beef guardrail: students cannot be removed while a session is live. If you believe they are not present, use 🚩 Flag Absent on the roster instead.",
+      });
+    }
+
     const normalizedMatric = String(targetMatric).trim().toUpperCase();
     const membersQuery = courseRef.collection("members");
 
@@ -68,6 +84,13 @@ module.exports = async (req, res) => {
       if (targetMemberDoc) {
         tx.delete(targetMemberDoc.ref);
       }
+    });
+
+    // Audit trail: every removal is permanently logged with who did it.
+    await courseRef.collection("removalLog").add({
+      matric: normalizedMatric,
+      removedByUid: decoded.uid,
+      removedAt: FieldValue.serverTimestamp(),
     });
 
     return res.status(200).json({ success: true });

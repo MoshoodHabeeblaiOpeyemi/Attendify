@@ -142,8 +142,19 @@ module.exports = async (req, res) => {
         .json({ error: "Session security details missing." });
     }
     const sessionData = secretDoc.data();
-    if (String(sessionData.pin) !== String(pin)) {
-      return res.status(400).json({ error: "Invalid attendance PIN." });
+    
+    // Rotating PIN validation: accept current PIN or previous PIN within grace period
+    const currentPin = String(sessionData.pin || "");
+    const previousPin = sessionData.previousPin ? String(sessionData.previousPin) : null;
+    const pinRotationTime = sessionData.pinRotationTime || 0;
+    const gracePeriodMs = 5000; // 5-second grace period
+    const now = Date.now();
+    
+    const isCurrentPinValid = String(pin) === currentPin;
+    const isPreviousPinValid = previousPin && String(pin) === previousPin && (now - pinRotationTime) < gracePeriodMs;
+    
+    if (!isCurrentPinValid && !isPreviousPinValid) {
+      return res.status(400).json({ error: "Invalid attendance PIN. Please ask your Rep for the current PIN." });
     }
 
     const currentAttendees = sessionData.attendees || [];
@@ -168,11 +179,12 @@ module.exports = async (req, res) => {
           ? accuracy
           : 999;
 
-      // Indoor phones often report ±400–900m. That is uncertainty, not proof
-      // the student is kilometres away. Only reject readings that are unusable.
-      if (reportedAccuracy > 1500) {
+      // Updated tolerances for realistic indoor GPS while maintaining security
+      // Nigerian lecture halls: 150-200m radius accommodates indoor GPS inaccuracy
+      // without allowing hostel/different building check-ins
+      if (reportedAccuracy > 300) {
         return res.status(400).json({
-          error: `GPS signal unusable (±${Math.round(reportedAccuracy)}m). Move near a window, wait a few seconds, or ask the Rep to start PIN + Device Lock mode.`,
+          error: `GPS signal too weak (±${Math.round(reportedAccuracy)}m). Move near a window, wait 30 seconds, or ask the Rep to use PIN + Device Lock mode.`,
         });
       }
 
@@ -182,9 +194,9 @@ module.exports = async (req, res) => {
 
       if (hallLat !== undefined && hallLat !== null && hallLon !== undefined && hallLon !== null) {
         distance = calculateDistance(hallLat, hallLon, lat, lon);
-        // Allowed radius must include GPS uncertainty, otherwise a student
-        // standing in the hall with ±700m accuracy can never pass a 180m fence.
-        const allowedRadius = Math.min(900, baseRadius + reportedAccuracy);
+        // Allowed radius: 200m max for indoor GPS tolerance while preventing
+        // check-ins from different buildings or hostels
+        const allowedRadius = Math.min(200, baseRadius + reportedAccuracy);
 
         if (distance > allowedRadius) {
           const km = (distance / 1000).toFixed(1);

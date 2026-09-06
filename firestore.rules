@@ -80,6 +80,18 @@ service cloud.firestore {
         && request.resource.data.department == resource.data.department;
 
       allow delete: if false;
+
+      // 📲 FCM push tokens (device registrations for emergency alerts).
+      match /fcmTokens/{tokenId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // 🚩 Emergency push-style alerts (e.g. "flagged absent — see your Rep").
+      // Written only by the trusted backend; the student can only read them.
+      match /notifications/{notificationId} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
     }
 
     match /departmentReps/{repId} {
@@ -156,6 +168,59 @@ service cloud.firestore {
       match /deviceFlags/{flagId} {
         allow read: if isCourseStaff(courseId);
         allow write: if false;
+      }
+
+      // 🚩 Anti-beef absent flags. Written ONLY by the trusted backend
+      // (Admin SDK) — never from a client. Staff can list every flag for
+      // roster badges; a student can only ever read their OWN flag doc
+      // (uid-keyed) — that is the emergency "see your Rep" alert. Flags are
+      // permanent and can never be flipped or erased by anyone.
+      match /absentFlags/{flagUid} {
+        allow get: if isCourseStaff(courseId) || isOwner(flagUid);
+        allow list: if isCourseStaff(courseId);
+        allow create, update, delete: if false;
+      }
+
+      // Audit trail of student removals (backend-only, rep-readable).
+      match /removalLog/{logId} {
+        allow read: if isCourseStaff(courseId);
+        allow write: if false;
+      }
+
+      // Manual verification override requests (3-strike fail-safe).
+      // Students can only create/edit their OWN pending request; the count of
+      // automated failures is tracked client-side and is never stored/shown.
+      // Only course staff can resolve a request — and the decision is final
+      // (approved/rejected requests can never be flipped back to pending).
+      match /manualRequests/{requestUid} {
+        allow get: if signedIn() && (
+          request.auth.uid == requestUid || isCourseStaff(courseId)
+        );
+        allow list: if isCourseStaff(courseId);
+
+        allow create: if isOwner(requestUid)
+          && request.resource.data.uid == requestUid
+          && request.resource.data.status == 'pending'
+          && request.resource.data.reason is string
+          && request.resource.data.reason.size() > 0
+          && request.resource.data.reason.size() <= 200;
+
+        allow update: if (
+            // Student may refine their own reason while still pending...
+            isOwner(requestUid)
+            && resource.data.status == 'pending'
+            && request.resource.data.status == 'pending'
+            && request.resource.data.reason is string
+            && request.resource.data.reason.size() > 0
+            && request.resource.data.reason.size() <= 200
+          ) || (
+            // ...but ONLY staff can resolve it, and only from pending.
+            isCourseStaff(courseId)
+            && resource.data.status == 'pending'
+            && request.resource.data.status in ['approved', 'rejected']
+          );
+
+        allow delete: if false;
       }
     }
   }

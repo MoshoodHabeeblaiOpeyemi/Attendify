@@ -64,6 +64,41 @@ module.exports = async (req, res) => {
       " " +
       now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 
+    // Optional Physical Presence Check: the headcount the rep took in the hall
+    const rawHeadcount = (req.body || {}).physicalHeadcount;
+    const physicalHeadcount =
+      typeof rawHeadcount === "number" &&
+      Number.isInteger(rawHeadcount) &&
+      rawHeadcount >= 0
+        ? rawHeadcount
+        : null;
+
+    // Read the live doc BEFORE it gets deleted below — flags are keyed to it.
+    const liveSnap = await courseRef.collection("session").doc("live").get();
+    const sessionExpiresAt = liveSnap.exists
+      ? liveSnap.data().expiresAt || null
+      : null;
+
+    // Snapshot every 🚩 absent flag raised during THIS session so the archive
+    // keeps the anti-beef record even after the flag docs roll to a new session.
+    let flaggedAbsent = [];
+    if (sessionExpiresAt) {
+      const flagsSnap = await courseRef
+        .collection("absentFlags")
+        .where("sessionExpiresAt", "==", sessionExpiresAt)
+        .get();
+      flaggedAbsent = flagsSnap.docs.map((d) => {
+        const v = d.data();
+        return {
+          uid: d.id,
+          matric: v.matric || "",
+          reason: v.reason || "",
+          flaggedByRole: v.flaggedByRole || "rep",
+          flaggedAt: v.flaggedAt && v.flaggedAt.toDate ? v.flaggedAt.toDate().toISOString() : null,
+        };
+      });
+    }
+
     // Write the session record to the attendance/ subcollection
     // Key by timestamp so records are naturally ordered and never collide
     const sessionKey = `session_${now.getTime()}`;
@@ -72,6 +107,9 @@ module.exports = async (req, res) => {
       closedAt: FieldValue.serverTimestamp(),
       closedBy: decoded.uid,
       attendees,
+      systemCount: attendees.length,
+      physicalHeadcount,
+      flaggedAbsent,
     });
 
     // Auto-revoke session_assistant members — restore their role back to "student"
