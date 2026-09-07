@@ -301,6 +301,103 @@
           </div>
         </div>
 
+        <!-- BULK STUDENT IMPORT SECTION -->
+        <div id="bulkImportSection" class="hidden"
+          style="margin-top: 20px; background: var(--bg); padding: 20px; border-radius: 12px; border: 1.5px solid var(--border); margin-bottom: 20px;">
+          <h3 style="color: var(--navy); margin-bottom: 5px;">
+            <i data-lucide="upload"></i> Bulk Student Import
+          </h3>
+          <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Upload a CSV file with matric numbers to auto-enroll students. Format: one matric per line, or with headers.</p>
+
+          <div style="margin-bottom: 15px;">
+            <label for="csvFileInput" style="font-size: 0.85rem; color: var(--muted); display: block; margin-bottom: 8px;">Select CSV File:</label>
+            <input type="file" id="csvFileInput" accept=".csv"
+              style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); font-size: 0.9rem;">
+          </div>
+
+          <button id="importCsvBtn" class="btn" style="font-size: 0.85rem; padding: 10px 16px;">
+            <i data-lucide="upload-cloud"></i> Import Students
+          </button>
+
+          <div id="importProgress" class="hidden" style="margin-top: 15px; padding: 12px; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border);">
+            <div style="font-size: 0.85rem; color: var(--text);">
+              <span id="importStatus">Processing...</span>
+              <div id="importResults" style="margin-top: 8px; font-size: 0.8rem; color: var(--muted);"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- HOLIDAY/EXEMPTION MANAGEMENT SECTION -->
+        <div id="exemptionManagementSection" class="hidden"
+          style="margin-top: 20px; background: var(--bg); padding: 20px; border-radius: 12px; border: 1.5px solid var(--border); margin-bottom: 20px;">
+          <h3 style="color: var(--navy); margin-bottom: 5px;">
+            <i data-lucide="calendar-x"></i> Holiday & Exemption Management
+          </h3>
+          <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Mark students as excused for specific dates (medical, university events, etc.). Excused absences don't count against the 70% threshold.</p>
+
+          <div style="margin-bottom: 15px;">
+            <label for="exemptStudentSelect" style="font-size: 0.85rem; color: var(--muted); display: block; margin-bottom: 8px;">Select Student:</label>
+            <select id="exemptStudentSelect"
+              style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); font-size: 0.9rem;">
+              <option value="">-- Choose student --</option>
+            </select>
+          </div>
+
+          <div style="margin-bottom: 15px;">
+            <label for="exemptDate" style="font-size: 0.85rem; color: var(--muted); display: block; margin-bottom: 8px;">Date of Absence:</label>
+            <input type="date" id="exemptDate"
+              style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); font-size: 0.9rem;">
+          </div>
+
+          <div style="margin-bottom: 15px;">
+            <label for="exemptReason" style="font-size: 0.85rem; color: var(--muted); display: block; margin-bottom: 8px;">Reason for Exemption:</label>
+            <select id="exemptReason"
+              style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); font-size: 0.9rem;">
+              <option value="medical">Medical Emergency/Illness</option>
+              <option value="university_event">University Official Event</option>
+              <option value="family_emergency">Family Emergency</option>
+              <option value="religious">Religious Observance</option>
+              <option value="other">Other (specify below)</option>
+            </select>
+          </div>
+
+          <div style="margin-bottom: 15px;">
+            <label for="exemptDetails" style="font-size: 0.85rem; color: var(--muted); display: block; margin-bottom: 8px;">Additional Details:</label>
+            <textarea id="exemptDetails" rows="2" maxlength="200"
+              placeholder="Provide any additional context..."
+              style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); font-size: 0.9rem; resize: none;"></textarea>
+          </div>
+
+          <button id="addExemptionBtn" class="btn" style="font-size: 0.85rem; padding: 10px 16px;">
+            <i data-lucide="shield-check"></i> Add Exemption
+          </button>
+
+          <div style="margin-top: 20px;">
+            <h4 style="font-size: 0.9rem; color: var(--navy); margin-bottom: 10px;">Current Exemptions:</h4>
+            <div id="exemptionsList" style="max-height: 200px; overflow-y: auto;">
+              <p style="font-size: 0.85rem; color: var(--muted); text-align: center; padding: 10px;">No exemptions recorded yet.</p>
+            </div>
+          </div>
+        </div>
+
+          <div style="margin-bottom: 15px;">
+            <label for="csvFileInput" style="font-size: 0.85rem; color: var(--muted); display: block; margin-bottom: 8px;">Select CSV File:</label>
+            <input type="file" id="csvFileInput" accept=".csv" 
+              style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); font-size: 0.9rem;">
+          </div>
+
+          <button id="importCsvBtn" class="btn" style="font-size: 0.85rem; padding: 10px 16px;">
+            <i data-lucide="upload-cloud"></i> Import Students
+          </button>
+
+          <div id="importProgress" class="hidden" style="margin-top: 15px; padding: 12px; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border);">
+            <div style="font-size: 0.85rem; color: var(--text);">
+              <span id="importStatus">Processing...</span>
+              <div id="importResults" style="margin-top: 8px; font-size: 0.8rem; color: var(--muted);"></div>
+            </div>
+          </div>
+        </div>
+
         <!-- REP ASSISTANT MANAGEMENT SECTION -->
         <div id="assistantManagementSection" class="hidden"
           style="margin-top: 20px; background: var(--bg); padding: 20px; border-radius: 12px; border: 1.5px solid var(--border); margin-bottom: 20px;">
@@ -438,6 +535,17 @@
           </div>
         </div>
 
+        <!-- GRADE PROJECTION -->
+        <div id="gradeProjectionSection"
+          style="background: var(--bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 15px;">
+          <h4 style="color: var(--navy); margin-bottom: 10px; font-size: 0.95rem;">
+            <i data-lucide="trending-up"></i> Grade Projection
+          </h4>
+          <div id="gradeProjectionContent" style="font-size: 0.85rem; color: var(--text);">
+            <p style="color: var(--muted);">Attend more classes to see your projection.</p>
+          </div>
+        </div>
+
         <h3 style="margin-bottom: 10px; font-size: 1.1rem; color: var(--navy);">
           <i data-lucide="users"></i> Live Attendance Roster (<span id="rosterCount">0</span>)
         </h3>
@@ -490,6 +598,21 @@
         </p>
         <div id="auditLogContainer">
           <p style="font-size: 0.85rem; color: var(--muted); text-align: center; padding: 8px;">No audit events yet. 👍</p>
+        </div>
+      </div>
+
+      <!-- SESSION SECURITY SIGNALS: screenshots + background app detection -->
+      <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border);">
+        <h3 style="color: var(--navy); margin-bottom: 5px; font-size: 1rem;">
+          <i data-lucide="eye"></i> Session Security Signals (<span id="securityEventsCount">0</span>)
+        </h3>
+        <p style="font-size: 0.8rem; color: var(--muted); margin-bottom: 12px;">
+          Soft signals recorded during live sessions — screenshot attempts and students
+          leaving the app mid-check-in. Context only, not proof of cheating — pair it with
+          the physical headcount before drawing conclusions.
+        </p>
+        <div id="securityEventsContainer">
+          <p style="font-size: 0.85rem; color: var(--muted); text-align: center; padding: 8px;">No security signals. 👍</p>
         </div>
       </div>
 
@@ -742,6 +865,24 @@
 
   <!-- TOAST CONTAINER -->
   <div id="toast-container" aria-live="polite" aria-atomic="false"></div>
+
+  <!-- SECURITY OVERLAY (Screenshot/Recording Prevention) -->
+  <div id="securityOverlay" class="hidden"
+    style="position: fixed; inset: 0; z-index: 99999; background: rgba(5, 6, 15, 0.95); display: flex; align-items: center; justify-content: center; text-align: center; padding: 20px;">
+    <div style="max-width: 400px; color: #ffffff;">
+      <div style="font-size: 3rem; margin-bottom: 16px;">🚫</div>
+      <h2 style="color: #ffffff; margin-bottom: 12px; font-size: 1.4rem;">Security Alert</h2>
+      <p style="color: rgba(255, 255, 255, 0.8); margin-bottom: 20px; font-size: 0.95rem; line-height: 1.5;">
+        Screenshots and screen recording are blocked during active attendance sessions for security purposes.
+      </p>
+      <div style="background: rgba(255, 255, 255, 0.1); padding: 12px; border-radius: 8px; margin-bottom: 20px; font-size: 0.85rem; color: rgba(255, 255, 255, 0.7);">
+        <p style="margin: 0;">⚠️ Attempting to screenshot or record during attendance will be logged and may result in disciplinary action.</p>
+      </div>
+      <button id="dismissSecurityAlert" style="background: var(--teal); color: #ffffff; border: none; padding: 12px 24px; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer;">
+        I Understand - Return to App
+      </button>
+    </div>
+  </div>
 
   <!-- CUSTOM CONFIRM DIALOG -->
   <div id="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title">

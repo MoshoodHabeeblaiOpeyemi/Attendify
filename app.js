@@ -115,6 +115,8 @@ function showConfirm({
     const cancelBtn = document.getElementById("confirm-cancel");
 
     if (!overlay) {
+      // Fallback to browser confirm if custom dialog not available
+      console.warn("Custom confirm dialog not found, using browser default");
       resolve(window.confirm(message));
       return;
     }
@@ -192,6 +194,133 @@ let currentUser = null;
 let activeCourse = null;
 let countdownInterval = null;
 let isCreatingAccount = false; // 👈 ADD THIS LINE HERE%
+let studentExemptions = []; // Cache for student exemptions
+let securityOverlayActive = false; // Track if security overlay is showing
+
+// --- SECURITY: SCREENSHOT/RECORDING + BACKGROUND APP DETECTION ---
+// Honest capability note: a web page CAN catch desktop screenshot keyboard
+// shortcuts, and it CAN see when the tab/app is hidden (which is exactly
+// what happens when someone switches to a screen recorder or another app).
+// It cannot block hardware screenshots on mobile — so every signal we can
+// see is shown to the student AND logged permanently for the rep to review.
+let securityHiddenAt = 0;
+let securityLastEventAt = {};
+let securityEventCount = 0;
+
+function isLiveSessionNow() {
+  return Boolean(
+    activeCourse &&
+      activeCourse.activeSession &&
+      !activeCourse.activeSession.expired,
+  );
+}
+
+// Persists a soft-security signal to courses/{id}/securityEvents so the
+// rep sees it in their dashboard. Debounced + capped so a misbehaving
+// client can't flood the rep with noise. Failures are non-fatal.
+async function logSecurityEvent(type, extra = {}) {
+  try {
+    if (!isLiveSessionNow() || !auth.currentUser) return;
+    if (securityEventCount >= 20) return;
+    const now = Date.now();
+    const last = securityLastEventAt[type] || 0;
+    if (now - last < 5000) return;
+    securityLastEventAt[type] = now;
+    securityEventCount++;
+
+    await setDoc(
+      doc(collection(db, "courses", activeCourse.id, "securityEvents")),
+      {
+        uid: auth.currentUser.uid,
+        matric: currentUser ? currentUser.matric : "",
+        type,
+        sessionExpiresAt: activeCourse.activeSession.expiresAt || 0,
+        ...extra,
+        loggedAt: serverTimestamp(),
+      },
+    );
+  } catch (err) {
+    console.warn("Security event not logged:", err.message);
+  }
+}
+
+function setupSecurityMonitoring() {
+  const securityOverlay = document.getElementById("securityOverlay");
+  const dismissSecurityBtn = document.getElementById("dismissSecurityAlert");
+
+  if (!securityOverlay) return;
+
+  const showSecurityOverlay = () => {
+    if (securityOverlayActive) return;
+    securityOverlayActive = true;
+    securityOverlay.classList.remove("hidden");
+    securityOverlay.classList.add("show");
+  };
+
+  const hideSecurityOverlay = () => {
+    securityOverlayActive = false;
+    securityOverlay.classList.remove("show");
+    securityOverlay.classList.add("hidden");
+  };
+
+  if (dismissSecurityBtn) {
+    dismissSecurityBtn.addEventListener("click", hideSecurityOverlay);
+  }
+
+  // Keyboard shortcuts for screenshots (desktop)
+  document.addEventListener("keydown", (e) => {
+    if (!isLiveSessionNow()) return;
+
+    const isPrintScreen = e.key === "PrintScreen";
+    const isShortcutShot =
+      (e.metaKey || e.ctrlKey) &&
+      e.shiftKey &&
+      ["3", "4", "5"].includes(e.key);
+    if (!isPrintScreen && !isShortcutShot) return;
+
+    e.preventDefault();
+    showSecurityOverlay();
+    logSecurityEvent("screenshot_attempt", {
+      method: isPrintScreen ? "printscreen" : "keyboard_shortcut",
+    });
+    toast.error(
+      "Screenshots are blocked during attendance sessions — this attempt was recorded.",
+      "🚫 Security Alert",
+    );
+  });
+
+  // Background app detection: fires on mobile app switching AND desktop
+  // tab/minimize. A short absence (<3s) is normal (notification shade,
+  // permission prompts) and ignored; anything longer is logged + alerted.
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (isLiveSessionNow()) securityHiddenAt = Date.now();
+      return;
+    }
+    if (!securityHiddenAt) return;
+    const awayMs = Date.now() - securityHiddenAt;
+    securityHiddenAt = 0;
+    if (!isLiveSessionNow() || awayMs < 3000) return;
+
+    logSecurityEvent("left_app", { awayMs });
+    toast.warning(
+      `You left the app during attendance for ${Math.round(
+        awayMs / 1000,
+      )}s. This was recorded for your Course Rep.`,
+      "👁️ Background Detected",
+    );
+  });
+
+  // Fallback for browsers that don't fire visibilitychange reliably.
+  window.addEventListener("blur", () => {
+    if (isLiveSessionNow() && !securityHiddenAt) securityHiddenAt = Date.now();
+  });
+
+  return { showSecurityOverlay, hideSecurityOverlay };
+}
+
+// Initialize security monitoring
+const securityControls = setupSecurityMonitoring();
 
 // --- CLOCK SKEW SYNC & DEVICE BINDING ---
 let serverClockSkewMs = 0;
@@ -500,6 +629,9 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // --- HAMBURGER MENU LOGIC ---
+const mobileMenuBtn = document.getElementById("mobileMenuBtn");
+const navLinks = document.getElementById("navLinks");
+
 if (mobileMenuBtn && navLinks) {
   mobileMenuBtn.addEventListener("click", () => {
     navLinks.classList.toggle("show-menu");
@@ -512,10 +644,11 @@ if (mobileMenuBtn && navLinks) {
   navLinks.addEventListener("click", (e) => {
     if (e.target.tagName === "BUTTON") {
       navLinks.classList.remove("show-menu");
-      mobileMenuBtn.innerHTML = '<i data-lucide="menu"></i>'; // 👈 FIXED
-      refreshIcons(); // 👈 FIXED
+      mobileMenuBtn.innerHTML = '<i data-lucide="menu"></i>';
+      refreshIcons();
     }
   });
+}
 
   // --- REAL-TIME FIRESTORE SYNC ---
   let unsubscribeCourses = null;
@@ -657,6 +790,7 @@ if (mobileMenuBtn && navLinks) {
 
   // --- THEME TOGGLE LOGIC ---
   const themeToggleBtn = document.getElementById("themeToggle");
+  const htmlElement = document.documentElement;
   if (themeToggleBtn) {
     themeToggleBtn.addEventListener("click", () => {
       const currentTheme = htmlElement.getAttribute("data-theme");
@@ -1168,6 +1302,10 @@ if (mobileMenuBtn && navLinks) {
       );
       if (assistantManagementSection)
         assistantManagementSection.classList.add("hidden");
+      const bulkImportSection = document.getElementById("bulkImportSection");
+      if (bulkImportSection) bulkImportSection.classList.add("hidden");
+      const exemptionManagementSection = document.getElementById("exemptionManagementSection");
+      if (exemptionManagementSection) exemptionManagementSection.classList.add("hidden");
 
       activeCourse = null;
       if (countdownInterval) clearInterval(countdownInterval);
@@ -1878,6 +2016,32 @@ if (mobileMenuBtn && navLinks) {
     );
   }
 
+  // --- STUDENT EXEMPTIONS LISTENER ---
+  let unsubscribeStudentExemptions = null;
+
+  function startStudentExemptionsListener(courseId, userMatric) {
+    if (unsubscribeStudentExemptions) {
+      unsubscribeStudentExemptions();
+      unsubscribeStudentExemptions = null;
+    }
+
+    unsubscribeStudentExemptions = onSnapshot(
+      query(
+        collection(db, "courses", courseId, "exemptions"),
+        where("matric", "==", userMatric)
+      ),
+      (snap) => {
+        // Cache exemptions globally
+        studentExemptions = snap.docs.map(doc => doc.data());
+        // Trigger re-render of analytics when exemptions change
+        if (activeCourse && activeCourse.id === courseId) {
+          renderPortalState();
+        }
+      },
+      (err) => console.error("Student exemptions listener error:", err)
+    );
+  }
+
   // --- ANTI-BEEF: absent flags (rep roster badges + student emergency alert) ---
   function startAbsentFlagsListener(courseId) {
     if (unsubscribeAbsentFlags) {
@@ -2200,6 +2364,72 @@ if (mobileMenuBtn && navLinks) {
     `;
   }
 
+  // ============================================================
+  // SESSION SECURITY SIGNALS (rep view of screenshot/left-app events)
+  // ============================================================
+  let unsubscribeSecurityEvents = null;
+
+  function startSecurityEventsListener(courseId) {
+    if (unsubscribeSecurityEvents) {
+      unsubscribeSecurityEvents();
+      unsubscribeSecurityEvents = null;
+    }
+    unsubscribeSecurityEvents = onSnapshot(
+      query(
+        collection(db, "courses", courseId, "securityEvents"),
+        orderBy("loggedAt", "desc"),
+      ),
+      (snap) => {
+        if (!activeCourse || activeCourse.id !== courseId) return;
+        activeCourse.securityEvents = snap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        }));
+        renderSecurityEventsPanel();
+      },
+      (err) => console.error("Security events listener error:", err),
+    );
+  }
+
+  function renderSecurityEventsPanel() {
+    const container = document.getElementById("securityEventsContainer");
+    const countEl = document.getElementById("securityEventsCount");
+    if (!container || !activeCourse) return;
+    const events = activeCourse.securityEvents || [];
+    if (countEl) countEl.textContent = events.length;
+    if (events.length === 0) {
+      container.innerHTML = `<p style="font-size: 0.85rem; color: var(--muted); text-align: center; padding: 8px;">No security signals. 👍</p>`;
+      return;
+    }
+
+    const sorted = [...events].sort((a, b) => {
+      const aT = a.loggedAt && a.loggedAt.toMillis ? a.loggedAt.toMillis() : 0;
+      const bT = b.loggedAt && b.loggedAt.toMillis ? b.loggedAt.toMillis() : 0;
+      return bT - aT;
+    });
+
+    container.innerHTML = "";
+    sorted.slice(0, 30).forEach((ev) => {
+      const when =
+        ev.loggedAt && ev.loggedAt.toDate
+          ? ev.loggedAt.toDate().toLocaleString()
+          : "just now";
+      const isShot = ev.type === "screenshot_attempt";
+      const icon = isShot ? "📸" : "👋";
+      const label = isShot
+        ? `Screenshot attempt (${ev.method || "unknown method"})`
+        : `Left the app mid-session for ${Math.round((ev.awayMs || 0) / 1000)}s`;
+      const card = document.createElement("div");
+      card.style.cssText =
+        "background: var(--card-bg); padding: 8px 12px; border-radius: 8px; margin-bottom: 6px; border: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 8px;";
+      card.innerHTML = `
+        <span style="font-size: 0.85rem;">${icon} <strong>${ev.matric || "Unknown"}</strong> — ${label}</span>
+        <span style="font-size: 0.72rem; color: var(--muted); white-space: nowrap;">${when}</span>
+      `;
+      container.appendChild(card);
+    });
+  }
+
   function stopPortalListeners() {
     if (unsubscribeSessionLive) {
       unsubscribeSessionLive();
@@ -2240,6 +2470,14 @@ if (mobileMenuBtn && navLinks) {
     if (unsubscribeAudit) {
       unsubscribeAudit();
       unsubscribeAudit = null;
+    }
+    if (unsubscribeStudentExemptions) {
+      unsubscribeStudentExemptions();
+      unsubscribeStudentExemptions = null;
+    }
+    if (unsubscribeSecurityEvents) {
+      unsubscribeSecurityEvents();
+      unsubscribeSecurityEvents = null;
     }
     // Leaving the portal (or logging out) must also kill the projector view.
     if (window.closeQrMode) window.closeQrMode();
@@ -2351,12 +2589,23 @@ if (mobileMenuBtn && navLinks) {
         if (repArchiveSection) repArchiveSection.classList.remove("hidden");
         if (assistantManagementSection)
           assistantManagementSection.classList.remove("hidden");
+        const bulkImportSection = document.getElementById("bulkImportSection");
+        if (bulkImportSection) bulkImportSection.classList.remove("hidden");
+        const exemptionManagementSection = document.getElementById("exemptionManagementSection");
+        if (exemptionManagementSection) exemptionManagementSection.classList.remove("hidden");
         renderAssistantDropdownAndList();
+        populateExemptStudentDropdown();
+        loadExemptions();
         startAuditListener(courseId);
+        startSecurityEventsListener(courseId);
       } else {
         if (repArchiveSection) repArchiveSection.classList.add("hidden");
         if (assistantManagementSection)
           assistantManagementSection.classList.add("hidden");
+        const bulkImportSection = document.getElementById("bulkImportSection");
+        if (bulkImportSection) bulkImportSection.classList.add("hidden");
+        const exemptionManagementSection = document.getElementById("exemptionManagementSection");
+        if (exemptionManagementSection) exemptionManagementSection.classList.add("hidden");
       }
       renderLectureHallOptions();
     } else {
@@ -2365,6 +2614,8 @@ if (mobileMenuBtn && navLinks) {
       if (repArchiveSection) repArchiveSection.classList.add("hidden");
       if (assistantManagementSection)
         assistantManagementSection.classList.add("hidden");
+      const bulkImportSection = document.getElementById("bulkImportSection");
+      if (bulkImportSection) bulkImportSection.classList.add("hidden");
     }
 
     renderPortalState();
@@ -2379,6 +2630,7 @@ if (mobileMenuBtn && navLinks) {
       startMyManualRequestListener(courseId);
       startMyAbsentFlagListener(courseId);
       syncManualOverrideUI();
+      startStudentExemptionsListener(courseId, userMatric);
     }
   };
 
@@ -2395,6 +2647,10 @@ if (mobileMenuBtn && navLinks) {
       );
       if (assistantManagementSection)
         assistantManagementSection.classList.add("hidden");
+      const bulkImportSection = document.getElementById("bulkImportSection");
+      if (bulkImportSection) bulkImportSection.classList.add("hidden");
+      const exemptionManagementSection = document.getElementById("exemptionManagementSection");
+      if (exemptionManagementSection) exemptionManagementSection.classList.add("hidden");
 
       activeCourse = null;
       if (countdownInterval) clearInterval(countdownInterval);
@@ -2622,6 +2878,299 @@ if (mobileMenuBtn && navLinks) {
         joinCourseForm.reset();
       }
     });
+  }
+
+  // --- BULK STUDENT IMPORT LOGIC ---
+  const importCsvBtn = document.getElementById("importCsvBtn");
+  const csvFileInput = document.getElementById("csvFileInput");
+  const importProgress = document.getElementById("importProgress");
+  const importStatus = document.getElementById("importStatus");
+  const importResults = document.getElementById("importResults");
+
+  if (importCsvBtn && csvFileInput) {
+    importCsvBtn.addEventListener("click", async () => {
+      if (!activeCourse || !auth.currentUser) {
+        toast.error("No active course selected.");
+        return;
+      }
+
+      const file = csvFileInput.files[0];
+      if (!file) {
+        toast.warning("Please select a CSV file first.");
+        return;
+      }
+
+      if (!file.name.endsWith('.csv')) {
+        toast.error("Please upload a CSV file.");
+        return;
+      }
+
+      try {
+        if (importProgress) importProgress.classList.remove("hidden");
+        if (importStatus) importStatus.textContent = "Reading CSV file...";
+        if (importResults) importResults.textContent = "";
+
+        const csvText = await file.text();
+        const lines = csvText.split('\n').map(line => line.trim()).filter(line => line);
+
+        // Parse CSV - handle both header and no-header formats
+        let matrics = [];
+        const hasHeader = lines[0].toLowerCase().includes('matric') || lines[0].toLowerCase().includes('number');
+
+        const startIndex = hasHeader ? 1 : 0;
+        for (let i = startIndex; i < lines.length; i++) {
+          const line = lines[i];
+          // Handle comma-separated or just one matric per line
+          const parts = line.split(',').map(part => part.trim()).filter(part => part);
+          if (parts.length > 0) {
+            // Take the first non-empty part as the matric
+            matrics.push(normalizeMatric(parts[0]));
+          }
+        }
+
+        if (matrics.length === 0) {
+          throw new Error("No valid matric numbers found in CSV.");
+        }
+
+        if (importStatus) importStatus.textContent = `Found ${matrics.length} matric numbers. Processing...`;
+
+        // Filter out already enrolled students
+        const currentEnrolled = (activeCourse.enrolled || []).map(normalizeMatric);
+        const newMatrics = matrics.filter(m => !currentEnrolled.includes(m));
+
+        if (newMatrics.length === 0) {
+          if (importStatus) importStatus.textContent = "All students already enrolled.";
+          if (importResults) importResults.textContent = `${matrics.length} total, 0 new.`;
+          toast.info("All students from CSV are already enrolled.");
+          return;
+        }
+
+        // Process in batches to avoid overwhelming Firestore
+        const batchSize = 10;
+        let successCount = 0;
+        let failCount = 0;
+        const failedMatrics = [];
+
+        for (let i = 0; i < newMatrics.length; i += batchSize) {
+          const batch = newMatrics.slice(i, i + batchSize);
+          const batchPromises = batch.map(async (matric) => {
+            try {
+              // Generate a temporary UID for the student (they'll bind their real account on first login)
+              const tempUid = `temp_${matric.replace(/[^a-zA-Z0-9]/g, '')}_${Date.now()}`;
+
+              await setDoc(
+                doc(db, "courses", activeCourse.id, "members", tempUid),
+                {
+                  uid: tempUid,
+                  matric: matric,
+                  name: matric, // Placeholder name until they register
+                  role: "student",
+                  joinedAt: Date.now(),
+                  pendingRegistration: true, // Flag to indicate they need to register
+                }
+              );
+              return { success: true, matric };
+            } catch (error) {
+              console.error(`Failed to add ${matric}:`, error);
+              return { success: false, matric, error: error.message };
+            }
+          });
+
+          const batchResults = await Promise.all(batchPromises);
+          batchResults.forEach(result => {
+            if (result.success) {
+              successCount++;
+            } else {
+              failCount++;
+              failedMatrics.push(result.matric);
+            }
+          });
+
+          // Update progress
+          const processed = Math.min(i + batchSize, newMatrics.length);
+          if (importStatus) importStatus.textContent = `Processed ${processed}/${newMatrics.length} students...`;
+        }
+
+        // Update course document with new enrolled list
+        activeCourse.enrolled = [...currentEnrolled, ...newMatrics.filter(m => {
+          return failedMatrics.indexOf(m) === -1;
+        })];
+        await updateCourseInFirestore();
+
+        // Show results
+        if (importStatus) importStatus.textContent = "Import completed!";
+        if (importResults) {
+          importResults.innerHTML = `
+            <div>✅ Successfully enrolled: ${successCount}</div>
+            <div>❌ Failed: ${failCount}</div>
+            ${failedMatrics.length > 0 ? `<div style="margin-top: 4px; color: var(--danger);">Failed: ${failedMatrics.slice(0, 5).join(', ')}${failedMatrics.length > 5 ? '...' : ''}</div>` : ''}
+          `;
+        }
+
+        toast.success(`Successfully imported ${successCount} students. ${failCount > 0 ? `${failCount} failed.` : ''}`, "Import Complete 📥");
+
+        // Refresh the UI
+        renderPortalState();
+        renderAssistantDropdownAndList();
+
+      } catch (error) {
+        console.error("CSV Import Error:", error);
+        if (importStatus) importStatus.textContent = "Import failed.";
+        if (importResults) importResults.textContent = error.message;
+        toast.error(error.message || "Failed to import CSV file.");
+      } finally {
+        // Hide progress after a delay
+        setTimeout(() => {
+          if (importProgress) importProgress.classList.add("hidden");
+        }, 5000);
+      }
+    });
+  }
+
+  // --- HOLIDAY/EXEMPTION MANAGEMENT LOGIC ---
+  const addExemptionBtn = document.getElementById("addExemptionBtn");
+  const exemptStudentSelect = document.getElementById("exemptStudentSelect");
+  const exemptDate = document.getElementById("exemptDate");
+  const exemptReason = document.getElementById("exemptReason");
+  const exemptDetails = document.getElementById("exemptDetails");
+  const exemptionsList = document.getElementById("exemptionsList");
+
+  // Populate student dropdown when portal opens
+  function populateExemptStudentDropdown() {
+    if (!exemptStudentSelect || !activeCourse) return;
+
+    exemptStudentSelect.innerHTML = '<option value="">-- Choose student --</option>';
+
+    const enrolledMatrics = (activeCourse.enrolled || []).map(normalizeMatric);
+    enrolledMatrics.forEach(matric => {
+      const option = document.createElement("option");
+      option.value = matric;
+      option.textContent = matric;
+      exemptStudentSelect.appendChild(option);
+    });
+  }
+
+  if (addExemptionBtn) {
+    addExemptionBtn.addEventListener("click", async () => {
+      if (!activeCourse || !auth.currentUser) {
+        toast.error("No active course selected.");
+        return;
+      }
+
+      const studentMatric = exemptStudentSelect ? exemptStudentSelect.value : "";
+      const date = exemptDate ? exemptDate.value : "";
+      const reason = exemptReason ? exemptReason.value : "";
+      const details = exemptDetails ? exemptDetails.value.trim() : "";
+
+      if (!studentMatric) {
+        toast.warning("Please select a student.");
+        return;
+      }
+      if (!date) {
+        toast.warning("Please select the date of absence.");
+        return;
+      }
+
+      try {
+        const exemptionId = `exempt_${studentMatric.replace(/[^a-zA-Z0-9]/g, '')}_${date.replace(/-/g, '')}`;
+
+        await setDoc(
+          doc(db, "courses", activeCourse.id, "exemptions", exemptionId),
+          {
+            matric: studentMatric,
+            date: date,
+            reason: reason,
+            details: details,
+            approvedBy: auth.currentUser.uid,
+            approvedByName: currentUser.name || "Rep",
+            approvedAt: serverTimestamp(),
+          }
+        );
+
+        toast.success(`Exemption added for ${studentMatric} on ${date}.`, "Exemption Added 🛡️");
+
+        // Clear form
+        if (exemptStudentSelect) exemptStudentSelect.value = "";
+        if (exemptDate) exemptDate.value = "";
+        if (exemptReason) exemptReason.value = "medical";
+        if (exemptDetails) exemptDetails.value = "";
+
+        // Refresh exemptions list
+        loadExemptions();
+
+      } catch (error) {
+        console.error("Add exemption error:", error);
+        toast.error(error.message || "Failed to add exemption.");
+      }
+    });
+  }
+
+  async function loadExemptions() {
+    if (!activeCourse || !exemptionsList) return;
+
+    try {
+      const exemptionsSnap = await getDocs(collection(db, "courses", activeCourse.id, "exemptions"));
+      const exemptions = exemptionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      if (exemptions.length === 0) {
+        exemptionsList.innerHTML = '<p style="font-size: 0.85rem; color: var(--muted); text-align: center; padding: 10px;">No exemptions recorded yet.</p>';
+        return;
+      }
+
+      exemptionsList.innerHTML = "";
+      exemptions.forEach(exemption => {
+        const card = document.createElement("div");
+        card.style.cssText = "background: var(--card-bg); padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; border: 1px solid var(--border);";
+
+        const reasonLabels = {
+          medical: "Medical Emergency",
+          university_event: "University Event",
+          family_emergency: "Family Emergency",
+          religious: "Religious Observance",
+          other: "Other"
+        };
+
+        card.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <strong style="color: var(--navy);">🎓 ${exemption.matric}</strong>
+            <span style="font-size: 0.75rem; color: var(--muted);">${exemption.date}</span>
+          </div>
+          <div style="font-size: 0.8rem; color: var(--muted);">🛡️ ${reasonLabels[exemption.reason] || exemption.reason}</div>
+          ${exemption.details ? `<div style="font-size: 0.75rem; color: var(--muted); margin-top: 4px;">"${exemption.details}"</div>` : ''}
+          <button data-exemption-id="${exemption.id}" class="remove-exemption-btn" style="background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 0.75rem; padding: 4px 6px; margin-top: 6px;">Remove ❌</button>
+        `;
+
+        exemptionsList.appendChild(card);
+      });
+
+      // Add remove handlers
+      exemptionsList.querySelectorAll(".remove-exemption-btn").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const exemptionId = btn.getAttribute("data-exemption-id");
+          if (await showConfirm({
+            title: "Remove Exemption",
+            message: "Remove this exemption? The student's absence will count against their attendance.",
+            okText: "Remove",
+            cancelText: "Cancel",
+            icon: "trash-2",
+            danger: true
+          })) {
+            try {
+              await deleteDoc(doc(db, "courses", activeCourse.id, "exemptions", exemptionId));
+              toast.success("Exemption removed.", "Removed 🗑️");
+              loadExemptions();
+            } catch (error) {
+              console.error("Remove exemption error:", error);
+              toast.error("Failed to remove exemption.");
+            }
+          }
+        });
+      });
+
+    } catch (error) {
+      console.error("Load exemptions error:", error);
+      exemptionsList.innerHTML = '<p style="font-size: 0.85rem; color: var(--danger); text-align: center; padding: 10px;">Failed to load exemptions.</p>';
+    }
   }
 
   // --- ASSISTANT REPS MANAGEMENT LOGIC ---
@@ -3879,6 +4428,12 @@ if (mobileMenuBtn && navLinks) {
           bannerText.innerHTML = `Time Remaining: <strong id="countdownTimer" style="font-size: 1.2rem;">${initialSeconds}s</strong>`;
         }
       }
+
+      // Activate security monitoring for students during live sessions
+      if (!isRep && !isAssistant && securityControls) {
+        console.log("Security monitoring activated for student");
+      }
+
       if (isRep || isAssistant) {
         if (activePinDisplay) {
           activePinDisplay.classList.remove("hidden");
@@ -4051,7 +4606,10 @@ if (mobileMenuBtn && navLinks) {
 
     rosterList.dataset.flagsSignature = flagsSignature;
 
-    if (isRep) renderAuditSection();
+    if (isRep) {
+      renderAuditSection();
+      renderSecurityEventsPanel();
+    }
 
     if (isRep) {
       let enrolledListDiv = document.getElementById(
@@ -4162,33 +4720,71 @@ if (mobileMenuBtn && navLinks) {
         if (flags.length === 0) {
           deviceFlagsListContainer.innerHTML = `<p style="font-size: 0.85rem; color: var(--muted); text-align: center; padding: 8px;">No flagged attempts. 👍</p>`;
         } else {
-          // Newest first — most relevant to a rep checking in on things right now
-          const sortedFlags = [...flags].sort((a, b) => {
-            const aTime =
-              a.createdAt && a.createdAt.toMillis ? a.createdAt.toMillis() : 0;
-            const bTime =
-              b.createdAt && b.createdAt.toMillis ? b.createdAt.toMillis() : 0;
-            return bTime - aTime;
+          // 🔁 MULTIPLE ACCOUNT DETECTION: group flags by physical device.
+          // A phone showing up with 2+ DIFFERENT attempted matrics is being
+          // used for proxy attendance at scale — surface that severity first.
+          const byDevice = {};
+          flags.forEach((flag) => {
+            const key = flag.deviceId || "unknown";
+            if (!byDevice[key]) byDevice[key] = [];
+            byDevice[key].push(flag);
           });
+
+          const deviceGroups = Object.entries(byDevice)
+            .map(([deviceId, group]) => {
+              const attemptedMatrics = [
+                ...new Set(
+                  group
+                    .map((f) => normalizeMatric(f.attemptedMatric || ""))
+                    .filter(Boolean),
+                ),
+              ];
+              const latest = group.reduce((acc, f) => {
+                const t =
+                  f.createdAt && f.createdAt.toMillis
+                    ? f.createdAt.toMillis()
+                    : 0;
+                return Math.max(acc, t);
+              }, 0);
+              return { deviceId, group, attemptedMatrics, latest };
+            })
+            .sort((a, b) => b.latest - a.latest);
+
           deviceFlagsListContainer.innerHTML = "";
-          sortedFlags.forEach((flag) => {
+          deviceGroups.forEach((dg) => {
             const flagCard = document.createElement("div");
             flagCard.style.cssText =
               "background: var(--card-bg); padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; border: 1px solid var(--danger);";
-            const whenText =
-              flag.createdAt && flag.createdAt.toDate
-                ? flag.createdAt.toDate().toLocaleString()
-                : "Just now";
+            const whenText = dg.latest
+              ? new Date(dg.latest).toLocaleString()
+              : "Just now";
+            const repeatBadge =
+              dg.attemptedMatrics.length > 1
+                ? `<span style="background: #dc3545; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold;">🔁 MULTI-ACCOUNT: ${dg.attemptedMatrics.length} matrics on ONE device</span>`
+                : dg.group.length > 1
+                  ? `<span style="background: #fd7e14; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold;">🔁 ${dg.group.length} repeat attempts</span>`
+                  : "";
+            const matricList = dg.attemptedMatrics
+              .map((m) => `<strong>${m}</strong>`)
+              .join(", ");
             flagCard.innerHTML = `
-              <div style="font-size: 0.85rem;">
-                🚫 <strong>${flag.attemptedMatric || "Unknown"}</strong> tried checking in on a device locked to <strong>${flag.boundMatric || "Unknown"}</strong>
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap;">
+                <div style="font-size: 0.85rem;">
+                  📱 Device …${(dg.deviceId || "").slice(-6)} locked to <strong>${dg.group[0].boundMatric || "?"}</strong>
+                </div>
+                ${repeatBadge}
               </div>
-              <div style="font-size: 0.75rem; color: var(--muted); margin-top: 3px;">${whenText}</div>
+              <div style="font-size: 0.78rem; color: var(--muted); margin-top: 4px;">
+                Attempted: ${matricList} · ${dg.group.length} attempt(s) · last: ${whenText}
+              </div>
             `;
             deviceFlagsListContainer.appendChild(flagCard);
           });
         }
       }
+
+      // 👁️ Session security signals (screenshot attempts / left-app pings)
+      renderSecurityEventsPanel();
     }
 
     const studentAnalyticsSection = document.getElementById(
@@ -4204,7 +4800,11 @@ if (mobileMenuBtn && navLinks) {
       const history = activeCourse.attendanceHistory || [];
       const totalClasses = history.length;
 
+      // Use cached exemptions
+      const exemptions = studentExemptions || [];
+
       let attendedCount = 0;
+      let excusedCount = 0;
       let historyListHTML = "";
 
       history.forEach((sessionRecord) => {
@@ -4214,24 +4814,69 @@ if (mobileMenuBtn && navLinks) {
         const wasPresent = normalizedAttendees.includes(userMatric);
         if (wasPresent) attendedCount++;
 
+        // Check if this session date has an exemption
+        const sessionDate = sessionRecord.date || "";
+        const hasExemption = exemptions.some(ex => ex.date === sessionDate);
+        if (hasExemption) excusedCount++;
+
+        let statusText = wasPresent ? "Present ✅" : "Absent ❌";
+        let statusColor = wasPresent ? "#28a745" : "#dc3545";
+
+        if (!wasPresent && hasExemption) {
+          statusText = "Excused 🛡️";
+          statusColor = "#fd7e14";
+        }
+
         historyListHTML += `
         <li style="display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 0.85rem;">
           <span>📅 ${sessionRecord.date}</span>
-          <span style="font-weight: bold; color: ${wasPresent ? "#28a745" : "#dc3545"};">
-            ${wasPresent ? "Present ✅" : "Absent ❌"}
+          <span style="font-weight: bold; color: ${statusColor};">
+            ${statusText}
           </span>
         </li>
       `;
       });
 
+      // Calculate percentage considering exemptions
+      const effectiveClasses = totalClasses - excusedCount;
       const percentage =
-        totalClasses > 0
-          ? Math.round((attendedCount / totalClasses) * 100)
+        effectiveClasses > 0
+          ? Math.round((attendedCount / effectiveClasses) * 100)
           : 100;
 
       document.getElementById("statAttendedCount").textContent = attendedCount;
-      document.getElementById("statTotalClasses").textContent = totalClasses;
+      document.getElementById("statTotalClasses").textContent = `${totalClasses} (${excusedCount} excused)`;
       document.getElementById("statPercentage").textContent = `${percentage}%`;
+
+      // Grade Projection Logic
+      const gradeProjectionContent = document.getElementById("gradeProjectionContent");
+      if (gradeProjectionContent) {
+        if (totalClasses === 0) {
+          gradeProjectionContent.innerHTML = `<p style="color: var(--muted);">Attend more classes to see your projection.</p>`;
+        } else {
+          const remainingClasses = Math.max(0, 10 - totalClasses); // Assume ~10 classes per semester
+          const neededToReach70 = Math.max(0, Math.ceil((0.70 * (effectiveClasses + remainingClasses)) - attendedCount));
+          const neededToReach75 = Math.max(0, Math.ceil((0.75 * (effectiveClasses + remainingClasses)) - attendedCount));
+          const neededToReach80 = Math.max(0, Math.ceil((0.80 * (effectiveClasses + remainingClasses)) - attendedCount));
+
+          let projectionHTML = `<div style="display: flex; flex-direction: column; gap: 8px;">`;
+
+          if (percentage >= 80) {
+            projectionHTML += `<div style="color: #28a745; font-weight: 600;">🎉 Excellent! You're on track for 80%+ attendance.</div>`;
+          } else if (percentage >= 70) {
+            projectionHTML += `<div style="color: #28a745; font-weight: 600;">✅ You meet the 70% threshold. Aim higher!</div>`;
+          } else {
+            projectionHTML += `<div style="color: #dc3545; font-weight: 600;">⚠️ Below 70% threshold. You need to attend ${neededToReach70} more classes.</div>`;
+          }
+
+          projectionHTML += `<div style="font-size: 0.8rem; color: var(--muted); margin-top: 8px;">`;
+          projectionHTML += `<div>To reach 75%: Attend ${neededToReach75} more classes</div>`;
+          projectionHTML += `<div>To reach 80%: Attend ${neededToReach80} more classes</div>`;
+          projectionHTML += `</div></div>`;
+
+          gradeProjectionContent.innerHTML = projectionHTML;
+        }
+      }
 
       let personalLogContainer = document.getElementById(
         "personalLogContainer",
@@ -4260,11 +4905,13 @@ if (mobileMenuBtn && navLinks) {
       } else if (percentage >= 70) {
         eligibilityBanner.style.background = "rgba(40, 167, 69, 0.1)";
         eligibilityBanner.style.color = "#28a745";
-        eligibilityBanner.textContent = `✅ ELIGIBLE: You meet the 70% attendance threshold (${percentage}%).`;
+        const exemptionNote = excusedCount > 0 ? ` (${excusedCount} excused)` : "";
+        eligibilityBanner.textContent = `✅ ELIGIBLE: You meet the 70% attendance threshold (${percentage}%${exemptionNote}).`;
       } else {
         eligibilityBanner.style.background = "rgba(220, 53, 69, 0.1)";
         eligibilityBanner.style.color = "#dc3545";
-        eligibilityBanner.textContent = `⚠️ WARNING: Your attendance is at ${percentage}%. You are below the 70% exam eligibility requirement!`;
+        const exemptionNote = excusedCount > 0 ? ` (${excusedCount} excused)` : "";
+        eligibilityBanner.textContent = `⚠️ WARNING: Your attendance is at ${percentage}%${exemptionNote}. You are below the 70% exam eligibility requirement!`;
       }
     } else if (studentAnalyticsSection) {
       studentAnalyticsSection.classList.add("hidden");

@@ -222,6 +222,42 @@ service cloud.firestore {
 
         allow delete: if false;
       }
+
+      // Holiday/Exemption management (rep-only writes).
+      // Reps can create and delete exemptions for students. Staff can read
+      // everything; a student can list ONLY their own — matched by comparing
+      // the exemption's matric against the member doc of the requester.
+      match /exemptions/{exemptionId} {
+        allow get, list: if isCourseStaff(courseId) || (
+          isCourseMember(courseId)
+          && get(
+            /databases/$(database)/documents/courses/$(courseId)/members/$(request.auth.uid)
+          ).data.matric == resource.data.matric
+        );
+
+        allow create: if isCourseRep(courseId)
+          && request.resource.data.matric is string
+          && request.resource.data.matric.size() > 0
+          && request.resource.data.date is string
+          && request.resource.data.date.size() > 0
+          && request.resource.data.reason is string
+          && request.resource.data.reason.size() > 0;
+
+        allow delete: if isCourseRep(courseId);
+      }
+
+      // 👁️ Session security events (screenshot attempts, leaving the app
+      // mid-session). Soft signals — attendance itself is never written here.
+      // A student can only ever create events attributed to themselves, and
+      // only the rep/staff can read them. Nothing can be edited or erased.
+      match /securityEvents/{eventId} {
+        allow read: if isCourseStaff(courseId);
+        allow create: if isCourseMember(courseId)
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.type in ['screenshot_attempt', 'left_app']
+          && request.resource.data.sessionExpiresAt is number;
+        allow update, delete: if false;
+      }
     }
   }
 }

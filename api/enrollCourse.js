@@ -76,6 +76,29 @@ module.exports = async (req, res) => {
       });
     });
 
+    // 🧹 Bulk-import cleanup: reps can pre-load a class list, which creates
+    // TEMP placeholder members (ids starting with "temp_") for matrics that
+    // have not registered yet. Now that the real student has joined with
+    // their proper uid-keyed member doc, remove the placeholder so the
+    // roster never shows the same matric twice.
+    try {
+      const tempSnap = await course.ref
+        .collection("members")
+        .where("matric", "==", matric)
+        .get();
+      const staleTemps = tempSnap.docs.filter(
+        (d) => d.id !== decoded.uid && d.data().pendingRegistration === true,
+      );
+      if (staleTemps.length > 0) {
+        const cleanup = db.batch();
+        staleTemps.forEach((d) => cleanup.delete(d.ref));
+        await cleanup.commit();
+      }
+    } catch (cleanupErr) {
+      // Non-fatal — the placeholder is cosmetic clutter, not a security issue.
+      console.warn("Temp member cleanup skipped:", cleanupErr.message);
+    }
+
     return res.status(200).json({ success: true, courseId: course.id });
   } catch (error) {
     console.error("Enroll course error:", error);
