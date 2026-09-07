@@ -4917,4 +4917,3 @@ if (mobileMenuBtn && navLinks) {
       studentAnalyticsSection.classList.add("hidden");
     }
   }
-}
