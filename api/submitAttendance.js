@@ -207,23 +207,54 @@ module.exports = async (req, res) => {
       }
     }
 
-    await secretRef.update({
-      attendees: FieldValue.arrayUnion(matric),
-    });
-
+    // 🛡️ ATOMIC CHECK-IN: the attendee verification, attendees-array update,
+    // and check-in record creation all happen inside one Firestore
+    // transaction. Two requests racing on the same student (double-tap,
+    // flaky-network retry) can no longer slip past the attendees check, and
+    // the attendees list can never desync from the check-in record.
     const sessionTimestamp = liveDoc.data().expiresAt;
     const uniqueCheckinId = `session_${sessionTimestamp}_${matric}`;
-    await courseRef.collection("checkins").doc(uniqueCheckinId).set({
-      uid,
-      matric,
-      sessionExpiresAt: sessionTimestamp,
-      timestamp: FieldValue.serverTimestamp(),
-      status: "Present",
-      location: isNoGpsMode
-        ? { mode: "no_gps" }
-        : { lat, lon, accuracy: accuracy ? Math.round(accuracy) : null },
-      distance: Math.round(distance),
-    });
+
+    try {
+      await db.runTransaction(async (tx) => {
+        const freshSecretDoc = await tx.get(secretRef);
+        if (!freshSecretDoc.exists) {
+          throw new Error("SESSION_EXPIRED");
+        }
+        const freshAttendees = freshSecretDoc.data().attendees || [];
+        if (freshAttendees.includes(matric)) {
+          throw new Error("ALREADY_CHECKED_IN");
+        }
+
+        tx.update(secretRef, {
+          attendees: FieldValue.arrayUnion(matric),
+        });
+
+        tx.set(courseRef.collection("checkins").doc(uniqueCheckinId), {
+          uid,
+          matric,
+          sessionExpiresAt: sessionTimestamp,
+          timestamp: FieldValue.serverTimestamp(),
+          status: "Present",
+          location: isNoGpsMode
+            ? { mode: "no_gps" }
+            : { lat, lon, accuracy: accuracy ? Math.round(accuracy) : null },
+          distance: Math.round(distance),
+        });
+      });
+    } catch (txError) {
+      if (txError.message === "ALREADY_CHECKED_IN") {
+        return res
+          .status(400)
+          .json({ error: "You have already checked in for this session!" });
+      }
+      if (txError.message === "SESSION_EXPIRED") {
+        return res
+          .status(404)
+          .json({ error: "No active attendance session found." });
+      }
+      throw txError;
+    }
 
     return res.status(200).json({
       success: true,
