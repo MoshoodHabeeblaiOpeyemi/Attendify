@@ -1309,17 +1309,9 @@ if (mobileMenuBtn && navLinks) {
     } else {
       currentUser = null;
       if (portalSection) portalSection.classList.add("hidden");
-      const repArchiveSection = document.getElementById("repArchiveSection");
-      if (repArchiveSection) repArchiveSection.classList.add("hidden");
-      const assistantManagementSection = document.getElementById(
-        "assistantManagementSection",
-      );
-      if (assistantManagementSection)
-        assistantManagementSection.classList.add("hidden");
-      const bulkImportSection = document.getElementById("bulkImportSection");
-      if (bulkImportSection) bulkImportSection.classList.add("hidden");
-      const exemptionManagementSection = document.getElementById("exemptionManagementSection");
-      if (exemptionManagementSection) exemptionManagementSection.classList.add("hidden");
+      hideAllManagementPanels();
+      const mgmtToolbarOut = document.getElementById("managementToolbar");
+      if (mgmtToolbarOut) mgmtToolbarOut.classList.add("hidden");
 
       activeCourse = null;
       if (countdownInterval) clearInterval(countdownInterval);
@@ -1535,19 +1527,6 @@ if (mobileMenuBtn && navLinks) {
           submitBtn.textContent = "Save Changes 💾";
         }
       }
-    });
-  }
-
-  const resetDeviceBindingBtn = document.getElementById(
-    "resetDeviceBindingBtn",
-  );
-  if (resetDeviceBindingBtn) {
-    resetDeviceBindingBtn.addEventListener("click", () => {
-      localStorage.removeItem("attendify_device_uuid");
-      toast.success(
-        "Device binding removed from this phone. Next check-in will register as a new phone.",
-        "Device Reset 📱",
-      );
     });
   }
 
@@ -2602,36 +2581,28 @@ if (mobileMenuBtn && navLinks) {
       if (studentControls) studentControls.classList.add("hidden");
 
       if (isRep) {
-        if (repArchiveSection) repArchiveSection.classList.remove("hidden");
-        if (assistantManagementSection)
-          assistantManagementSection.classList.remove("hidden");
-        const bulkImportSection = document.getElementById("bulkImportSection");
-        if (bulkImportSection) bulkImportSection.classList.remove("hidden");
-        const exemptionManagementSection = document.getElementById("exemptionManagementSection");
-        if (exemptionManagementSection) exemptionManagementSection.classList.remove("hidden");
+        // Management panels start collapsed — they open on demand from the
+        // Course Maintenance toolbar so the portal stays short on every screen.
+        const managementToolbar = document.getElementById("managementToolbar");
+        if (managementToolbar) managementToolbar.classList.remove("hidden");
+        hideAllManagementPanels();
         renderAssistantDropdownAndList();
         populateExemptStudentDropdown();
         loadExemptions();
         startAuditListener(courseId);
         startSecurityEventsListener(courseId);
       } else {
-        if (repArchiveSection) repArchiveSection.classList.add("hidden");
-        if (assistantManagementSection)
-          assistantManagementSection.classList.add("hidden");
-        const bulkImportSection = document.getElementById("bulkImportSection");
-        if (bulkImportSection) bulkImportSection.classList.add("hidden");
-        const exemptionManagementSection = document.getElementById("exemptionManagementSection");
-        if (exemptionManagementSection) exemptionManagementSection.classList.add("hidden");
+        const managementToolbarEl = document.getElementById("managementToolbar");
+        if (managementToolbarEl) managementToolbarEl.classList.add("hidden");
+        hideAllManagementPanels();
       }
       renderLectureHallOptions();
     } else {
       if (repControls) repControls.classList.add("hidden");
       if (studentControls) studentControls.classList.remove("hidden");
-      if (repArchiveSection) repArchiveSection.classList.add("hidden");
-      if (assistantManagementSection)
-        assistantManagementSection.classList.add("hidden");
-      const bulkImportSection = document.getElementById("bulkImportSection");
-      if (bulkImportSection) bulkImportSection.classList.add("hidden");
+      hideAllManagementPanels();
+      const mgmtToolbarEl = document.getElementById("managementToolbar");
+      if (mgmtToolbarEl) mgmtToolbarEl.classList.add("hidden");
     }
 
     renderPortalState();
@@ -2656,17 +2627,9 @@ if (mobileMenuBtn && navLinks) {
       if (portalSection) portalSection.classList.add("hidden");
       if (dashboardSection) dashboardSection.classList.remove("hidden");
 
-      const repArchiveSection = document.getElementById("repArchiveSection");
-      if (repArchiveSection) repArchiveSection.classList.add("hidden");
-      const assistantManagementSection = document.getElementById(
-        "assistantManagementSection",
-      );
-      if (assistantManagementSection)
-        assistantManagementSection.classList.add("hidden");
-      const bulkImportSection = document.getElementById("bulkImportSection");
-      if (bulkImportSection) bulkImportSection.classList.add("hidden");
-      const exemptionManagementSection = document.getElementById("exemptionManagementSection");
-      if (exemptionManagementSection) exemptionManagementSection.classList.add("hidden");
+      hideAllManagementPanels();
+      const mgmtToolbarBack = document.getElementById("managementToolbar");
+      if (mgmtToolbarBack) mgmtToolbarBack.classList.add("hidden");
 
       activeCourse = null;
       if (countdownInterval) clearInterval(countdownInterval);
@@ -2791,6 +2754,50 @@ if (mobileMenuBtn && navLinks) {
     });
   }
 
+  // --- COURSE MAINTENANCE TOOLBAR (accordion) ---
+  // The four heavy management panels stay collapsed by default so the course
+  // portal is short. Each toolbar button opens exactly one and closes the rest.
+  function hideAllManagementPanels() {
+    [
+      "bulkImportSection",
+      "exemptionManagementSection",
+      "assistantManagementSection",
+      "repArchiveSection",
+    ].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add("hidden");
+    });
+    document
+      .querySelectorAll(".manage-tool-btn")
+      .forEach((b) => b.classList.remove("active"));
+  }
+
+  window.toggleManagementPanel = function (panelId) {
+    hideAllManagementPanels();
+    const target = document.getElementById(panelId);
+    const targetBtn = Array.from(
+      document.querySelectorAll(".manage-tool-btn"),
+    ).find((b) => b.dataset.panel === panelId);
+    if (target && target.classList.contains("hidden")) {
+      target.classList.remove("hidden");
+      if (targetBtn) targetBtn.classList.add("active");
+      setTimeout(
+        () => target.scrollIntoView({ behavior: "smooth", block: "start" }),
+        60,
+      );
+    }
+  };
+
+  document
+    .querySelectorAll(".manage-tool-btn")
+    .forEach((b) => {
+      if (!b.dataset.panel) return;
+      b.addEventListener("click", (ev) => {
+        ev.currentTarget.blur();
+        window.toggleManagementPanel(b.dataset.panel);
+      });
+    });
+
   // --- JOIN COURSE FORM ---
   const joinCourseForm = document.getElementById("joinCourseForm");
   if (joinCourseForm) {
@@ -2842,7 +2849,9 @@ if (mobileMenuBtn && navLinks) {
         });
         const result = await response.json();
         if (!response.ok)
-          throw new Error(result.error || "Unable to join course.");
+          throw new Error(
+            `__JOIN_ERR__${result.error || "Unable to join course."}`,
+          );
 
         // The onSnapshot listener watches the courses collection, NOT subcollections.
         // It won't fire when members/ changes. A student can only read their own
@@ -2882,9 +2891,16 @@ if (mobileMenuBtn && navLinks) {
         toast.success(`You are now enrolled in ${found.name}!`, "Joined! 🎉");
       } catch (error) {
         console.error("Join course error:", error);
-        toast.error(
-          "Something went wrong while joining. Please check your connection.",
-        );
+        if (error.message && error.message.startsWith("__JOIN_ERR__")) {
+          toast.error(
+            error.message.slice("__JOIN_ERR__".length),
+            "Cannot Join",
+          );
+        } else {
+          toast.error(
+            "Something went wrong while joining. Please check your connection.",
+          );
+        }
       } finally {
         if (submitBtn) {
           submitBtn.disabled = false;

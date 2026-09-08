@@ -59,6 +59,30 @@ module.exports = async (req, res) => {
     if (!course)
       return res.status(404).json({ error: "Course code not found." });
 
+    // 🔒 SCHOOL / DEPARTMENT / LEVEL ENCLOSURE: a course belongs to ONE
+    // institution • department • level. A student must match all three to join.
+    // A course created with "GENERAL" (or empty) for any of these fields is
+    // treated as a wildcard — it accepts that dimension from any student, which
+    // keeps faculty-wide seminars possible while still blocking cross-colony
+    // clashes for courses that DO declare a school, department or level.
+    const courseData = course.data();
+    const userData = profile.data();
+    const norm = (v) => String(v || "").trim().toUpperCase();
+    const enclosedMatch = (userV, courseV) => {
+      const c = norm(courseV);
+      return c === "" || c === "GENERAL" || norm(userV) === c;
+    };
+    if (
+      !enclosedMatch(userData.institution, courseData.institution) ||
+      !enclosedMatch(userData.department, courseData.department) ||
+      !enclosedMatch(userData.level, courseData.level)
+    ) {
+      return res.status(403).json({
+        error:
+          `This course is enclosed for ${courseData.institution || "a specific School"} • ${courseData.department || "a specific Department"} • ${courseData.level || "a specific Level"}. Your profile is ${userData.institution || "?"} • ${userData.department || "?"} • ${userData.level || "?"} — students can only join courses that match their School, Department and Level.`,
+      });
+    }
+
     const memberRef = course.ref.collection("members").doc(decoded.uid);
 
     await db.runTransaction(async (tx) => {

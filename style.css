@@ -1036,6 +1036,24 @@ input:focus::placeholder {
   margin-right: 4px;
 }
 
+.manage-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.manage-tool-btn {
+  font-size: 0.78rem;
+  padding: 10px 8px;
+}
+
+.manage-tool-btn.active {
+  border: 2px solid var(--teal) !important;
+  background: rgba(45, 224, 201, 0.15) !important;
+  color: var(--teal) !important;
+  box-shadow: none !important;
+}
+
 /* Mobile guide tweak: comfortable spacing for the handbook */
 @media (max-width: 640px) {
   .guide-section {

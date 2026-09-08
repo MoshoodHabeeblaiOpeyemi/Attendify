@@ -1,5 +1,5 @@
 // Bump this version string on EVERY deploy so the SW refreshes automatically
-const CACHE_NAME = "attendify-static-v9";
+const CACHE_NAME = "attendify-static-v10";
 const STATIC_ASSETS = ["/", "/index.html", "/app.js", "/style.css", "/Attendify Logo.png"];
 
 self.addEventListener("install", (event) => {

@@ -322,6 +322,32 @@
           </div>
         </div>
 
+        <!-- REP MAINTENANCE TOOLBAR: bulky panels open on demand so the portal stays short -->
+        <div id="managementToolbar" class="hidden"
+          style="margin-bottom: 18px; background: var(--bg); border-radius: 12px; border: 1px solid var(--border); padding: 12px 14px;">
+          <p style="font-size: 0.85rem; font-weight: 700; color: var(--navy); margin: 0 0 10px;">
+            <i data-lucide="layout-dashboard"></i> Course Maintenance
+          </p>
+          <div class="manage-tool-grid">
+            <button type="button" class="btn manage-tool-btn" data-panel="bulkImportSection"
+              style="font-size: 0.78rem; padding: 10px 8px;">
+              <i data-lucide="upload"></i> 📥 Bulk Import
+            </button>
+            <button type="button" class="btn manage-tool-btn" data-panel="exemptionManagementSection"
+              style="font-size: 0.78rem; padding: 10px 8px;">
+              <i data-lucide="calendar-x"></i> 🛡️ Exemptions
+            </button>
+            <button type="button" class="btn manage-tool-btn" data-panel="assistantManagementSection"
+              style="font-size: 0.78rem; padding: 10px 8px;">
+              <i data-lucide="users"></i> 👥 Assistants
+            </button>
+            <button type="button" class="btn manage-tool-btn" data-panel="repArchiveSection"
+              style="font-size: 0.78rem; padding: 10px 8px;">
+              <i data-lucide="archive"></i> 📚 Course Archive
+            </button>
+          </div>
+        </div>
+
         <!-- BULK STUDENT IMPORT SECTION -->
         <div id="bulkImportSection" class="hidden"
           style="margin-top: 20px; background: var(--bg); padding: 20px; border-radius: 12px; border: 1.5px solid var(--border); margin-bottom: 20px;">
@@ -397,24 +423,6 @@
             <h4 style="font-size: 0.9rem; color: var(--navy); margin-bottom: 10px;">Current Exemptions:</h4>
             <div id="exemptionsList" style="max-height: 200px; overflow-y: auto;">
               <p style="font-size: 0.85rem; color: var(--muted); text-align: center; padding: 10px;">No exemptions recorded yet.</p>
-            </div>
-          </div>
-        </div>
-
-          <div style="margin-bottom: 15px;">
-            <label for="csvFileInput" style="font-size: 0.85rem; color: var(--muted); display: block; margin-bottom: 8px;">Select CSV File:</label>
-            <input type="file" id="csvFileInput" accept=".csv" 
-              style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); font-size: 0.9rem;">
-          </div>
-
-          <button id="importCsvBtn" class="btn" style="font-size: 0.85rem; padding: 10px 16px;">
-            <i data-lucide="upload-cloud"></i> Import Students
-          </button>
-
-          <div id="importProgress" class="hidden" style="margin-top: 15px; padding: 12px; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border);">
-            <div style="font-size: 0.85rem; color: var(--text);">
-              <span id="importStatus">Processing...</span>
-              <div id="importResults" style="margin-top: 8px; font-size: 0.8rem; color: var(--muted);"></div>
             </div>
           </div>
         </div>
@@ -890,10 +898,6 @@
           <button type="submit" class="btn"><i data-lucide="save"></i> Save Changes</button>
         </div>
         <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); text-align: center;">
-          <button id="resetDeviceBindingBtn" type="button"
-            style="background: transparent; border: none; color: var(--teal); font-size: 0.82rem; font-weight: 600; cursor: pointer; text-decoration: underline;">
-            <i data-lucide="smartphone"></i> Reset Device Binding (For Testing)
-          </button>
           <button id="enablePushBtn" type="button"
             style="background: transparent; border: none; color: #fd7e14; font-size: 0.82rem; font-weight: 600; cursor: pointer; text-decoration: underline; margin-left: 16px;">
             <i data-lucide="bell-ring"></i> Enable Emergency Push Alerts
