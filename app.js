@@ -1915,7 +1915,7 @@ if (mobileMenuBtn && navLinks) {
           ✋ <strong>${request.name || "Student"}</strong> (${request.matric || "?"})
         </div>
         <div style="font-size: 0.8rem; color: var(--muted); margin-top: 3px;">"${request.reason || ""}" — ${whenText}</div>
-        <div style="display: flex; gap: 8px; margin-top: 8px;">
+        <div class="manual-request-actions" style="margin-top: 8px;">
           <button data-approve-uid="${request.id}" class="btn" style="background: #28a745; font-size: 0.78rem; padding: 6px 12px; width: auto;">✅ Approve (I can see them)</button>
           <button data-reject-uid="${request.id}" class="btn" style="background: var(--danger); font-size: 0.78rem; padding: 6px 12px; width: auto;">🚩 Reject</button>
         </div>
@@ -4701,8 +4701,8 @@ if (mobileMenuBtn && navLinks) {
 
         const li = document.createElement("li");
         li.style.cssText =
-          "display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem;";
-        li.innerHTML = `<span>🎓 <strong>${attendeeRole === "rep" || isRepAttendee ? "Rep" : "Student"}</strong> (${matric}) ${badgeHTML}</span> <span style="display: flex; align-items: center; gap: 6px;">${statusHTML}${flagBtnHTML}</span>`;
+          "display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem;";
+        li.innerHTML = `<span>🎓 <strong>${attendeeRole === "rep" || isRepAttendee ? "Rep" : "Student"}</strong> (${matric}) ${badgeHTML}</span> <span style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">${statusHTML}${flagBtnHTML}</span>`;
         rosterList.appendChild(li);
       });
     }
@@ -4796,7 +4796,7 @@ if (mobileMenuBtn && navLinks) {
           archiveCard.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
             <strong>📅 Session on ${sessionRecord.date}</strong>
-            <div style="display: flex; gap: 8px; align-items: center;">
+            <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end;">
               <span style="font-size: 0.8rem; background: var(--teal); color: white; padding: 2px 6px; border-radius: 4px;">${sessionRecord.attendees.length} Present</span>
               ${headcountBadgeHTML}
               ${flagsBadgeHTML}

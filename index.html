@@ -208,18 +208,18 @@
           <!-- LECTURE LOCATION SELECTOR -->
           <div
             style="margin-bottom: 18px; padding: 14px; background: var(--card-bg); border-radius: 12px; border: 1.5px solid var(--border);">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div class="hall-actions-row">
               <label for="repHallSelect"
                 style="font-size: 0.85rem; font-weight: 700; color: var(--navy); margin-bottom: 0;">
                 <i data-lucide="map-pin"></i> Lecture Location / Hall:
               </label>
-              <div style="display: flex; gap: 8px;">
+              <div class="hall-actions">
                 <button id="setLocationBtn" type="button"
-                  style="background: transparent; border: none; color: var(--teal); font-size: 0.8rem; font-weight: 600; cursor: pointer; text-decoration: underline; padding: 0;">
+                  style="background: transparent; border: none; color: var(--teal); font-size: 0.8rem; font-weight: 600; cursor: pointer; text-decoration: underline; padding: 6px 8px;">
                   <i data-lucide="crosshairs"></i> Set Current Location
                 </button>
                 <button id="manageHallsBtn" type="button"
-                  style="background: transparent; border: none; color: var(--teal); font-size: 0.8rem; font-weight: 600; cursor: pointer; text-decoration: underline; padding: 0;">
+                  style="background: transparent; border: none; color: var(--teal); font-size: 0.8rem; font-weight: 600; cursor: pointer; text-decoration: underline; padding: 6px 8px;">
                   <i data-lucide="sliders"></i> Manage Halls
                 </button>
               </div>
@@ -242,8 +242,8 @@
             <p style="font-size: 0.75rem; color: var(--muted); margin: 0 0 10px;">
               Choose how students verify presence this lecture.
             </p>
-            <div id="modeCardsGrid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;"></div>
-            <div id="modeHint" style="font-size: 0.75rem; color: var(--muted); margin-top: 8px;"></div>
+            <div id="modeCardsGrid" class="mode-cards-grid"></div>
+            <div id="modeHint" style="font-size: 0.75rem; color: var(--muted); margin-top: 8px; line-height: 1.4;"></div>
           </div>
 
           <button id="generatePinBtn" class="btn">
@@ -289,11 +289,11 @@
                 system check-ins so ghost check-ins can't hide. Optional — closing the class
                 without this just saves the system count.
               </p>
-              <div style="display: flex; gap: 8px; align-items: center;">
+              <div class="headcount-row">
                 <input type="number" id="physicalCountInput" min="0" placeholder="e.g., 74"
-                  style="flex: 1; padding: 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 1rem;" />
+                  style="flex: 1 1 150px; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 1rem;" />
                 <button id="saveHeadcountBtn" class="btn"
-                  style="font-size: 0.8rem; padding: 9px 14px; width: auto;">
+                  style="font-size: 0.8rem; padding: 10px 14px; width: auto;">
                   <i data-lucide="check"></i> Save Count
                 </button>
               </div>

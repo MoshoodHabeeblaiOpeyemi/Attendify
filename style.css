@@ -938,3 +938,224 @@ input:focus::placeholder {
 #securityOverlay.show {
   display: flex !important;
 }
+
+/* ============================================================
+   RESPONSIVE LAYOUT HELPERS (rep control center + panels)
+   ============================================================ */
+.hall-actions-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.hall-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.hall-actions button {
+  min-height: 36px;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+}
+
+.mode-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.headcount-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.manual-request-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.manual-request-actions [data-approve-uid],
+.manual-request-actions [data-reject-uid] {
+  flex: 1 1 auto;
+}
+
+/* ============================================================
+   MOBILE / NARROW-SCREEN POLISH
+   ============================================================ */
+@media (max-width: 640px) {
+  /* App shell breathing room */
+  .container {
+    width: min(96%, 850px);
+    margin: 20px auto;
+    padding: 0 10px;
+  }
+
+  .navbar {
+    padding: 12px 4%;
+  }
+
+  .brand {
+    font-size: 1.25rem;
+  }
+
+  .brand-logo {
+    height: 26px;
+  }
+
+  .card {
+    padding: 26px 20px;
+  }
+
+  .dashboard-header h2 {
+    font-size: 1.6rem;
+  }
+
+  .section-title {
+    font-size: 1.1rem;
+  }
+
+  .course-grid {
+    gap: 16px;
+  }
+
+  .action-buttons {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* Course Rep Control Center */
+  #repControls {
+    padding: 16px 14px !important;
+  }
+
+  #repControls h3 {
+    font-size: 1.05rem;
+  }
+
+  #repControls > div,
+  #repControls .hall-info-chip {
+    margin-bottom: 14px;
+  }
+
+  .hall-actions-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .hall-actions {
+    width: 100%;
+    justify-content: center;
+    gap: 10px;
+  }
+
+  .hall-actions button {
+    flex: 1 1 100%;
+    min-height: 42px;
+    font-size: 0.78rem;
+  }
+
+  /* Attendance mode cards: single column, room to breathe */
+  #modeCardsGrid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  #modeCardsGrid button[data-mode] {
+    padding: 12px 12px !important;
+    font-size: 0.78rem !important;
+  }
+
+  #modeCardsGrid button[data-mode] div {
+    margin-bottom: 4px !important;
+  }
+
+  /* Headcount: input and button stack full-width */
+  .headcount-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .headcount-row input {
+    flex: 1 1 100%;
+  }
+
+  .headcount-row .btn {
+    width: 100% !important;
+    padding: 10px 14px !important;
+    font-size: 0.8rem !important;
+  }
+
+  /* Manual verification requests: full-width stacked actions */
+  .manual-request-actions {
+    flex-direction: column;
+  }
+
+  .manual-request-actions [data-approve-uid],
+  .manual-request-actions [data-reject-uid] {
+    width: 100% !important;
+    padding: 10px 12px !important;
+    font-size: 0.78rem !important;
+  }
+
+  /* Lower sections: slightly tighter padding */
+  #assistantManagementSection,
+  #exemptionManagementSection,
+  #repArchiveSection,
+  #studentAnalyticsSection {
+    padding: 16px 14px !important;
+  }
+
+  /* Modals & confirm dialogs */
+  .modal-card {
+    padding: 24px 20px;
+  }
+
+  .modal-actions {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .modal-actions .btn {
+    min-height: 46px;
+  }
+
+  #confirm-box {
+    padding: 24px 20px;
+  }
+
+  /* Session banner + PIN display */
+  #activePinDisplay {
+    padding: 12px 12px;
+  }
+
+  #pinCodeText {
+    font-size: 1.7rem;
+    letter-spacing: 6px;
+  }
+
+  /* QR projector overlay: fit narrow screens */
+  #qrCourseTitle {
+    font-size: 1.1rem;
+  }
+
+  #qrPinText {
+    font-size: 1.2rem;
+    letter-spacing: 6px;
+  }
+
+  #closeQrBtn {
+    width: auto;
+    padding: 10px 20px;
+    font-size: 0.85rem;
+  }
+}
