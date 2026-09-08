@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="icon" type="image/png" href="/icon.png">
+  <link rel="icon" type="image/png" href="/Attendify Logo.png">
   <title>Attendify | Smart Student Attendance</title>
   <link rel="stylesheet" href="style.css">
   <link rel="manifest" href="manifest.json">
@@ -13,10 +13,18 @@
 
 <body>
 
+  <!-- SPLASH SCREEN -->
+  <div id="splashScreen">
+    <img src="Attendify Logo.png" alt="Attendify" class="splash-logo" />
+    <span class="splash-text">Attendify</span>
+    <span class="splash-hint">Click anywhere to continue...</span>
+  </div>
+
   <!-- NAVBAR -->
   <header class="navbar">
     <div class="brand">
-      <span class="brand-word">Attend<span class="brand-suffix">ify</span><span class="brand-node"></span></span>
+      <img src="Attendify Logo.png" alt="Attendify" class="brand-logo" />
+      <span class="brand-text">Attendify</span>
     </div>
 
     <!-- Mobile Hamburger Button -->
@@ -223,6 +231,19 @@
             </div>
             <div id="setLocationStatus"
               style="font-size: 0.75rem; color: var(--muted); margin-top: 6px; display: none;"></div>
+          </div>
+
+          <!-- ATTENDANCE MODE SELECTOR — HOW students verify this lecture -->
+          <div id="attendanceModeSection"
+            style="margin-bottom: 18px; padding: 14px; background: var(--card-bg); border-radius: 12px; border: 1.5px solid var(--border);">
+            <p style="font-size: 0.85rem; font-weight: 700; color: var(--navy); margin: 0 0 2px;">
+              <i data-lucide="shield-check"></i> Attendance Mode
+            </p>
+            <p style="font-size: 0.75rem; color: var(--muted); margin: 0 0 10px;">
+              Choose how students verify presence this lecture.
+            </p>
+            <div id="modeCardsGrid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;"></div>
+            <div id="modeHint" style="font-size: 0.75rem; color: var(--muted); margin-top: 8px;"></div>
           </div>
 
           <button id="generatePinBtn" class="btn">

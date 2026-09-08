@@ -16,3 +16,6 @@ node_modules
 
 # Local audit/temp files
 _audit_output.txt
+
+# Visily/design mockups (reference only — not app assets)
+New folder/

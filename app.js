@@ -96,6 +96,20 @@ const toast = {
 };
 
 // ============================================================
+// SPLASH SCREEN (pure cosmetic — click anywhere to continue)
+// ============================================================
+const splashScreen = document.getElementById("splashScreen");
+if (splashScreen) {
+  splashScreen.addEventListener("click", () => {
+    if (splashScreen.classList.contains("splash-fade-out")) return;
+    splashScreen.classList.add("splash-fade-out");
+    setTimeout(() => {
+      splashScreen.style.display = "none";
+    }, 650);
+  });
+}
+
+// ============================================================
 // CUSTOM CONFIRM DIALOG  (replaces window.confirm)
 // ============================================================
 function showConfirm({
@@ -1754,6 +1768,7 @@ if (mobileMenuBtn && navLinks) {
               localDeadline: localDeadline,
               expired: false,
               locationMode: data.locationMode || "no_gps",
+              qrMode: data.qrMode === true,
               hallName: data.hallName || null,
             };
           } else if (activeCourse.activeSession) {
@@ -1789,6 +1804,7 @@ if (mobileMenuBtn && navLinks) {
         activeCourse.activeSession.attendees = data.attendees || [];
         activeCourse.activeSession.locationMode =
           data.locationMode || activeCourse.activeSession.locationMode;
+        activeCourse.activeSession.qrMode = data.qrMode === true;
         console.log(
           "Secret listener updated PIN:",
           activeCourse.activeSession.pin,
@@ -3375,12 +3391,19 @@ if (mobileMenuBtn && navLinks) {
     const storedPreference = localStorage.getItem(
       `attendify_last_hall_${activeCourse.id}`,
     );
+    // Legacy values ("no_gps"/"live_gps") used to live in this dropdown —
+    // they are attendance-mode choices now, so ignore them here.
+    const validStored =
+      storedPreference && storedPreference.startsWith("hall_")
+        ? storedPreference
+        : null;
     const defaultVal =
-      storedPreference || (halls.length > 0 ? `hall_${halls[0].id}` : "no_gps");
+      validStored || (halls.length > 0 ? `hall_${halls[0].id}` : "add_new");
 
     selectEl.innerHTML = "";
 
-    // Group 1: Saved Lecture Halls
+    // Pure location choices only — verification modes live in the
+    // Attendance Mode section below.
     if (halls.length > 0) {
       const hallGroup = document.createElement("optgroup");
       hallGroup.label = "🏛️ Saved Lecture Halls";
@@ -3398,58 +3421,120 @@ if (mobileMenuBtn && navLinks) {
       selectEl.appendChild(hallGroup);
     }
 
-    // Group 2: Alternative Modes
-    const modeGroup = document.createElement("optgroup");
-    modeGroup.label = "⚙️ Other Location Modes";
-
-    const noGpsOpt = document.createElement("option");
-    noGpsOpt.value = "no_gps";
-    noGpsOpt.textContent = "⚡ PIN + Device Lock Only (Emergency / No GPS)";
-    if (defaultVal === "no_gps" || halls.length === 0) noGpsOpt.selected = true;
-    modeGroup.appendChild(noGpsOpt);
-
-    const liveGpsOpt = document.createElement("option");
-    liveGpsOpt.value = "live_gps";
-    liveGpsOpt.textContent = "📍 Capture Rep Live GPS (Outdoors / Ground)";
-    if (defaultVal === "live_gps") liveGpsOpt.selected = true;
-    modeGroup.appendChild(liveGpsOpt);
-
     const addOpt = document.createElement("option");
     addOpt.value = "add_new";
     addOpt.textContent = "➕ Add / Set New Lecture Hall...";
-    modeGroup.appendChild(addOpt);
-
-    selectEl.appendChild(modeGroup);
+    if (halls.length === 0) addOpt.selected = true;
+    selectEl.appendChild(addOpt);
 
     const updateBadge = () => {
-      const val = selectEl.value;
+      let val = selectEl.value;
       if (val === "add_new") {
         openManageHallsModal();
-        selectEl.value = defaultVal;
-        return;
+        val = halls.length > 0 ? validStored || `hall_${halls[0].id}` : "add_new";
+        selectEl.value = val;
       }
-      localStorage.setItem(`attendify_last_hall_${activeCourse.id}`, val);
+      if (val.startsWith("hall_")) {
+        localStorage.setItem(`attendify_last_hall_${activeCourse.id}`, val);
+      }
       if (!badgeEl) return;
-      if (val === "no_gps") {
-        badgeEl.className = "hall-info-chip badge-emergency";
-        badgeEl.innerHTML = `<span>⚡ <strong>Emergency Mode:</strong> GPS check disabled. One-phone device lock active.</span>`;
-      } else if (val === "live_gps") {
-        badgeEl.className = "hall-info-chip badge-live";
-        badgeEl.innerHTML = `<span>📍 <strong>Live GPS:</strong> Captures Rep's current position upon generating PIN.</span>`;
-      } else if (val.startsWith("hall_")) {
-        const hId = val.replace("hall_", "");
-        const h = halls.find((item) => String(item.id) === String(hId));
-        if (h) {
-          const displayRadius =
-            h.name === "Current Location" ? 200 : h.radius || 80;
-          badgeEl.className = "hall-info-chip badge-hall";
-          badgeEl.innerHTML = `<span>🏛️ <strong>Hall Active:</strong> ${h.name} (${displayRadius}m indoor boundary).</span>`;
-        }
+      const hId = String(val).replace("hall_", "");
+      const h = halls.find((item) => String(item.id) === String(hId));
+      if (h) {
+        const displayRadius =
+          h.name === "Current Location" ? 200 : h.radius || 80;
+        badgeEl.className = "hall-info-chip badge-hall";
+        badgeEl.innerHTML = `<span>🏛️ <strong>Hall Active:</strong> ${h.name} (${displayRadius}m indoor boundary).</span>`;
+      } else {
+        badgeEl.className = "hall-info-chip";
+        badgeEl.innerHTML = `<span>ℹ️ No hall selected — GPS modes will ask for one at generate time.</span>`;
       }
     };
 
     selectEl.onchange = updateBadge;
     updateBadge();
+    renderModeCards();
+    syncModeUI();
+  }
+
+  // ============================================================
+  // ATTENDANCE MODE SELECTOR — setup-time choice of HOW students verify
+  // ============================================================
+  const ATTENDANCE_MODES = {
+    qr_mode: {
+      icon: "📺",
+      title: "QR + Device Lock",
+      desc: "Students scan the rotating QR on a screen (or type the PIN). No GPS.",
+    },
+    pin_only: {
+      icon: "⚡",
+      title: "PIN + Device Lock",
+      desc: "Emergency: rotating PIN only, no GPS at all.",
+    },
+    live_gps: {
+      icon: "📍",
+      title: "Live GPS (Rep Anchor)",
+      desc: "Your live position becomes the fence when you generate.",
+    },
+    full_combo: {
+      icon: "🎯",
+      title: "PIN + Device + Hall GPS",
+      desc: "Maximum security: PIN + saved-hall geofence + device lock.",
+    },
+  };
+
+  function getSelectedAttendanceMode() {
+    if (!activeCourse) return "pin_only";
+    const halls = activeCourse.savedHalls || [];
+    return (
+      localStorage.getItem(`attendify_mode_${activeCourse.id}`) ||
+      (halls.length > 0 ? "full_combo" : "pin_only")
+    );
+  }
+
+  function renderModeCards() {
+    const grid = document.getElementById("modeCardsGrid");
+    if (!grid || !activeCourse) return;
+    const current = getSelectedAttendanceMode();
+    grid.innerHTML = "";
+    Object.entries(ATTENDANCE_MODES).forEach(([mode, cfg]) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      const active = mode === current;
+      btn.setAttribute("data-mode", mode);
+      btn.style.cssText = `text-align: left; padding: 10px; border-radius: 10px; cursor: pointer; font-size: 0.72rem; border: 1.5px solid ${active ? "var(--teal)" : "var(--border)"}; background: ${active ? "rgba(45, 224, 201, 0.12)" : "var(--bg)"}; color: var(--text); transition: border-color 0.15s ease;`;
+      btn.innerHTML = `<div style="font-weight: 700; margin-bottom: 3px;">${cfg.icon} ${cfg.title}${active ? " ✓" : ""}</div><div style="color: var(--muted);">${cfg.desc}</div>`;
+      btn.addEventListener("click", () => {
+        localStorage.setItem(`attendify_mode_${activeCourse.id}`, mode);
+        renderModeCards();
+        syncModeUI();
+      });
+      grid.appendChild(btn);
+    });
+  }
+
+  function syncModeUI() {
+    const mode = getSelectedAttendanceMode();
+    const selectEl = document.getElementById("repHallSelect");
+    const hint = document.getElementById("modeHint");
+    const usesLocation = mode === "full_combo" || mode === "live_gps";
+
+    if (selectEl) {
+      selectEl.disabled = !usesLocation;
+      selectEl.style.opacity = usesLocation ? "1" : "0.5";
+    }
+    if (hint) {
+      if (!usesLocation) {
+        hint.innerHTML = `📍 <em>Location is not used in this mode — the hall dropdown is disabled. Switch to a GPS mode to use a saved hall.</em>`;
+      } else if (mode === "live_gps") {
+        hint.innerHTML = `📍 Your current position will be captured the moment you generate the PIN.`;
+      } else {
+        const halls = activeCourse ? activeCourse.savedHalls || [] : [];
+        hint.innerHTML = halls.length
+          ? `🏛️ Uses the selected hall's geofence — change it in the dropdown above.`
+          : `⚠️ No hall saved yet — add one in the dropdown above (or via Manage Halls), or pick another mode.`;
+      }
+    }
   }
 
   function openManageHallsModal() {
@@ -3705,31 +3790,26 @@ if (mobileMenuBtn && navLinks) {
       const managerMatric = normalizeMatric(
         currentUser ? currentUser.matric : "REP-001",
       );
+      const mode = getSelectedAttendanceMode();
 
-      const hallSelect = document.getElementById("repHallSelect");
-      const selectedVal = hallSelect ? hallSelect.value : "no_gps";
-
-      const confirmNoGps = async (reason) => {
-        return showConfirm({
-          title: "Start without GPS check?",
-          message:
-            reason +
-            " Students will check in with PIN + device lock only. Anyone with the PIN who is on campus (or not) can mark attendance. Continue?",
-          okText: "Start PIN-only session",
-          cancelText: "Cancel",
-          danger: true,
-          icon: "alert-triangle",
+      // 📺 QR + Device Lock: students scan the projected rotating QR (or
+      // type the PIN). No GPS fence — createSession shows the confirmation.
+      if (mode === "qr_mode") {
+        await createSession(randomPin, managerMatric, {
+          mode: "no_gps",
+          qrMode: true,
         });
-      };
+        return;
+      }
 
-      if (selectedVal === "no_gps") {
-        const ok = await confirmNoGps("You chose PIN + Device Lock (no GPS).");
-        if (!ok) return;
+      // ⚡ Emergency: PIN + Device Lock, no GPS at all.
+      if (mode === "pin_only") {
         await createSession(randomPin, managerMatric, { mode: "no_gps" });
         return;
       }
 
-      if (selectedVal === "live_gps") {
+      // 📍 Live GPS: capture the rep's current position as the fence.
+      if (mode === "live_gps") {
         toast.info("Acquiring GPS for live session...", "GPS Check");
         generatePinBtn.disabled = true;
         try {
@@ -3742,18 +3822,20 @@ if (mobileMenuBtn && navLinks) {
           });
         } catch (err) {
           console.warn("Could not capture Rep GPS:", err);
-          const ok = await confirmNoGps(
-            "Could not lock your live GPS. You can still start in PIN-only mode.",
+          toast.warning(
+            "Could not lock your live GPS — falling back to PIN-only. Confirm on the next dialog.",
+            "GPS Unavailable",
           );
-          if (ok) {
-            await createSession(randomPin, managerMatric, { mode: "no_gps" });
-          }
+          await createSession(randomPin, managerMatric, { mode: "no_gps" });
         } finally {
           generatePinBtn.disabled = false;
         }
         return;
       }
 
+      // 🎯 Full combo: PIN + Device Lock + saved-hall geofence.
+      const hallSelect = document.getElementById("repHallSelect");
+      const selectedVal = hallSelect ? hallSelect.value : "";
       if (selectedVal && selectedVal.startsWith("hall_")) {
         const hallId = selectedVal.replace("hall_", "");
         const hall = (activeCourse.savedHalls || []).find(
@@ -3779,8 +3861,10 @@ if (mobileMenuBtn && navLinks) {
         return;
       }
 
-      const ok = await confirmNoGps("No lecture hall is selected.");
-      if (ok) await createSession(randomPin, managerMatric, { mode: "no_gps" });
+      toast.warning(
+        "No lecture hall is selected. Add one in the dropdown above, or switch to a mode that doesn't need GPS.",
+        "Hall Required",
+      );
     });
   }
 
@@ -3791,13 +3875,16 @@ if (mobileMenuBtn && navLinks) {
 
     if (sessionMode === "no_gps") {
       const proceed = await showConfirm({
-        title: "Start Session Without Location Check?",
-        message:
-          "This session will NOT verify where students are physically located — anyone with the PIN can check in from anywhere, including off-campus. Only proceed if that's genuinely what you want for this class.",
-        okText: "Start Anyway",
+        title: locData.qrMode
+          ? "Start QR + Device Lock Session?"
+          : "Start Session Without Location Check?",
+        message: locData.qrMode
+          ? "Students will scan the rotating QR on your screen (or type the PIN). No GPS fence — anyone with the PIN can check in from anywhere, so keep the code visible only inside the hall. Device lock stays active. Continue?"
+          : "This session will NOT verify where students are physically located — anyone with the PIN can check in from anywhere, including off-campus. Only proceed if that's genuinely what you want for this class.",
+        okText: locData.qrMode ? "Start QR Session" : "Start Anyway",
         cancelText: "Cancel",
         danger: true,
-        icon: "map-pin-off",
+        icon: locData.qrMode ? "qr-code" : "map-pin-off",
       });
       if (!proceed) return;
     }
@@ -3814,6 +3901,7 @@ if (mobileMenuBtn && navLinks) {
       durationSeconds: sessionDurationSeconds,
       pinRotationInterval: pinRotationIntervalSeconds,
       locationMode: locationMode,
+      qrMode: locData.qrMode === true,
       hallName: locData.name || null,
     };
 
@@ -3822,6 +3910,7 @@ if (mobileMenuBtn && navLinks) {
       previousPin: null,
       pinRotationTime: now,
       locationMode: locationMode,
+      qrMode: locData.qrMode === true,
       lat: typeof locData.lat === "number" ? locData.lat : null,
       lon: typeof locData.lon === "number" ? locData.lon : null,
       radius: locData.radius || 80,
@@ -3837,6 +3926,7 @@ if (mobileMenuBtn && navLinks) {
       expired: false,
       attendees: [managerMatric],
       locationMode: locationMode,
+      qrMode: locData.qrMode === true,
       lat: secretPayload.lat,
       lon: secretPayload.lon,
       radius: secretPayload.radius,
@@ -4448,6 +4538,11 @@ if (mobileMenuBtn && navLinks) {
 
         const showQrBtnEl = document.getElementById("showQrBtn");
         if (showQrBtnEl) showQrBtnEl.classList.remove("hidden");
+        // Session live — mode/hall selection is locked in; hide the pickers.
+        const modeSectionLive = document.getElementById("attendanceModeSection");
+        if (modeSectionLive) modeSectionLive.classList.add("hidden");
+        const locSectionLive = document.getElementById("repHallSelect");
+        if (locSectionLive) locSectionLive.disabled = true;
         // Projector view open? Re-render the QR for the fresh PIN.
         const qrOverlayEl = document.getElementById("qrModeOverlay");
         if (qrOverlayEl && !qrOverlayEl.classList.contains("hidden")) {
@@ -4491,6 +4586,11 @@ if (mobileMenuBtn && navLinks) {
 
         const showQrBtnEl = document.getElementById("showQrBtn");
         if (showQrBtnEl) showQrBtnEl.classList.add("hidden");
+        // No live session → bring the setup pickers back.
+        const modeSectionIdle = document.getElementById("attendanceModeSection");
+        if (modeSectionIdle) modeSectionIdle.classList.remove("hidden");
+        if (window.closeQrMode) window.closeQrMode();
+        syncModeUI();
         // No live session → nothing to project.
         if (window.closeQrMode) window.closeQrMode();
       }
@@ -4499,7 +4599,10 @@ if (mobileMenuBtn && navLinks) {
     if (!isRep && !isAssistant) {
       const studentPinHint = document.querySelector("#studentControls p");
       if (studentPinHint) {
-        if (isSessionActive && session.locationMode === "no_gps") {
+        if (isSessionActive && session.qrMode) {
+          studentPinHint.textContent =
+            "📺 Scan the rotating QR on the screen — it checks you in automatically. You can also type the PIN below. Device lock still applies.";
+        } else if (isSessionActive && session.locationMode === "no_gps") {
           studentPinHint.textContent =
             "GPS is off for this session. Enter the 4-digit PIN announced by your Course Rep.";
         } else if (isSessionActive) {
