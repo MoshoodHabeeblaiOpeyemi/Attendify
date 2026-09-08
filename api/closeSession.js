@@ -99,6 +99,27 @@ module.exports = async (req, res) => {
       });
     }
 
+    // 👥 Group snapshot: pull each attendee's group tag from their check-in
+    // record. Stored on the archive so group history survives even if the
+    // group itself is deleted later.
+    let attendeeGroups = {};
+    if (sessionExpiresAt) {
+      try {
+        const checkinsSnap = await courseRef
+          .collection("checkins")
+          .where("sessionExpiresAt", "==", sessionExpiresAt)
+          .get();
+        checkinsSnap.docs.forEach((d) => {
+          const v = d.data();
+          if (v.groupName) {
+            attendeeGroups[String(v.matric || "").toUpperCase()] = v.groupName;
+          }
+        });
+      } catch (groupErr) {
+        console.warn("Attendee group lookup skipped:", groupErr && groupErr.message);
+      }
+    }
+
     // Write the session record to the attendance/ subcollection
     // Key by timestamp so records are naturally ordered and never collide
     const sessionKey = `session_${now.getTime()}`;
@@ -107,6 +128,7 @@ module.exports = async (req, res) => {
       closedAt: FieldValue.serverTimestamp(),
       closedBy: decoded.uid,
       attendees,
+      attendeeGroups,
       systemCount: attendees.length,
       physicalHeadcount,
       flaggedAbsent,

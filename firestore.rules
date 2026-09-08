@@ -170,6 +170,23 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // 👥 GROUPS: sub-classes inside a parent course ("Group A", "Group B").
+      // One session per lecture — groups only tag who belongs where. Staff
+      // (rep + appointed assistants/group leads) manage groups; members stay
+      // enrolled in the parent course and attendance history keeps the group
+      // snapshot even after a group is deleted.
+      match /groups/{groupId} {
+        allow read: if signedIn() && (
+          isCourseStaff(courseId) || isCourseMember(courseId)
+        );
+        allow create: if isCourseStaff(courseId)
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 60;
+        allow update: if isCourseStaff(courseId);
+        allow delete: if isCourseRep(courseId);
+      }
+
       // 🚩 Anti-beef absent flags. Written ONLY by the trusted backend
       // (Admin SDK) — never from a client. Staff can list every flag for
       // roster badges; a student can only ever read their OWN flag doc

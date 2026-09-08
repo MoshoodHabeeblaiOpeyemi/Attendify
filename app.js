@@ -10,6 +10,9 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
 import {
   getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   collection,
   doc,
   setDoc,
@@ -23,6 +26,7 @@ import {
   onSnapshot,
   arrayUnion,
   arrayRemove,
+  addDoc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
@@ -94,6 +98,151 @@ const toast = {
   warning: (msg, title) => showToast(msg, "warning", title),
   info: (msg, title) => showToast(msg, "info", title),
 };
+
+// ============================================================
+// APP NAVIGATION HISTORY (Android back button / swipe support)
+// ============================================================
+// The app is a single page that swaps views. We keep ONE trap entry in the
+// browser history: every back-press lands on the trap and we decide what
+// "back" means for the view the user is actually on — like a native app.
+let currentNavView = "auth";
+
+function replaceNavState(view) {
+  currentNavView = view;
+  try {
+    history.replaceState({ attendify: true, view }, "");
+  } catch (e) {
+    /* older browsers — ignore */
+  }
+}
+
+function pushNavTrap(view) {
+  currentNavView = view;
+  try {
+    history.pushState({ attendify: true, view }, "");
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+window.addEventListener("popstate", (event) => {
+  const state = event.state || {};
+  const view = state.view || currentNavView;
+
+  // A modal is open? Back closes the modal instead of the app.
+  const openModal = document.querySelector(".modal.show");
+  if (openModal) {
+    openModal.classList.remove("show");
+    pushNavTrap(currentNavView);
+    return;
+  }
+
+  if (view === "portal" && currentNavView === "portal") {
+    pushNavTrap("portal");
+    return;
+  }
+
+  if (currentNavView === "portal" && window.__attendifyReturnToDashboard) {
+    // Back from a course portal → return to the dashboard.
+    window.__attendifyReturnToDashboard();
+    return;
+  }
+
+  if (currentNavView === "dashboard") {
+    showConfirm({
+      title: "Log out?",
+      message: "Do you want to log out of Attendify?",
+      okText: "Yes, Log out",
+      cancelText: "Stay",
+      icon: "log-out",
+      danger: false,
+    }).then((yes) => {
+      if (yes) {
+        signOut(auth);
+      }
+      pushNavTrap("dashboard");
+    });
+    return;
+  }
+
+  // Auth screen — the user is about to leave the app entirely.
+  showConfirm({
+    title: "Leave Attendify?",
+    message: "You are about to exit the app. Are you sure?",
+    okText: "Leave",
+    cancelText: "Stay",
+    icon: "log-out",
+    danger: false,
+  }).then((yes) => {
+    if (yes) {
+      history.back(); // genuinely exit — no trap re-push
+    } else {
+      pushNavTrap("auth");
+    }
+  });
+});
+
+// Initial trap entry — every back-press from here on hits our handler.
+pushNavTrap("auth");
+
+// ============================================================
+// NETWORK QUALITY CHIP (is the network good right now?)
+// ============================================================
+function updateNetworkChips() {
+  const chips = document.querySelectorAll(".network-chip");
+  if (!chips.length) return;
+  let label;
+  let color;
+  if (!navigator.onLine) {
+    label = "🔴 Offline";
+    color = "var(--danger)";
+  } else {
+    const conn =
+      navigator.connection ||
+      navigator.mozConnection ||
+      navigator.webkitConnection;
+    const type = conn ? conn.effectiveType : "";
+    const down =
+      conn && typeof conn.downlink === "number" ? conn.downlink : null;
+    if (type === "slow-2g" || type === "2g" || (down !== null && down < 0.2)) {
+      label = "📶 Very slow";
+      color = "var(--danger)";
+    } else if (type === "3g" || (down !== null && down < 1.5)) {
+      label = "📶 Weak";
+      color = "#fd7e14";
+    } else {
+      label = "📶 Good";
+      color = "var(--success)";
+    }
+  }
+  chips.forEach((c) => {
+    c.textContent = label;
+    c.style.color = color;
+    c.style.borderColor = color;
+  });
+}
+
+window.addEventListener("online", updateNetworkChips);
+window.addEventListener("offline", updateNetworkChips);
+document.addEventListener("visibilitychange", updateNetworkChips);
+if (navigator.connection) {
+  navigator.connection.addEventListener("change", updateNetworkChips);
+}
+setInterval(updateNetworkChips, 20000);
+updateNetworkChips();
+
+// ============================================================
+// FETCH WITH TIMEOUT (slow networks must fail fast, not hang forever)
+// ============================================================
+async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // ============================================================
 // SPLASH SCREEN (pure cosmetic — click anywhere to continue)
@@ -175,7 +324,21 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+
+// 📶 OFFLINE-FIRST FIRESTORE: writes made while the network is down are
+// queued in IndexedDB and synced automatically the moment connectivity
+// returns — critical for lecture halls where 200 students share one router.
+export let db;
+try {
+  db = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager(),
+    }),
+  });
+} catch (err) {
+  console.warn("Offline persistence unavailable, using default cache:", err);
+  db = getFirestore(app);
+}
 
 // ============================================================
 // OPTIONAL HARDENING KEYS (fill these from the Firebase Console)
@@ -359,6 +522,15 @@ function getAccurateNow() {
   return Date.now() + serverClockSkewMs;
 }
 
+// Countdown formatting: always M:SS so timers never show confusing raw
+// numbers like "1020" — 5 minutes reads as "5:00", 23 seconds as "0:23".
+function formatCountdown(totalSeconds) {
+  const s = Math.max(0, Math.ceil(totalSeconds));
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
 function applyPortalCourseUpdate(updated) {
   if (!updated) return;
   if (!activeCourse || activeCourse.id !== updated.id) {
@@ -378,38 +550,49 @@ function applyPortalCourseUpdate(updated) {
       : updated.deviceFlags || [],
   };
   if (updated.activeSession && prevSession) {
+    // Only carry local-only fields (PIN cache, rotation time, local deadline)
+    // across snapshots of the SAME session. A brand-new session (different
+    // expiresAt) must start clean — otherwise stale values from a previous
+    // lecture leak into the new one and corrupt the countdown on this device.
+    const sameSession =
+      prevSession.expiresAt === updated.activeSession.expiresAt;
     activeCourse.activeSession = {
       ...updated.activeSession,
-      pin: prevSession.pin || updated.activeSession.pin || null,
-      previousPin:
-        prevSession.previousPin || updated.activeSession.previousPin || null,
-      pinRotationTime:
-        prevSession.pinRotationTime ||
-        updated.activeSession.pinRotationTime ||
-        Date.now(),
-      localDeadline:
-        prevSession.localDeadline || updated.activeSession.localDeadline,
-      attendees:
-        prevSession.attendees && prevSession.attendees.length
-          ? prevSession.attendees
-          : updated.activeSession.attendees || [],
+      ...(sameSession
+        ? {
+            pin: prevSession.pin || updated.activeSession.pin || null,
+            previousPin:
+              prevSession.previousPin ||
+              updated.activeSession.previousPin ||
+              null,
+            pinRotationTime:
+              prevSession.pinRotationTime ||
+              updated.activeSession.pinRotationTime ||
+              Date.now(),
+            attendees:
+              prevSession.attendees && prevSession.attendees.length
+                ? prevSession.attendees
+                : updated.activeSession.attendees || [],
+            rejectedFixes: prevSession.rejectedFixes || [],
+          }
+        : {}),
       locationMode:
-        prevSession.locationMode ||
         updated.activeSession.locationMode ||
+        prevSession.locationMode ||
         "no_gps",
       sessionDuration:
-        prevSession.sessionDuration ||
         updated.activeSession.sessionDuration ||
-        60,
+        prevSession.sessionDuration ||
+        300,
       pinRotationInterval:
-        prevSession.pinRotationInterval ||
         updated.activeSession.pinRotationInterval ||
+        prevSession.pinRotationInterval ||
         30,
     };
   }
 }
 
-function getBestGpsPosition(timeoutMs = 8000) {
+function getBestGpsPosition(timeoutMs = 8000, onProgress = null) {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
       reject({
@@ -434,6 +617,9 @@ function getBestGpsPosition(timeoutMs = 8000) {
     watchId = navigator.geolocation.watchPosition(
       (pos) => {
         if (!best || pos.coords.accuracy < best.coords.accuracy) best = pos;
+        if (typeof onProgress === "function") {
+          onProgress(pos.coords.accuracy, pos);
+        }
         if (pos.coords.accuracy <= 50) finish(pos, false);
       },
       (err) => {
@@ -1103,6 +1289,7 @@ if (mobileMenuBtn && navLinks) {
 
   function checkAuth() {
     if (currentUser) {
+      replaceNavState("dashboard");
       authContainer.classList.add("hidden");
       dashboardSection.classList.remove("hidden");
       logoutBtn.classList.remove("hidden");
@@ -1118,12 +1305,9 @@ if (mobileMenuBtn && navLinks) {
 
       const openCreateModalBtn = document.getElementById("openCreateModal");
       if (openCreateModalBtn) {
-        const userMatric = normalizeMatric(currentUser.matric);
-        const isAnywhereAssistant = courses.some((c) =>
-          (c.assistants || []).map(normalizeMatric).includes(userMatric),
-        );
-
-        if (currentUser.isRep || isAnywhereAssistant) {
+        // 🔒 Assistants help run THEIR appointed course only — they never get
+        // course-creation powers anywhere else. Only true reps can create.
+        if (currentUser.isRep) {
           openCreateModalBtn.classList.remove("hidden");
         } else {
           openCreateModalBtn.classList.add("hidden");
@@ -1132,6 +1316,7 @@ if (mobileMenuBtn && navLinks) {
 
       renderCourses();
     } else {
+      replaceNavState("auth");
       authContainer.classList.remove("hidden");
       dashboardSection.classList.add("hidden");
       logoutBtn.classList.add("hidden");
@@ -1715,6 +1900,195 @@ if (mobileMenuBtn && navLinks) {
   let unsubscribeAbsentFlags = null;
   let unsubscribeMyAbsentFlag = null;
   let unsubscribeNotifications = null;
+  let unsubscribeGroups = null;
+
+  // 👥 GROUPS: sub-sets inside a parent course ("Group A", "Group B"...).
+  // One session per lecture, one PIN — groups only tag who belongs where.
+  // Attendance records keep the group snapshot, so deleting a group never
+  // erases history, and members always stay enrolled in the parent course.
+  function startGroupsListener(courseId) {
+    if (unsubscribeGroups) {
+      unsubscribeGroups();
+      unsubscribeGroups = null;
+    }
+    unsubscribeGroups = onSnapshot(
+      collection(db, "courses", courseId, "groups"),
+      (snap) => {
+        if (!activeCourse || activeCourse.id !== courseId) return;
+        activeCourse.groups = snap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        }));
+        renderGroupsList();
+        renderPortalState(); // roster badges update with group info
+      },
+      (err) => console.error("Groups listener error:", err),
+    );
+  }
+
+  function renderGroupsList() {
+    const container = document.getElementById("groupsList");
+    if (!container || !activeCourse) return;
+    const groups = activeCourse.groups || [];
+    const isRepHere = currentUser && activeCourse.repUid === currentUser.uid;
+
+    if (groups.length === 0) {
+      container.innerHTML =
+        '<p style="font-size: 0.85rem; color: var(--muted); text-align: center; padding: 10px;">No groups yet. Create one above — e.g. "Group A".</p>';
+      return;
+    }
+
+    container.innerHTML = "";
+    groups.forEach((g) => {
+      const members = (g.members || []).map(normalizeMatric);
+      const memberChips =
+        members
+          .map(
+            (m) => `
+          <span style="display: inline-flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; font-size: 0.75rem; margin: 3px 4px 3px 0;">
+            ${m}
+            <button data-remove-member="${g.id}" data-matric="${m}" title="Remove from group (stays enrolled in course)" style="background: none; border: none; color: var(--danger); cursor: pointer; font-weight: bold; padding: 0;">&times;</button>
+          </span>`,
+          )
+          .join("") ||
+        '<span style="font-size: 0.8rem; color: var(--muted);">No members yet.</span>';
+
+      const enrolled = (activeCourse.enrolled || []).map(normalizeMatric);
+      const available = enrolled.filter((m) => !members.includes(m));
+      const options = available
+        .map((m) => `<option value="${m}">${m}</option>`)
+        .join("");
+
+      const card = document.createElement("div");
+      card.style.cssText =
+        "background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px;";
+      card.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+          <strong style="color: var(--navy);">🏷️ ${g.name}</strong>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            ${g.leadMatric ? `<span style="font-size: 0.7rem; background: #6f42c1; color: #fff; padding: 2px 6px; border-radius: 4px;">LEAD ${g.leadMatric}</span>` : ""}
+            <span style="font-size: 0.7rem; background: var(--teal); color: #fff; padding: 2px 6px; border-radius: 4px;">${members.length} member(s)</span>
+            ${isRepHere ? `<button data-delete-group="${g.id}" style="background: transparent; border: 1px solid var(--danger); color: var(--danger); border-radius: 6px; font-size: 0.7rem; font-weight: bold; padding: 3px 8px; cursor: pointer;">Delete</button>` : ""}
+          </div>
+        </div>
+        <div style="margin-top: 8px;">${memberChips}</div>
+        <div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">
+          <select data-member-select="${g.id}" style="flex: 1 1 140px; padding: 7px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); font-size: 0.8rem;">
+            <option value="">-- Add student to group --</option>
+            ${options}
+          </select>
+          <button data-add-member="${g.id}" class="btn" style="width: auto; font-size: 0.75rem; padding: 7px 12px;">➕ Add</button>
+        </div>
+      `;
+      container.appendChild(card);
+    });
+
+    container.querySelectorAll("[data-add-member]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const gid = btn.dataset.addMember;
+        const select = container.querySelector(
+          `[data-member-select="${gid}"]`,
+        );
+        const matric = select ? select.value : "";
+        if (!matric) {
+          toast.warning("Pick a student to add first.");
+          return;
+        }
+        try {
+          await updateDoc(doc(db, "courses", activeCourse.id, "groups", gid), {
+            members: arrayUnion(matric),
+          });
+          toast.success(`${matric} added to the group.`, "Group Updated 👥");
+        } catch (err) {
+          toast.error(err.message);
+        }
+      });
+    });
+
+    container.querySelectorAll("[data-remove-member]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          await updateDoc(
+            doc(
+              db,
+              "courses",
+              activeCourse.id,
+              "groups",
+              btn.dataset.removeMember,
+            ),
+            { members: arrayRemove(btn.dataset.matric) },
+          );
+          toast.info(
+            `${btn.dataset.matric} removed from the group (still enrolled in the course).`,
+          );
+        } catch (err) {
+          toast.error(err.message);
+        }
+      });
+    });
+
+    container.querySelectorAll("[data-delete-group]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const ok = await showConfirm({
+          title: "Delete Group",
+          message:
+            "Delete this group? Members stay enrolled in the course, and past attendance records keep their group tag. Continue?",
+          okText: "Delete Group",
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          await deleteDoc(
+            doc(
+              db,
+              "courses",
+              activeCourse.id,
+              "groups",
+              btn.dataset.deleteGroup,
+            ),
+          );
+          toast.success(
+            "Group deleted. Students remain in the parent course.",
+            "Deleted",
+          );
+        } catch (err) {
+          toast.error(err.message);
+        }
+      });
+    });
+  }
+
+  const createGroupBtn = document.getElementById("createGroupBtn");
+  if (createGroupBtn) {
+    createGroupBtn.addEventListener("click", async () => {
+      if (!activeCourse || !auth.currentUser) return;
+      const input = document.getElementById("newGroupName");
+      const name = input ? input.value.trim() : "";
+      if (!name) {
+        toast.warning("Give the group a name first (e.g., Group A).");
+        return;
+      }
+      try {
+        createGroupBtn.disabled = true;
+        await addDoc(collection(db, "courses", activeCourse.id, "groups"), {
+          name: name.slice(0, 60),
+          leadUid: auth.currentUser.uid,
+          leadMatric: normalizeMatric(currentUser ? currentUser.matric : ""),
+          members: [],
+          createdAt: serverTimestamp(),
+        });
+        if (input) input.value = "";
+        toast.success(
+          `Group "${name}" created. Add members below.`,
+          "Group Created 👥",
+        );
+      } catch (err) {
+        toast.error(err.message);
+      } finally {
+        createGroupBtn.disabled = false;
+      }
+    });
+  }
 
   function startSessionLiveListener(courseId) {
     if (unsubscribeSessionLive) {
@@ -1727,28 +2101,35 @@ if (mobileMenuBtn && navLinks) {
         if (!activeCourse || activeCourse.id !== courseId) return;
         if (snap.exists()) {
           const data = snap.data();
+          // 🎯 SERVER-ANCHORED CLOCK: the session was written "just now" by
+          // Firestore's clock, so server time ≈ generatedAt + push delay.
+          // Re-anchor the skew on EVERY session snapshot — this makes the
+          // countdown identical on all devices even if a phone's clock is
+          // wrong (the source of the "1020s" countdown bug).
+          if (
+            data.generatedAt &&
+            typeof data.generatedAt.toMillis === "function"
+          ) {
+            serverClockSkewMs =
+              data.generatedAt.toMillis() + 1500 - Date.now();
+          }
           const accurateNow = getAccurateNow();
-          const duration = (data.durationSeconds || 60) * 1000;
+          const duration = (data.durationSeconds || 300) * 1000;
           const rawMsLeft = (data.expiresAt || 0) - accurateNow;
           const cappedMsLeft = Math.max(0, Math.min(rawMsLeft, duration));
           const isStillActive = data.active && cappedMsLeft > 0;
           if (isStillActive) {
-            const existingDeadline =
-              activeCourse.activeSession &&
-              activeCourse.activeSession.localDeadline;
-            const localDeadline =
-              existingDeadline && existingDeadline > Date.now()
-                ? existingDeadline
-                : Date.now() + cappedMsLeft;
-
             activeCourse.activeSession = {
               ...(activeCourse.activeSession || {}),
               expiresAt: data.expiresAt,
-              localDeadline: localDeadline,
               expired: false,
               locationMode: data.locationMode || "no_gps",
               qrMode: data.qrMode === true,
               hallName: data.hallName || null,
+              anchorAccuracy:
+                typeof data.anchorAccuracy === "number"
+                  ? data.anchorAccuracy
+                  : activeCourse.activeSession?.anchorAccuracy ?? null,
             };
           } else if (activeCourse.activeSession) {
             activeCourse.activeSession.expired = true;
@@ -1781,6 +2162,11 @@ if (mobileMenuBtn && navLinks) {
         activeCourse.activeSession.pinRotationTime =
           data.pinRotationTime || Date.now();
         activeCourse.activeSession.attendees = data.attendees || [];
+        activeCourse.activeSession.rejectedFixes = Array.isArray(
+          data.rejectedFixes,
+        )
+          ? data.rejectedFixes
+          : [];
         activeCourse.activeSession.locationMode =
           data.locationMode || activeCourse.activeSession.locationMode;
         activeCourse.activeSession.qrMode = data.qrMode === true;
@@ -1863,6 +2249,22 @@ if (mobileMenuBtn && navLinks) {
     );
   }
 
+  // 🔔 Phase + attention state for the rep portal: the Live card only shows
+  // while a session exists (or someone needs the rep), and new manual
+  // requests pop the panel open with a toast + vibration — like a raised
+  // hand the rep cannot miss, even though everything else is collapsed.
+  let pendingManualCount = 0;
+
+  function syncRepPhaseUI() {
+    const session = activeCourse ? activeCourse.activeSession : null;
+    const setupCard = document.getElementById("sessionSetupCard");
+    const liveCard = document.getElementById("liveSessionCard");
+    if (!setupCard || !liveCard) return;
+    const showLive = !!session || pendingManualCount > 0;
+    liveCard.classList.toggle("hidden", !showLive);
+    setupCard.classList.toggle("hidden", !!session);
+  }
+
   function renderManualRequestQueue(requests) {
     const panel = document.getElementById("manualRequestsPanel");
     if (!panel) return;
@@ -1872,7 +2274,38 @@ if (mobileMenuBtn && navLinks) {
       "manualRequestsListContainer",
     );
     if (countEl) countEl.textContent = pending.length;
+    pendingManualCount = pending.length;
+
     panel.classList.toggle("hidden", requests.length === 0);
+
+    // Auto-attention: detect NEW pending requests since the last snapshot.
+    const idsSignature = pending
+      .map((r) => r.id)
+      .sort()
+      .join("|");
+    if (pending.length > 0) {
+      const prevIds = new Set(
+        (panel.dataset.lastPendingIds || "")
+          .split("|")
+          .filter(Boolean),
+      );
+      const fresh = pending.filter((r) => !prevIds.has(r.id));
+      const isFirstRender = panel.dataset.lastPendingIds === undefined;
+      panel.dataset.lastPendingIds = idsSignature;
+      if (!isFirstRender && fresh.length > 0) {
+        panel.classList.remove("hidden");
+        syncRepPhaseUI();
+        const first = fresh[0];
+        toast.info(
+          `${first.name || "A student"} is requesting manual verification.`,
+          "✋ Manual Request",
+        );
+        if (navigator.vibrate) navigator.vibrate([180, 90, 180]);
+      }
+    } else {
+      panel.dataset.lastPendingIds = "";
+    }
+
     if (!listContainer) return;
 
     if (pending.length === 0) {
@@ -1922,26 +2355,65 @@ if (mobileMenuBtn && navLinks) {
   // Rep/assistant approves — the server records attendance as manual_override.
   async function approveManualRequest(targetUid) {
     if (!activeCourse || !auth.currentUser) return;
-    try {
-      const idToken = await auth.currentUser.getIdToken();
-      const response = await fetch("/api/approveManualAttendance", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({ courseId: activeCourse.id, targetUid }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Approval failed.");
-      toast.success(
-        result.message || "Manual attendance approved and logged.",
-        "Approved ✅",
-      );
-    } catch (error) {
-      console.error("Approve manual request error:", error);
-      toast.error(error.message);
+    const approveBtn = document.querySelector(
+      `[data-approve-uid="${targetUid}"]`,
+    );
+    const rejectBtn = document.querySelector(
+      `[data-reject-uid="${targetUid}"]`,
+    );
+    // ⚡ INSTANT feedback: on congested hall networks the request takes
+    // seconds — the rep must see the tap registered immediately.
+    if (approveBtn) {
+      approveBtn.disabled = true;
+      approveBtn.innerHTML = "⏳ Approving…";
     }
+    if (rejectBtn) rejectBtn.disabled = true;
+
+    let lastError = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const idToken = await auth.currentUser.getIdToken();
+        const response = await fetchWithTimeout(
+          "/api/approveManualAttendance",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${idToken}`,
+            },
+            body: JSON.stringify({ courseId: activeCourse.id, targetUid }),
+          },
+          15000,
+        );
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Approval failed.");
+        toast.success(
+          result.message || "Manual attendance approved and logged.",
+          "Approved ✅",
+        );
+        lastError = null;
+        break;
+      } catch (error) {
+        console.error("Approve manual request error:", error);
+        lastError = error;
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        }
+      }
+    }
+    if (lastError) {
+      toast.error(
+        "Network is too slow right now — the approval did not go through. Tap Approve again in a moment.",
+        "Slow Network",
+      );
+    }
+    // Restore buttons (the listener re-renders the card on success anyway).
+    if (approveBtn) {
+      approveBtn.disabled = false;
+      approveBtn.innerHTML =
+        '✅ Approve (I can see them)';
+    }
+    if (rejectBtn) rejectBtn.disabled = false;
   }
 
   // Rep/assistant rejects — decision is final and permanently logged.
@@ -1956,6 +2428,17 @@ if (mobileMenuBtn && navLinks) {
       icon: "flag",
     });
     if (!ok) return;
+    const rejectBtn = document.querySelector(
+      `[data-reject-uid="${targetUid}"]`,
+    );
+    const approveBtn = document.querySelector(
+      `[data-approve-uid="${targetUid}"]`,
+    );
+    if (rejectBtn) {
+      rejectBtn.disabled = true;
+      rejectBtn.innerHTML = "⏳ Rejecting…";
+    }
+    if (approveBtn) approveBtn.disabled = true;
     try {
       await updateDoc(
         doc(db, "courses", activeCourse.id, "manualRequests", targetUid),
@@ -1969,6 +2452,12 @@ if (mobileMenuBtn && navLinks) {
     } catch (error) {
       console.error("Reject manual request error:", error);
       toast.error(error.message || "Could not reject the request.");
+    } finally {
+      if (rejectBtn) {
+        rejectBtn.disabled = false;
+        rejectBtn.innerHTML = "🚩 Reject";
+      }
+      if (approveBtn) approveBtn.disabled = false;
     }
   }
 
@@ -2462,6 +2951,10 @@ if (mobileMenuBtn && navLinks) {
       unsubscribeNotifications();
       unsubscribeNotifications = null;
     }
+    if (unsubscribeGroups) {
+      unsubscribeGroups();
+      unsubscribeGroups = null;
+    }
     if (unsubscribeAudit) {
       unsubscribeAudit();
       unsubscribeAudit = null;
@@ -2540,6 +3033,7 @@ if (mobileMenuBtn && navLinks) {
     const selectedCourse = courses.find((c) => c.id === courseId);
     if (!selectedCourse) return;
 
+    replaceNavState("portal");
     const userMatric = normalizeMatric(currentUser ? currentUser.matric : "");
     const isRep = currentUser && selectedCourse.repUid === currentUser.uid;
     const isAssistant =
@@ -2580,21 +3074,18 @@ if (mobileMenuBtn && navLinks) {
       if (repControls) repControls.classList.remove("hidden");
       if (studentControls) studentControls.classList.add("hidden");
 
+      // Course Maintenance toolbar: visible to reps AND assistants (group
+      // leads manage their own groups). Rep-only actions stay protected by
+      // the backend regardless of who can see the buttons.
+      const managementToolbar = document.getElementById("managementToolbar");
+      if (managementToolbar) managementToolbar.classList.remove("hidden");
+      hideAllManagementPanels();
       if (isRep) {
-        // Management panels start collapsed — they open on demand from the
-        // Course Maintenance toolbar so the portal stays short on every screen.
-        const managementToolbar = document.getElementById("managementToolbar");
-        if (managementToolbar) managementToolbar.classList.remove("hidden");
-        hideAllManagementPanels();
         renderAssistantDropdownAndList();
         populateExemptStudentDropdown();
         loadExemptions();
         startAuditListener(courseId);
         startSecurityEventsListener(courseId);
-      } else {
-        const managementToolbarEl = document.getElementById("managementToolbar");
-        if (managementToolbarEl) managementToolbarEl.classList.add("hidden");
-        hideAllManagementPanels();
       }
       renderLectureHallOptions();
     } else {
@@ -2608,6 +3099,7 @@ if (mobileMenuBtn && navLinks) {
     renderPortalState();
     startAttendanceHistoryListener(courseId);
     startSessionLiveListener(courseId);
+    startGroupsListener(courseId);
     if (isRep || isAssistant) {
       startSessionSecretListener(courseId);
       startDeviceFlagsListener(courseId);
@@ -2624,18 +3116,26 @@ if (mobileMenuBtn && navLinks) {
   const backToDashboardBtn = document.getElementById("backToDashboard");
   if (backToDashboardBtn) {
     backToDashboardBtn.addEventListener("click", () => {
-      if (portalSection) portalSection.classList.add("hidden");
-      if (dashboardSection) dashboardSection.classList.remove("hidden");
-
-      hideAllManagementPanels();
-      const mgmtToolbarBack = document.getElementById("managementToolbar");
-      if (mgmtToolbarBack) mgmtToolbarBack.classList.add("hidden");
-
-      activeCourse = null;
-      if (countdownInterval) clearInterval(countdownInterval);
-      stopPortalListeners();
+      returnToDashboard();
     });
   }
+
+  // Shared by the header button AND the Android back button/swipe — one
+  // code path so navigation behaves identically no matter how it's triggered.
+  function returnToDashboard() {
+    if (portalSection) portalSection.classList.add("hidden");
+    if (dashboardSection) dashboardSection.classList.remove("hidden");
+
+    hideAllManagementPanels();
+    const mgmtToolbarBack = document.getElementById("managementToolbar");
+    if (mgmtToolbarBack) mgmtToolbarBack.classList.add("hidden");
+
+    activeCourse = null;
+    if (countdownInterval) clearInterval(countdownInterval);
+    stopPortalListeners();
+    replaceNavState("dashboard");
+  }
+  window.__attendifyReturnToDashboard = returnToDashboard;
 
   // --- CREATE COURSE FORM ---
   const createCourseForm = document.getElementById("createCourseForm");
@@ -2762,6 +3262,7 @@ if (mobileMenuBtn && navLinks) {
       "bulkImportSection",
       "exemptionManagementSection",
       "assistantManagementSection",
+      "repEnrolledStudentsSection",
       "repArchiveSection",
     ].forEach((id) => {
       const el = document.getElementById(id);
@@ -3634,7 +4135,13 @@ if (mobileMenuBtn && navLinks) {
       }
 
       try {
-        const pos = await getBestGpsPosition(15000); // 15 seconds for accurate lock
+        const pos = await getBestGpsPosition(15000, (acc) => {
+          if (setLocationStatus) {
+            setLocationStatus.style.display = "block";
+            setLocationStatus.style.color = "var(--muted)";
+            setLocationStatus.textContent = `📡 Locking GPS… best fix ±${Math.round(acc)}m — hold still`;
+          }
+        }); // 15 seconds for accurate lock
         const lat = pos.coords.latitude;
         const lon = pos.coords.longitude;
         const accuracy = pos.coords.accuracy;
@@ -3829,12 +4336,38 @@ if (mobileMenuBtn && navLinks) {
         toast.info("Acquiring GPS for live session...", "GPS Check");
         generatePinBtn.disabled = true;
         try {
-          const pos = await getBestGpsPosition(12000);
+          const pos = await getBestGpsPosition(12000, (acc) => {
+            generatePinBtn.textContent = `📡 Locking GPS… ±${Math.round(acc)}m`;
+          });
+          const gpsAccuracy = Math.round(pos.coords.accuracy);
+
+          // 🛡️ ANCHOR QUALITY GATE: indoor WiFi-positioning can report a
+          // confident-but-wrong fix (±20m that is actually 300m off). A bad
+          // anchor rejects every honest student — so gate it hard.
+          if (gpsAccuracy > 120) {
+            toast.error(
+              `GPS too weak (±${gpsAccuracy}m) — the fence could be off by a building's width. Move near a window or outdoors and retry, or use PIN + Device Lock mode.`,
+              "Weak GPS — Session Blocked",
+            );
+            return;
+          }
+          if (gpsAccuracy > 60) {
+            const proceed = await showConfirm({
+              title: "Weak GPS signal",
+              message: `Accuracy is ±${gpsAccuracy}m — the fence may not match the hall exactly, and students inside could be rejected. Start Live GPS anyway? (PIN + Device Lock is the safer mode indoors.)`,
+              okText: "Start Anyway",
+              cancelText: "Cancel",
+              danger: true,
+            });
+            if (!proceed) return;
+          }
+
           await createSession(randomPin, managerMatric, {
             mode: "live_gps",
             lat: pos.coords.latitude,
             lon: pos.coords.longitude,
-            radius: 80,
+            radius: 150,
+            accuracy: gpsAccuracy,
           });
         } catch (err) {
           console.warn("Could not capture Rep GPS:", err);
@@ -3845,6 +4378,7 @@ if (mobileMenuBtn && navLinks) {
           await createSession(randomPin, managerMatric, { mode: "no_gps" });
         } finally {
           generatePinBtn.disabled = false;
+          renderPortalState();
         }
         return;
       }
@@ -3919,6 +4453,11 @@ if (mobileMenuBtn && navLinks) {
       locationMode: locationMode,
       qrMode: locData.qrMode === true,
       hallName: locData.name || null,
+      // 🎯 Server-anchored clock: every device receiving this snapshot knows
+      // true server time (write happened "just now"), which re-syncs the
+      // countdown on phones with wrong clocks — no more 1020s countdowns.
+      generatedAt: serverTimestamp(),
+      anchorAccuracy: typeof locData.accuracy === "number" ? locData.accuracy : null,
     };
 
     const secretPayload = {
@@ -3938,7 +4477,6 @@ if (mobileMenuBtn && navLinks) {
       previousPin: null,
       pinRotationTime: now,
       expiresAt: expiresAt,
-      localDeadline: Date.now() + sessionDurationSeconds * 1000,
       expired: false,
       attendees: [managerMatric],
       locationMode: locationMode,
@@ -3987,13 +4525,16 @@ if (mobileMenuBtn && navLinks) {
         return;
       }
 
-      const deadline =
-        session.localDeadline || session.expiresAt - serverClockSkewMs;
+      const deadline = session.expiresAt - serverClockSkewMs;
       const msRemaining = deadline - Date.now();
       const timeLeft = Math.max(0, Math.ceil(msRemaining / 1000));
       const liveTimerElement = document.getElementById("countdownTimer");
 
-      // PIN Rotation Logic
+      // PIN Rotation Logic — ONLY the rep's device rotates the PIN.
+      // Assistants receive the new code through the secret listener, so two
+      // devices can never disagree about the active PIN.
+      const canRotate =
+        currentUser && activeCourse.repUid === currentUser.uid;
       const pinRotationInterval = (session.pinRotationInterval || 30) * 1000; // 30 seconds default
       const timeSinceRotation =
         Date.now() - (session.pinRotationTime || Date.now());
@@ -4003,7 +4544,7 @@ if (mobileMenuBtn && navLinks) {
       );
       const pinRotationElement = document.getElementById("pinRotationTimer");
 
-      if (timeUntilRotation <= 0 && !session.expired) {
+      if (timeUntilRotation <= 0 && !session.expired && canRotate) {
         // Time to rotate the PIN
         const newPin = Math.floor(1000 + Math.random() * 9000).toString();
         const oldPin = session.pin;
@@ -4036,8 +4577,9 @@ if (mobileMenuBtn && navLinks) {
       } else {
         // Update rotation countdown display
         if (pinRotationElement) {
-          const rotationSeconds = Math.ceil(timeUntilRotation / 1000);
-          pinRotationElement.textContent = `${rotationSeconds}s`;
+          pinRotationElement.textContent = formatCountdown(
+            timeUntilRotation / 1000,
+          );
         }
       }
 
@@ -4052,7 +4594,7 @@ if (mobileMenuBtn && navLinks) {
         renderPortalState();
       } else {
         if (liveTimerElement) {
-          liveTimerElement.textContent = `${timeLeft}s`;
+          liveTimerElement.textContent = formatCountdown(timeLeft);
         }
       }
     };
@@ -4504,11 +5046,28 @@ if (mobileMenuBtn && navLinks) {
       (activeCourse.assistants || []).map(normalizeMatric).includes(userMatric);
     const session = activeCourse.activeSession;
     const isSessionActive =
-      session &&
-      !session.expired &&
-      (session.localDeadline
-        ? Date.now() < session.localDeadline
-        : getAccurateNow() < session.expiresAt);
+      session && !session.expired && getAccurateNow() < session.expiresAt;
+
+    // ⚠️ ANCHOR HEALTH: clustered GPS rejections mean the rep's captured
+    // anchor is probably off (indoor WiFi-positioning lies). Surface it so
+    // the rep can re-anchor or switch modes instead of students failing
+    // silently one by one.
+    const anchorEl = document.getElementById("anchorHealthWarning");
+    if (anchorEl) {
+      const fixes = (session && session.rejectedFixes) || [];
+      const cutoff = Date.now() - 15 * 60 * 1000;
+      const recent = fixes.filter((f) => (f.at || 0) >= cutoff);
+      if (recent.length >= 3 && (isRep || isAssistant)) {
+        anchorEl.classList.remove("hidden");
+        const anchorAcc = session.anchorAccuracy;
+        anchorEl.innerHTML = `⚠️ <strong>${recent.length} students rejected by the GPS fence</strong> in the last 15 minutes. Your captured anchor (±${anchorAcc ? Math.round(anchorAcc) : "?"}m) is probably off — students can use their manual request button, or close &amp; re-generate with a fresh <strong>Set Current Location</strong> or PIN + Device Lock mode.`;
+      } else {
+        anchorEl.classList.add("hidden");
+      }
+    }
+
+    // Phase cards: setup shows pre-class, live card shows during/after.
+    syncRepPhaseUI();
 
     const bannerTitle = document.getElementById("bannerTitle");
     const bannerText = document.getElementById("bannerText");
@@ -4531,7 +5090,7 @@ if (mobileMenuBtn && navLinks) {
             0,
             Math.min(60, Math.ceil(msRemaining / 1000)),
           );
-          bannerText.innerHTML = `Time Remaining: <strong id="countdownTimer" style="font-size: 1.2rem;">${initialSeconds}s</strong>`;
+          bannerText.innerHTML = `Check-in closes in <strong id="countdownTimer" style="font-size: 1.2rem;">${formatCountdown(initialSeconds)}</strong>`;
         }
       }
 
@@ -4579,7 +5138,7 @@ if (mobileMenuBtn && navLinks) {
           if (bannerText) {
             if (isRep || isAssistant) {
               bannerText.textContent =
-                "The 60-second window has expired. PIN is no longer valid, but you can review and close class.";
+                "The check-in window has expired. PIN is no longer valid, but you can review and close class.";
             } else {
               bannerText.textContent =
                 "The attendance window for this session has closed. PIN is no longer valid.";
@@ -4710,6 +5269,12 @@ if (mobileMenuBtn && navLinks) {
         const statusHTML = flagRecord
           ? `<span style="color: #dc3545; font-weight: bold;">🚩 Flagged Absent</span>`
           : `<span style="color: #28a745; font-weight: bold;">Present ✅</span>`;
+        const groupInfo = (activeCourse.groups || []).find((g) =>
+          (g.members || []).map(normalizeMatric).includes(normalizedM),
+        );
+        const groupBadgeHTML = groupInfo
+          ? `<span style="background: var(--bg); border: 1px solid var(--border); color: var(--text-muted); padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 4px;">🏷️ ${groupInfo.name}</span>`
+          : "";
         const flagBtnHTML =
           (isRep || isAssistant) && !flagRecord
             ? `<button onclick="flagStudentAbsent('${matric}')" title="Empty seat linked to this check-in? Flag it — the student gets an emergency alert and cannot be quietly deleted" style="background: transparent; border: 1px solid #dc3545; color: #dc3545; border-radius: 6px; cursor: pointer; font-size: 0.72rem; font-weight: bold; padding: 3px 8px; margin-left: 8px;">🚩 Flag Absent</button>`
@@ -4718,7 +5283,7 @@ if (mobileMenuBtn && navLinks) {
         const li = document.createElement("li");
         li.style.cssText =
           "display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem;";
-        li.innerHTML = `<span>🎓 <strong>${attendeeRole === "rep" || isRepAttendee ? "Rep" : "Student"}</strong> (${matric}) ${badgeHTML}</span> <span style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">${statusHTML}${flagBtnHTML}</span>`;
+        li.innerHTML = `<span>🎓 <strong>${attendeeRole === "rep" || isRepAttendee ? "Rep" : "Student"}</strong> (${matric}) ${badgeHTML}${groupBadgeHTML}</span> <span style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">${statusHTML}${flagBtnHTML}</span>`;
         rosterList.appendChild(li);
       });
     }
@@ -4738,11 +5303,11 @@ if (mobileMenuBtn && navLinks) {
       if (!enrolledListDiv && portalSection) {
         enrolledListDiv = document.createElement("div");
         enrolledListDiv.id = "repEnrolledStudentsSection";
+        enrolledListDiv.className = "hidden";
         enrolledListDiv.style.cssText =
-          "background: var(--card-bg); padding: 15px; border-radius: 12px; margin-top: 20px; border: 1px solid var(--border);";
+          "margin-top: 20px; background: var(--bg); padding: 20px; border-radius: 12px; border: 1.5px solid var(--border); margin-bottom: 20px;";
 
-        const targetParent =
-          document.getElementById("repControls") || portalSection;
+        const targetParent = portalSection;
         targetParent.appendChild(enrolledListDiv);
       }
 

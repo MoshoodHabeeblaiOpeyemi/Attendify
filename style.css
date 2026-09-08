@@ -1036,6 +1036,19 @@ input:focus::placeholder {
   margin-right: 4px;
 }
 
+.network-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .manage-tool-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

@@ -200,11 +200,54 @@ module.exports = async (req, res) => {
 
         if (distance > allowedRadius) {
           const km = (distance / 1000).toFixed(1);
+
+          // 🧠 ANCHOR HEALTH: record the rejected fix so the rep's device can
+          // detect a systematically bad anchor (clustered rejections) and
+          // re-capture instead of letting students fail silently.
+          try {
+            await db.runTransaction(async (tx) => {
+              const snap = await tx.get(secretRef);
+              const fixes =
+                snap.exists && Array.isArray(snap.data().rejectedFixes)
+                  ? snap.data().rejectedFixes
+                  : [];
+              fixes.push({
+                lat,
+                lon,
+                accuracy: Math.round(reportedAccuracy),
+                distance: Math.round(distance),
+                at: Date.now(),
+              });
+              while (fixes.length > 12) fixes.shift();
+              tx.update(secretRef, { rejectedFixes: fixes });
+            });
+          } catch (fixErr) {
+            console.warn(
+              "Could not record rejected fix:",
+              fixErr && fixErr.message,
+            );
+          }
+
           return res.status(403).json({
             error: `Too far from lecture hall (~${Math.round(distance)}m / ${km}km). Allowed range is ${Math.round(allowedRadius)}m including GPS uncertainty. If you are in the hall, GPS is wrong — ask the Rep to use PIN + Device Lock.`,
           });
         }
       }
+    }
+
+    // 👥 Group lookup: tag every check-in with the student's group (if any).
+    // The snapshot survives group deletion — history stays intact.
+    let groupName = null;
+    try {
+      const groupsSnap = await courseRef.collection("groups").get();
+      const grp = groupsSnap.docs.find((d) =>
+        (d.data().members || [])
+          .map((m) => String(m || "").trim().toUpperCase())
+          .includes(matric),
+      );
+      if (grp) groupName = String(grp.data().name || "");
+    } catch (groupErr) {
+      console.warn("Group lookup skipped:", groupErr && groupErr.message);
     }
 
     // 🛡️ ATOMIC CHECK-IN: the attendee verification, attendees-array update,
@@ -236,6 +279,7 @@ module.exports = async (req, res) => {
           sessionExpiresAt: sessionTimestamp,
           timestamp: FieldValue.serverTimestamp(),
           status: "Present",
+          groupName: groupName || null,
           location: isNoGpsMode
             ? { mode: "no_gps" }
             : { lat, lon, accuracy: accuracy ? Math.round(accuracy) : null },
@@ -258,7 +302,9 @@ module.exports = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Attendance marked successfully!",
+      message: groupName
+        ? `Attendance marked successfully! (${groupName})`
+        : "Attendance marked successfully!",
       distance: Math.round(distance),
     });
   } catch (error) {
