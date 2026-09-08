@@ -708,34 +708,69 @@
 
   <!-- MODAL: APP GUIDE -->
   <div id="guideModal" class="modal">
-    <div class="modal-card" style="max-width: 500px; max-height: 85vh; overflow-y: auto;">
-      <h3><i data-lucide="book-open"></i> How Attendify Works</h3>
-      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 20px;">Your complete guide to managing or
-        checking into lectures seamlessly.</p>
+    <div class="modal-card" style="max-width: 540px; max-height: 88vh; overflow-y: auto; padding: 26px 22px;">
 
-      <div
-        style="text-align: left; font-size: 0.9rem; display: flex; flex-direction: column; gap: 15px; margin-bottom: 20px;">
-        <div style="background: var(--bg); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
-          <strong style="color: var(--navy);"><i data-lucide="graduation-cap"></i> For Students:</strong>
-          <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; margin-bottom: 0;">Join courses using
-            the official code from your Rep. Enter the 4-digit PIN and pass the location check-in.</p>
+      <h3 style="margin-bottom: 4px;"><i data-lucide="book-open"></i> Your Attendify Handbook</h3>
+      <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 14px;">Everything you need to know — in about two minutes. Pick your lane below.</p>
+
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;">
+        <span class="guide-badge">🎓 I'm a Student</span>
+        <span class="guide-badge">👔 I'm a Course Rep</span>
+      </div>
+
+      <!-- FOR STUDENTS -->
+      <div class="guide-section" style="border: 1.5px solid var(--teal);">
+        <strong style="color: var(--teal);"><i data-lucide="graduation-cap"></i> For Students: Checking In</strong>
+        <div style="display: flex; flex-direction: column; gap: 9px; margin-top: 10px;">
+          <div class="guide-step"><span class="guide-step-num">1</span><span style="font-size: 0.87rem; color: var(--text-primary);"><strong>Join &amp; show up.</strong> Your Rep shares a class code — join once, then simply walk into the lecture hall for every session.</span></div>
+          <div class="guide-step"><span class="guide-step-num">2</span><span style="font-size: 0.87rem; color: var(--text-primary);"><strong>Watch the screen.</strong> The Rep shows a <strong>live 30-second PIN</strong> (or a rotating QR code). You must be <strong>inside the lecture geofence</strong> to check in.</span></div>
+          <div class="guide-step"><span class="guide-step-num">3</span><span style="font-size: 0.87rem; color: var(--text-primary);"><strong>Type it (or scan it).</strong> Enter the code on your phone — or point your camera at the QR. Your device is verified, your location is verified, your code is verified — all in one second.</span></div>
+          <div class="guide-step"><span class="guide-step-num">4</span><span style="font-size: 0.87rem; color: var(--text-primary);"><strong>See the ✅.</strong> You're on the live roster instantly. No paper, no queue, no "did he see my name?"</span></div>
+          <div class="guide-step"><span class="guide-step-num">5</span><span style="font-size: 0.87rem; color: var(--text-primary);"><strong>Track your semester.</strong> The analytics tab shows your attendance %, your excused days 🛡️, and exactly how many classes stand between you and the 70% exam threshold.</span></div>
         </div>
+        <p style="font-size: 0.8rem; color: var(--muted); margin-top: 10px;">💡 <strong>GPS or network glitching?</strong> After 3 silent failed attempts, a hidden <em>"Request Manual Verification"</em> button appears. Send it, raise your hand — your Rep approves you with a glance. No one ever sees the failure counter; it exists only to stop spammers.</p>
+      </div>
 
-        <div style="background: var(--bg); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
-          <strong style="color: var(--navy);"><i data-lucide="shield"></i> For Department Reps:</strong>
-          <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; margin-bottom: 0;">Register your
-            Department and Level. Generate 60-second attendance PINs, manage roster members, and export CSV reports.</p>
+      <!-- FOR REPS -->
+      <div class="guide-section" style="border: 1.5px solid var(--violet);">
+        <strong style="color: var(--violet);"><i data-lucide="shield-check"></i> For Course Reps: Run a Lecture in 60 Seconds</strong>
+        <div style="display: flex; flex-direction: column; gap: 9px; margin-top: 10px;">
+          <div class="guide-step"><span class="guide-step-num">1</span><span style="font-size: 0.87rem; color: var(--text-primary);"><strong>Pin your location.</strong> Pick a saved hall or tap <em>"Set Current Location"</em> once. That becomes the invisible wall students must be inside.</span></div>
+          <div class="guide-step"><span class="guide-step-num">2</span><span style="font-size: 0.87rem; color: var(--text-primary);"><strong>Pick an attendance mode.</strong> Full combo (PIN + location + device), PIN + Device only (no GPS), Live GPS anchor, or QR projector mode for big halls.</span></div>
+          <div class="guide-step"><span class="guide-step-num">3</span><span style="font-size: 0.87rem; color: var(--text-primary);"><strong>Hit "Generate PIN."</strong> The class reads it off your screen or scans your projector QR. Watch the roster fill live.</span></div>
+          <div class="guide-step"><span class="guide-step-num">4</span><span style="font-size: 0.87rem; color: var(--text-primary);"><strong>Optional headcount.</strong> Tap <em>"Conduct Physical Presence Check"</em> and type the number of bodies you see. The app flags the difference — no ghost check-ins.</span></div>
+          <div class="guide-step"><span class="guide-step-num">5</span><span style="font-size: 0.87rem; color: var(--text-primary);"><strong>Approve &amp; close.</strong> One-tap approve the manual requests you can physically see, then <em>"Close Class &amp; Save"</em>. Records archive forever — CSV export anytime.</span></div>
         </div>
+        <p style="font-size: 0.8rem; color: var(--muted); margin-top: 10px;">🚩 <strong>Empty seat linked to a check-in?</strong> You can't delete a student mid-session (that's the law). Tap <strong>Flag Absent</strong> instead — it instantly alerts the student, and the incident is logged permanently.</p>
+      </div>
 
-        <div style="background: var(--bg); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
-          <strong style="color: var(--navy);"><i data-lucide="map-pin"></i> GPS & Security:</strong>
-          <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; margin-bottom: 0;">Prevents proxy
-            sign-ins using rolling windows and geofenced hall parameters.</p>
+      <!-- SECURITY SHIELD -->
+      <div class="guide-section" style="border: 1.5px solid var(--border);">
+        <strong style="color: var(--navy);"><i data-lucide="shield"></i> The Invisible Shield — Why You Can Trust the Numbers</strong>
+        <div style="font-size: 0.82rem; color: var(--text-primary); display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
+          <div><span class="guide-check">⏱️</span> <strong>Rotating PIN</strong> — the code dies every 30s, so a WhatsApp screenshot is already expired by the time it lands.</div>
+          <div><span class="guide-check">🔒</span> <strong>Device Lock</strong> — the first phone you use is bound to your matric forever. One phone, one student.</div>
+          <div><span class="guide-check">📍</span> <strong>Geofence</strong> — check-ins only count inside the hall area. No hostel check-ins, no "I'm on my way."</div>
+          <div><span class="guide-check">🤝</span> <strong>Fail-Safe override</strong> — real problems (dead GPS, dropped network) get a human rescue hatch. Never a dead end.</div>
+          <div><span class="guide-check">🚩</span> <strong>Anti-beef system</strong> — no silent deletions; every removal, flag, and approval is permanent and visible.</div>
+          <div><span class="guide-check">👁️</span> <strong>Watchdog</strong> — screenshot attempts and app-switching mid-session are logged for the Rep to review.</div>
+        </div>
+      </div>
+
+      <!-- TROUBLESHOOTING -->
+      <div class="guide-section" style="border: 1.5px dashed var(--border);">
+        <strong style="color: var(--navy);"><i data-lucide="wrench"></i> When Things Go Wrong</strong>
+        <div style="font-size: 0.82rem; color: var(--text-primary); display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
+          <div>❌ <em>"Invalid PIN"</em> → the code just rotated. Ask for the current one — it's a feature, not a bug.</div>
+          <div>❌ <em>"GPS too weak"</em> → move near a window. The radius already absorbs indoor bounce, so don't fight it.</div>
+          <div>❌ <em>"Device Locked"</em> → that phone is registered to another matric. Use your own device — borrowing phones is exactly what we're blocking.</div>
+          <div>❌ <em>"No GPS at all?"</em> → your Rep can run the session in <strong>PIN + Device Lock</strong> mode. No location needed.</div>
+          <div>❌ <em>Flagged absent by mistake?</em> → see your Rep immediately. Decisions are final but never silent, and always on record.</div>
         </div>
       </div>
 
       <div class="modal-actions">
-        <button type="button" class="btn close-modal" style="width: 100%;">Got it, let's go!</button>
+        <button type="button" class="btn close-modal" style="width: 100%;">Got it, let's go! 🚀</button>
       </div>
     </div>
   </div>
