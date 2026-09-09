@@ -200,9 +200,10 @@
               style="font-size: 1.2rem;">5:00</strong></p>
         </div>
 
-        <!-- REP CONTROLS -->
-        <div id="repControls" class="hidden"
-          style="background: var(--bg); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--border);">
+        <!-- REP CONTROLS — flat single-view: no box-in-box-in-box. Phase cards
+             (setup vs live) are toggled by syncRepPhaseUI; the Mission-Control
+             drawer switches between portal views. -->
+        <div id="repControls" class="hidden" style="margin-bottom: 8px;">
           <h3 style="color: var(--navy); margin-bottom: 10px;">
             <i data-lucide="shield-check"></i> Course Rep Control Center
           </h3>
@@ -339,35 +340,8 @@
           </div><!-- /liveSessionCard -->
         </div>
 
-        <!-- REP MAINTENANCE TOOLBAR: bulky panels open on demand so the portal stays short -->
-        <div id="managementToolbar" class="hidden"
-          style="margin-bottom: 18px; background: var(--bg); border-radius: 12px; border: 1px solid var(--border); padding: 12px 14px;">
-          <p style="font-size: 0.85rem; font-weight: 700; color: var(--navy); margin: 0 0 10px;">
-            <i data-lucide="layout-dashboard"></i> Course Maintenance
-          </p>
-          <div class="manage-tool-grid">
-            <button type="button" class="btn manage-tool-btn" data-panel="bulkImportSection"
-              style="font-size: 0.78rem; padding: 10px 8px;">
-              <i data-lucide="upload"></i> 📥 Bulk Import
-            </button>
-            <button type="button" class="btn manage-tool-btn" data-panel="exemptionManagementSection"
-              style="font-size: 0.78rem; padding: 10px 8px;">
-              <i data-lucide="calendar-x"></i> 🛡️ Exemptions
-            </button>
-            <button type="button" class="btn manage-tool-btn" data-panel="assistantManagementSection"
-              style="font-size: 0.78rem; padding: 10px 8px;">
-              <i data-lucide="users"></i> 👥 Assistants
-            </button>
-            <button type="button" class="btn manage-tool-btn" data-panel="repArchiveSection"
-              style="font-size: 0.78rem; padding: 10px 8px;">
-              <i data-lucide="archive"></i> 📚 Course Archive
-            </button>
-            <button type="button" class="btn manage-tool-btn" data-panel="repEnrolledStudentsSection"
-              style="font-size: 0.78rem; padding: 10px 8px;">
-              <i data-lucide="graduation-cap"></i> 🎓 Students
-            </button>
-          </div>
-        </div>
+        <!-- 🎛️ The old stacked toolbar is gone — replaced by the Mission-Control
+             drawer (tab on the screen edge). Rep views open one at a time. -->
 
         <!-- BULK STUDENT IMPORT SECTION -->
         <div id="bulkImportSection" class="hidden"
@@ -619,15 +593,60 @@
           </div>
         </div>
 
-        <h3 style="margin-bottom: 10px; font-size: 1.1rem; color: var(--navy);">
-          <i data-lucide="users"></i> Live Attendance Roster (<span id="rosterCount">0</span>)
-        </h3>
-        <div
-          style="background: var(--bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border); max-height: 250px; overflow-y: auto;">
-          <ul id="rosterList" style="list-style: none; padding-left: 0;">
-            <li style="color: var(--muted); font-size: 0.9rem; text-align: center; padding: 10px;">Waiting for session
-              to start...</li>
-          </ul>
+        </div>
+
+        <!-- 📊 ANALYTICS view (drawer destination for staff; stacked for students) -->
+        <div id="studentAnalyticsSection" class="hidden"
+          style="margin-top: 20px; background: var(--card-bg); padding: 20px; border-radius: 12px; border: 1.5px solid var(--border);">
+          <h3 style="color: var(--navy); margin-bottom: 5px;">
+            <i data-lucide="bar-chart-3"></i> Your Course Attendance Analytics
+          </h3>
+          <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">Track your lecture presence against
+            university thresholds (Min: 70%).</p>
+
+          <div
+            style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 15px;">
+            <div
+              style="background: var(--bg); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid var(--border);">
+              <span style="font-size: 0.75rem; color: var(--muted);">Classes Attended</span>
+              <h4 id="statAttendedCount" style="font-size: 1.2rem; color: var(--navy); margin-top: 4px;">0</h4>
+            </div>
+            <div
+              style="background: var(--bg); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid var(--border);">
+              <span style="font-size: 0.75rem; color: var(--muted);">Total Classes Held</span>
+              <h4 id="statTotalClasses" style="font-size: 1.2rem; color: var(--navy); margin-top: 4px;">0</h4>
+            </div>
+            <div
+              style="background: var(--bg); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid var(--border);">
+              <span style="font-size: 0.75rem; color: var(--muted);">Attendance Rate</span>
+              <h4 id="statPercentage" style="font-size: 1.2rem; color: var(--teal); margin-top: 4px;">0%</h4>
+            </div>
+          </div>
+
+          <!-- GRADE PROJECTION -->
+          <div id="gradeProjectionSection"
+            style="background: var(--bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 15px;">
+            <h4 style="color: var(--navy); margin-bottom: 10px; font-size: 0.95rem;">
+              <i data-lucide="trending-up"></i> Grade Projection
+            </h4>
+            <div id="gradeProjectionContent" style="font-size: 0.85rem; color: var(--text);">
+              <p style="color: var(--muted);">Attend more classes to see your projection.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 👥 LIVE ROSTER view (drawer destination for staff; stacked for students) -->
+        <div id="rosterSection" class="hidden">
+          <h3 style="margin-bottom: 10px; font-size: 1.1rem; color: var(--navy);">
+            <i data-lucide="users"></i> Live Attendance Roster (<span id="rosterCount">0</span>)
+          </h3>
+          <div
+            style="background: var(--bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border); max-height: 250px; overflow-y: auto;">
+            <ul id="rosterList" style="list-style: none; padding-left: 0;">
+              <li style="color: var(--muted); font-size: 0.9rem; text-align: center; padding: 10px;">Waiting for session
+                to start...</li>
+            </ul>
+          </div>
         </div>
       </div>
     </section>
@@ -1000,6 +1019,37 @@
       </div>
     </div>
   </div>
+
+  <!-- 🎛️ REP MISSION-CONTROL DRAWER: one view at a time, everything else one
+       tap away. Rep/assistant-only — students never see this chrome. -->
+  <div id="drawerBackdrop" class="drawer-backdrop"></div>
+  <aside id="portalDrawer" class="portal-drawer" aria-label="Course tools">
+    <div class="drawer-header">
+      <span class="drawer-title"><i data-lucide="layout-dashboard"></i> Course Tools</span>
+      <button id="drawerCloseBtn" class="drawer-close" aria-label="Close">&times;</button>
+    </div>
+    <nav class="drawer-nav">
+      <button class="drawer-item" data-view="checkinView">✋ Check-in
+        <span class="drawer-badge hidden" id="badgeCheckin">0</span>
+      </button>
+      <button class="drawer-item" data-view="rosterView">👥 Live Roster
+        <span class="drawer-badge hidden" id="badgeRoster">0</span>
+      </button>
+      <button class="drawer-item" data-view="studentsView">🎓 Students</button>
+      <button class="drawer-item" data-view="assistantsView">⭐ Assistants &amp; Groups</button>
+      <button class="drawer-item" data-view="bulkView">📥 Bulk Import</button>
+      <button class="drawer-item" data-view="exemptionsView">🛡️ Exemptions</button>
+      <button class="drawer-item" data-view="archiveView">📚 Archive &amp; Audit</button>
+      <button class="drawer-item" data-view="analyticsView">📊 Analytics</button>
+    </nav>
+    <p class="drawer-footnote">Tap a tool to focus on it — badges wait until you check.</p>
+  </aside>
+
+  <!-- The protruding, draggable handle (left/right/top/bottom — it remembers) -->
+  <button id="drawerTab" class="drawer-tab hidden" aria-label="Open course tools">
+    <i data-lucide="chevrons-left"></i>
+    <span id="drawerTabBadge" class="drawer-tab-badge hidden">0</span>
+  </button>
 
   <script type="module" src="app.js"></script>
   <script>

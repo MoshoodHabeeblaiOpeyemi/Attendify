@@ -1255,3 +1255,194 @@ input:focus::placeholder {
     font-size: 0.85rem;
   }
 }
+/* ============================================================
+   REP MISSION-CONTROL DRAWER (slide-out panel + draggable tab)
+   Staff/assistant-only chrome. One portal view at a time.
+   ============================================================ */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9400;
+  background: rgba(11, 13, 23, 0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.drawer-backdrop.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.portal-drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: min(84vw, 340px);
+  background: var(--bg-base);
+  border-left: 1px solid var(--border);
+  box-shadow: -18px 0 30px rgba(11, 13, 23, 0.25);
+  transform: translateX(102%);
+  transition: transform 0.28s cubic-bezier(0.25, 0.7, 0.3, 1);
+  z-index: 9450;
+  display: flex;
+  flex-direction: column;
+}
+.portal-drawer.show {
+  transform: translateX(0);
+}
+
+.drawer-header {
+  padding: 16px 16px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.drawer-title {
+  font-weight: 700;
+  color: var(--navy);
+  font-size: 0.98rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.drawer-close {
+  background: transparent;
+  border: none;
+  font-size: 1.4rem;
+  cursor: pointer;
+  color: var(--muted);
+  line-height: 1;
+  padding: 2px 8px;
+  border-radius: 8px;
+}
+.drawer-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-base-2);
+}
+
+.drawer-nav {
+  padding: 8px 12px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  flex: 1;
+}
+.drawer-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text-primary);
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.drawer-item:hover {
+  border-color: var(--violet);
+}
+.drawer-item.active {
+  border-color: var(--violet);
+  background: var(--accent-glow);
+  color: var(--violet);
+}
+.drawer-item.hidden {
+  display: none;
+}
+.drawer-badge {
+  min-width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  line-height: 1;
+}
+.drawer-footnote {
+  font-size: 0.72rem;
+  color: var(--muted);
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+/* The protruding handle — docked to an edge, dragged to move it. */
+.drawer-tab {
+  position: fixed;
+  z-index: 9500;
+  width: 30px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--violet);
+  color: #fff;
+  border: none;
+  cursor: grab;
+  box-shadow: 0 4px 14px rgba(11, 13, 23, 0.35);
+  touch-action: none;
+}
+.drawer-tab:active {
+  cursor: grabbing;
+}
+.drawer-tab.dragging {
+  transition: none;
+}
+.drawer-tab[data-edge="right"] {
+  right: 0;
+  top: var(--tab-offset, 40%);
+  transform: translateY(-50%);
+  border-radius: 10px 0 0 10px;
+}
+.drawer-tab[data-edge="left"] {
+  left: 0;
+  top: var(--tab-offset, 40%);
+  transform: translateY(-50%);
+  border-radius: 0 10px 10px 0;
+}
+.drawer-tab[data-edge="top"] {
+  top: 0;
+  left: var(--tab-offset, 40%);
+  transform: translateX(-50%);
+  border-radius: 0 0 10px 10px;
+}
+.drawer-tab[data-edge="bottom"] {
+  bottom: 0;
+  left: var(--tab-offset, 40%);
+  transform: translateX(-50%);
+  border-radius: 10px 10px 0 0;
+}
+.drawer-tab.hidden {
+  display: none;
+}
+.drawer-tab-badge {
+  position: absolute;
+  top: -5px;
+  right: -7px;
+  min-width: 17px;
+  height: 17px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  line-height: 1;
+  border: 2px solid #fff;
+}

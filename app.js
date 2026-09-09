@@ -137,6 +137,12 @@ window.addEventListener("popstate", (event) => {
     return;
   }
 
+  // Mission-Control drawer open? Back closes the drawer first.
+  if (window.__attendifyCloseDrawer && window.__attendifyCloseDrawer()) {
+    pushNavTrap(currentNavView);
+    return;
+  }
+
   if (view === "portal" && currentNavView === "portal") {
     pushNavTrap("portal");
     return;
@@ -1497,6 +1503,9 @@ if (mobileMenuBtn && navLinks) {
       hideAllManagementPanels();
       const mgmtToolbarOut = document.getElementById("managementToolbar");
       if (mgmtToolbarOut) mgmtToolbarOut.classList.add("hidden");
+      if (typeof syncDrawerTabVisibility === "function") {
+        syncDrawerTabVisibility();
+      }
 
       activeCourse = null;
       if (countdownInterval) clearInterval(countdownInterval);
@@ -2275,6 +2284,7 @@ if (mobileMenuBtn && navLinks) {
     );
     if (countEl) countEl.textContent = pending.length;
     pendingManualCount = pending.length;
+    setDrawerBadge("checkin", pending.length);
 
     panel.classList.toggle("hidden", requests.length === 0);
 
@@ -2540,6 +2550,10 @@ if (mobileMenuBtn && navLinks) {
           id: d.id,
           ...d.data(),
         }));
+        const flagCount = activeCourse.absentFlags.filter(
+          (f) => f.status === "flagged",
+        ).length;
+        setDrawerBadge("roster", flagCount);
         renderPortalState();
       },
       (err) => console.error("Absent flags listener error:", err),
@@ -3074,6 +3088,11 @@ if (mobileMenuBtn && navLinks) {
       if (repControls) repControls.classList.remove("hidden");
       if (studentControls) studentControls.classList.add("hidden");
 
+      // Mission-Control drawer: show the tab only for staff, default to the
+      // check-in view.
+      syncDrawerTabVisibility();
+      showDrawerView("checkin");
+
       // Course Maintenance toolbar: visible to reps AND assistants (group
       // leads manage their own groups). Rep-only actions stay protected by
       // the backend regardless of who can see the buttons.
@@ -3094,6 +3113,18 @@ if (mobileMenuBtn && navLinks) {
       hideAllManagementPanels();
       const mgmtToolbarEl = document.getElementById("managementToolbar");
       if (mgmtToolbarEl) mgmtToolbarEl.classList.add("hidden");
+
+      // Students see analytics + roster stacked (drawer is staff-only chrome).
+      const rosterSectionEl = document.getElementById("rosterSection");
+      if (rosterSectionEl) rosterSectionEl.classList.remove("hidden");
+      const studentAnalyticsEl = document.getElementById(
+        "studentAnalyticsSection",
+      );
+      if (studentAnalyticsEl) studentAnalyticsEl.classList.remove("hidden");
+
+      if (typeof syncDrawerTabVisibility === "function") {
+        syncDrawerTabVisibility();
+      }
     }
 
     renderPortalState();
@@ -3299,7 +3330,341 @@ if (mobileMenuBtn && navLinks) {
       });
     });
 
+// ============================================================
+  // 🎛️ MISSION-CONTROL DRAWER — one portal view at a time.
+  // The tab (draggable, edge-remembering) opens a slim slide-out from
+  // whichever edge it's docked on. Staff/assistant-only chrome; students
+  // never see it. Badges persist until the rep actually opens each view.
+  // ============================================================
+  const drawerTab = document.getElementById("drawerTab");
+  const drawerTabBadge = document.getElementById("drawerTabBadge");
+  const portalDrawer = document.getElementById("portalDrawer");
+  const drawerBackdrop = document.getElementById("drawerBackdrop");
+  const drawerCloseBtn = document.getElementById("drawerCloseBtn");
+
+  // Which rep-view is showing right now. "checkin" = setup+live cards.
+  let activeDrawerView = "checkin";
+  let isDrawerOpen = false;
+
+  // Unseen counts, keyed by drawer destination. Raising the badge value
+  // waits until the rep actually opens that view, then clears.
+  const drawerUnseen = {
+    checkin: 0,
+    roster: 0,
+    students: 0,
+    assistants: 0,
+    bulk: 0,
+    exemptions: 0,
+    archive: 0,
+    analytics: 0,
+  };
+
+  function capFirst(str) {
+    return str.charAt(0).toUpperCase() + str.slice(1);
+  }
+
+  function setDrawerBadge(view, count) {
+    drawerUnseen[view] = Math.max(0, count);
+    const badgeEl = document.getElementById(`badge${capFirst(view)}`);
+    if (badgeEl) {
+      badgeEl.textContent = String(count);
+      badgeEl.classList.toggle("hidden", count === 0);
+    }
+    updateDrawerTabBadge();
+  }
+
+  function updateDrawerTabBadge() {
+    if (!drawerTabBadge) return;
+    const total = Object.values(drawerUnseen).reduce(
+      (sum, n) => sum + (n || 0),
+      0,
+    );
+    drawerTabBadge.textContent = String(total);
+    drawerTabBadge.classList.toggle("hidden", total === 0);
+  }
+
+  function markDrawerViewSeen(view) {
+    if (drawerUnseen[view] > 0) setDrawerBadge(view, 0);
+  }
+
+  function openPortalDrawer() {
+    isDrawerOpen = true;
+    if (portalDrawer) portalDrawer.classList.add("show");
+    if (drawerBackdrop) drawerBackdrop.classList.add("show");
+    refreshIcons();
+  }
+
+  function closePortalDrawer() {
+    isDrawerOpen = false;
+    if (portalDrawer) portalDrawer.classList.remove("show");
+    if (drawerBackdrop) drawerBackdrop.classList.remove("show");
+  }
   // --- JOIN COURSE FORM ---
+// One view at a time. Every section hides first, then exactly one target
+  // shows. Connected panels (checkin includes manual requests + headcount;
+  // archive includes audit/device flags/security signals) travel together.
+  function showDrawerView(view) {
+    if (!view || typeof view !== "string") return;
+    if (!/^[a-z]+$/.test(view)) return;
+    activeDrawerView = view;
+
+    const allSections = [
+      "sessionSetupCard",
+      "liveSessionCard",
+      "bulkImportSection",
+      "exemptionManagementSection",
+      "assistantManagementSection",
+      "repEnrolledStudentsSection",
+      "repArchiveSection",
+      "studentAnalyticsSection",
+      "rosterSection",
+    ];
+    allSections.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add("hidden");
+    });
+
+    // Set the active class on drawer items + clear the badge for this view.
+    document
+      .querySelectorAll(".drawer-item")
+      .forEach((b) => b.classList.remove("active"));
+    const item = document.querySelector(`[data-view="${view}View"]`);
+    if (item) item.classList.add("active");
+    markDrawerViewSeen(view);
+
+    switch (view) {
+      case "checkin":
+        syncRepPhaseUI();
+        break;
+      case "roster": {
+        const el = document.getElementById("rosterSection");
+        if (el) el.classList.remove("hidden");
+        break;
+      }
+      case "bulk": {
+        const el = document.getElementById("bulkImportSection");
+        if (el) el.classList.remove("hidden");
+        break;
+      }
+      case "exemptions": {
+        const el = document.getElementById("exemptionManagementSection");
+        if (el) el.classList.remove("hidden");
+        break;
+      }
+      case "assistants": {
+        const el = document.getElementById("assistantManagementSection");
+        if (el) el.classList.remove("hidden");
+        break;
+      }
+      case "students": {
+        const el = document.getElementById("repEnrolledStudentsSection");
+        if (el) el.classList.remove("hidden");
+        break;
+      }
+      case "archive": {
+        const el = document.getElementById("repArchiveSection");
+        if (el) el.classList.remove("hidden");
+        break;
+      }
+      case "analytics": {
+        const el = document.getElementById("studentAnalyticsSection");
+        if (el) el.classList.remove("hidden");
+        break;
+      }
+      default:
+        break;
+    }
+
+    closePortalDrawer();
+
+    const targetEl = document.getElementById(
+      {
+        checkin: "liveSessionCard",
+        roster: "rosterSection",
+        bulk: "bulkImportSection",
+        exemptions: "exemptionManagementSection",
+        assistants: "assistantManagementSection",
+        students: "repEnrolledStudentsSection",
+        archive: "repArchiveSection",
+        analytics: "studentAnalyticsSection",
+      }[view] || "sessionSetupCard",
+    );
+    if (targetEl) {
+      setTimeout(
+        () => targetEl.scrollIntoView({ behavior: "smooth", block: "start" }),
+        60,
+      );
+    }
+  }
+
+  // Drawer nav item clicks.
+// Who is the current user in the active course?
+  function isRepForActiveCourse() {
+    return Boolean(
+      activeCourse && currentUser && activeCourse.repUid === currentUser.uid,
+    );
+  }
+  function isAssistantForActiveCourse() {
+    if (!activeCourse || !currentUser) return false;
+    const userMatric = normalizeMatric(currentUser.matric);
+    return Boolean(
+      (activeCourse.assistants || [])
+        .map(normalizeMatric)
+        .includes(userMatric),
+    );
+  }
+
+  // Show the tab only inside a portal for staff/assistants.
+  function syncDrawerTabVisibility() {
+    if (!drawerTab) return;
+    const inPortal = Boolean(
+      activeCourse &&
+        portalSection &&
+        !portalSection.classList.contains("hidden"),
+    );
+    const staff = isRepForActiveCourse() || isAssistantForActiveCourse();
+    drawerTab.classList.toggle("hidden", !(inPortal && staff));
+    if (!(inPortal && staff)) closePortalDrawer();
+  }
+
+  // Draggable tab — pointer + touch, moves along the chosen axis, clamps to
+  // the viewport, and remembers its edge + offset for next time.
+  let tabDragState = null;
+
+  function startTabDrag(e, pointer) {
+    if (!drawerTab) return;
+    const edge = drawerTab.dataset.edge || "right";
+    const isHorizontal = edge === "right" || edge === "left";
+    tabDragState = { edge, isHorizontal, start: pointer };
+    drawerTab.classList.add("dragging");
+    drawerTab.setPointerCapture?.(e.pointerId);
+  }
+
+  function updateTabDrag(pointer) {
+    if (!tabDragState || !drawerTab) return;
+    const delta = tabDragState.isHorizontal
+      ? pointer.y - tabDragState.start.y
+      : pointer.x - tabDragState.start.x;
+    const pos = Math.max(
+      24,
+      Math.min(window.innerHeight - 90, tabDragState.start.y + delta),
+    );
+    drawerTab.style.setProperty("--tab-offset", `${pos}px`);
+  }
+
+  function endTabDrag() {
+    if (!tabDragState || !drawerTab) return;
+    tabDragState = null;
+    drawerTab.classList.remove("dragging");
+    persistTabPosition();
+  }
+
+  function persistTabPosition() {
+    if (!drawerTab) return;
+    const edge = drawerTab.dataset.edge || "right";
+    const offsetVal = drawerTab.style.getPropertyValue("--tab-offset");
+    try {
+      localStorage.setItem(
+        "attendify_drawer_tab",
+        JSON.stringify({ edge, offset: offsetVal }),
+      );
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  function restoreTabPosition() {
+    if (!drawerTab) return;
+    try {
+      const raw = localStorage.getItem("attendify_drawer_tab");
+      const saved = raw ? JSON.parse(raw) : null;
+      if (saved && saved.edge) {
+        drawerTab.dataset.edge = saved.edge;
+        if (saved.offset) {
+          drawerTab.style.setProperty("--tab-offset", saved.offset);
+        }
+      }
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  // Mouse dragging.
+  if (drawerTab) {
+    drawerTab.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 && e.pointerType === "mouse") return;
+      startTabDrag(e, { x: e.clientX, y: e.clientY });
+    });
+    drawerTab.addEventListener("pointermove", (e) => {
+      if (!tabDragState) return;
+      updateTabDrag({ x: e.clientX, y: e.clientY });
+      if (e.pointerType === "touch") e.preventDefault();
+    });
+    drawerTab.addEventListener("pointerup", endTabDrag);
+    drawerTab.addEventListener("pointercancel", endTabDrag);
+    // Long-press / right-click rotates the docked edge.
+    drawerTab.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      const edges = ["right", "bottom", "left", "top"];
+      const next =
+        edges[
+          (edges.indexOf(drawerTab.dataset.edge || "right") + 1) % 4
+        ];
+      drawerTab.dataset.edge = next;
+      drawerTab.style.removeProperty("--tab-offset");
+      persistTabPosition();
+    });
+  }
+
+  restoreTabPosition();
+
+  // Expose for back-button: drawer open → close drawer (modal-like trap).
+  window.__attendifyCloseDrawer = () => {
+    if (isDrawerOpen) {
+      closePortalDrawer();
+      return true;
+    }
+    return false;
+  };
+
+  // Whenever the portal is closed, reset to the default view and hide the tab.
+  const _drwReturnToDashboard =
+    window.__attendifyReturnToDashboard || function () {};
+  window.__attendifyReturnToDashboard = function () {
+    closePortalDrawer();
+    syncDrawerTabVisibility();
+    _drwReturnToDashboard();
+  };
+  document
+    .querySelectorAll(".drawer-item")
+    .forEach((b) => {
+      const view = b.dataset.view;
+      if (!view) return;
+      b.addEventListener("click", () => {
+        showDrawerView(view.replace("View", ""));
+      });
+    });
+
+  // Tab click toggles the drawer.
+  if (drawerTab) {
+    drawerTab.addEventListener("click", () => {
+      if (
+        !activeCourse ||
+        (!isRepForActiveCourse() && !isAssistantForActiveCourse())
+      ) {
+        drawerTab.classList.add("hidden");
+        return;
+      }
+      if (isDrawerOpen) closePortalDrawer();
+      else openPortalDrawer();
+    });
+  }
+
+  if (drawerCloseBtn) drawerCloseBtn.addEventListener("click", closePortalDrawer);
+
+  if (drawerBackdrop) {
+    drawerBackdrop.addEventListener("click", closePortalDrawer);
+  }
   const joinCourseForm = document.getElementById("joinCourseForm");
   if (joinCourseForm) {
     joinCourseForm.addEventListener("submit", async (e) => {
@@ -5599,5 +5964,16 @@ if (mobileMenuBtn && navLinks) {
       }
     } else if (studentAnalyticsSection) {
       studentAnalyticsSection.classList.add("hidden");
+    }
+
+    // Students always see the live roster stacked with analytics; staff only
+    // see it when they pick the roster view from the Mission-Control drawer.
+    const rosterSectionEl = document.getElementById("rosterSection");
+    if (rosterSectionEl) {
+      if (!isRep && !isAssistant) {
+        rosterSectionEl.classList.remove("hidden");
+      } else if (activeDrawerView !== "roster") {
+        rosterSectionEl.classList.add("hidden");
+      }
     }
   }
