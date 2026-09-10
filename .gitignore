@@ -17,5 +17,13 @@ node_modules
 # Local audit/temp files
 _audit_output.txt
 
+# 🔐 Firebase service-account keys — NEVER commit these.
+# One leaked key = full database control. They live outside the repo (Downloads);
+# this guard stops an accidental drag-in + `git add -A` from pushing a master key.
+*firebase-adminsdk*.json
+*adminsdk*.json
+serviceAccount*.json
+gcp-key.json
+
 # Visily/design mockups (reference only — not app assets)
 New folder/
