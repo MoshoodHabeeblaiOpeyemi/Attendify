@@ -1,0 +1,84 @@
+name: Deploy Firestore Rules
+
+# Auto-ships firestore.rules to the live Firebase project whenever it changes
+# on main. Also runnable manually: Actions tab → Deploy Firestore Rules →
+# "Run workflow". Nothing else in this repo is deployed here — Vercel handles
+# the app + API functions; this job ONLY keeps Firestore rules in sync.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "firestore.rules"
+  workflow_dispatch:
+
+jobs:
+  deploy-rules:
+    name: Deploy firestore.rules → Firebase
+    runs-on: ubuntu-latest
+    concurrency: deploy-firestore-rules
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools@13
+
+      # Credentials — pick one source (first one present wins):
+      #   1) FIREBASE_SERVICE_ACCOUNT  → full service-account JSON pasted as a
+      #      GitHub secret (recommended)
+      #   2) FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY  → same three values
+      #      already used on Vercel, added as GitHub secrets (private key may
+      #      be pasted with literal "\n" or real newlines — both handled)
+      #   3) FIREBASE_TOKEN  → a `firebase login:ci` legacy CI token
+      - name: Build service account credentials
+        env:
+          SA_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FB_PROJECT_ID: "attendify-4c93d"
+          FB_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
+          FB_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          if [ -n "$SA_JSON" ]; then
+            echo "$SA_JSON" > "$HOME/gcp-key.json"
+            echo "✅ Using FIREBASE_SERVICE_ACCOUNT"
+          elif [ -n "$FB_CLIENT_EMAIL" ] && [ -n "$FB_PRIVATE_KEY" ]; then
+            node -e '
+              const fs = require("fs");
+              const sa = {
+                type: "service_account",
+                project_id: process.env.FB_PROJECT_ID,
+                private_key_id: "",
+                private_key: (process.env.FB_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
+                client_email: process.env.FB_CLIENT_EMAIL,
+                client_id: "",
+                auth_uri: "https://accounts.google.com/o/oauth2/auth",
+                token_uri: "https://oauth2.googleapis.com/token",
+                auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+                client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/" + encodeURIComponent(process.env.FB_CLIENT_EMAIL)
+              };
+              fs.writeFileSync(process.env.HOME + "/gcp-key.json", JSON.stringify(sa, null, 2));
+            '
+            echo "✅ Using FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY"
+          else
+            echo "⚠️ No service-account secrets set — will try FIREBASE_TOKEN in the deploy step."
+          fi
+
+      - name: Deploy Firestore rules
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          export GOOGLE_APPLICATION_CREDENTIALS="$HOME/gcp-key.json"
+          if [ ! -f "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
+            unset GOOGLE_APPLICATION_CREDENTIALS
+          fi
+          if [ ! -f "$HOME/gcp-key.json" ] && [ -z "${FIREBASE_TOKEN:-}" ]; then
+            echo "::error::No Firebase credentials found. Add a GitHub secret named FIREBASE_SERVICE_ACCOUNT (paste the full service-account JSON from Firebase console), or FIREBASE_TOKEN, then re-run this workflow from the Actions tab."
+            exit 1
+          fi
+          firebase deploy --only firestore:rules --project "attendify-4c93d" --non-interactive
