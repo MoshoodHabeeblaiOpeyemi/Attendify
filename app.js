@@ -1,3 +1,8 @@
+// 🔖 BUILD MARKER — proves which version of app.js the browser is running.
+// If your console does NOT print "build 256052f-drawer", the running JS is stale.
+console.log("%cAttendify build: 256052f-drawer (Mission-Control drawer live)", "color:#6C5DD3;font-weight:bold");
+
+// --- FIREBASE IMPORTS & CONFIGURATION ---
 // --- FIREBASE IMPORTS & CONFIGURATION ---
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
 import {
