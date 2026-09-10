@@ -1,6 +1,6 @@
 // 🔖 BUILD MARKER — proves which version of app.js the browser is running.
 // If your console does NOT print "build 256052f-drawer", the running JS is stale.
-console.log("%cAttendify build: 256052f-drawer (Mission-Control drawer live)", "color:#6C5DD3;font-weight:bold");
+console.log("%cAttendify build: tab-top-anchor (handle pinned near the navbar)", "color:#6C5DD3;font-weight:bold");
 
 // --- FIREBASE IMPORTS & CONFIGURATION ---
 // --- FIREBASE IMPORTS & CONFIGURATION ---
@@ -3545,6 +3545,34 @@ if (mobileMenuBtn && navLinks) {
     drawerTab.setPointerCapture?.(e.pointerId);
   }
 
+  // The tab lives in a fixed band near the top: never above the sticky
+  // navbar, never below ~55% of the viewport. Enforced on drag, restore
+  // AND resize — it can never sink out of sight again.
+  const TAB_MIN = 72;
+
+  function tabMaxOffset() {
+    const h = (drawerTab && drawerTab.offsetHeight) || 80;
+    return Math.max(
+      TAB_MIN + 40,
+      Math.min(
+        Math.round(window.innerHeight * 0.55),
+        window.innerHeight - h - 16,
+      ),
+    );
+  }
+
+  function clampTabToViewport() {
+    if (!drawerTab) return;
+    const edge = drawerTab.dataset.edge || "right";
+    if (edge === "top" || edge === "bottom") return; // flush to an edge = always visible
+    const raw = parseFloat(drawerTab.style.getPropertyValue("--tab-offset"));
+    if (Number.isNaN(raw)) return; // nothing custom set — CSS default (near top) applies
+    drawerTab.style.setProperty(
+      "--tab-offset",
+      `${Math.max(TAB_MIN, Math.min(tabMaxOffset(), raw))}px`,
+    );
+  }
+
   function updateTabDrag(pointer) {
     if (!tabDragState || !drawerTab) return;
     // Use the axis that matches the docked edge: right/left tabs slide
@@ -3555,12 +3583,11 @@ if (mobileMenuBtn && navLinks) {
       ? pointer.x - tabDragState.start.x
       : pointer.y - tabDragState.start.y;
     const seed = horizontalEdge ? tabDragState.start.x : tabDragState.start.y;
-    // Keep the tab in the visible band below the header — never under the
-    // top nav, never off-screen. Same band is enforced in restoreTabPosition.
-    const TAB_MIN = 72;
+    // Keep the tab in the visible band below the navbar — and never below
+    // the top ~55% of the screen, so it can't sink out of sight.
     const max = horizontalEdge
       ? window.innerWidth - 60
-      : window.innerHeight - 90;
+      : tabMaxOffset();
     const pos = Math.max(TAB_MIN, Math.min(max, seed + delta));
     drawerTab.style.setProperty("--tab-offset", `${pos}px`);
   }
@@ -3578,7 +3605,7 @@ if (mobileMenuBtn && navLinks) {
     const offsetVal = drawerTab.style.getPropertyValue("--tab-offset");
     try {
       localStorage.setItem(
-        "attendify_drawer_tab_v2",
+        "attendify_drawer_tab_v3",
         JSON.stringify({ edge, offset: offsetVal }),
       );
     } catch (e) {
@@ -3589,7 +3616,7 @@ if (mobileMenuBtn && navLinks) {
   function restoreTabPosition() {
     if (!drawerTab) return;
     try {
-      const raw = localStorage.getItem("attendify_drawer_tab_v2");
+      const raw = localStorage.getItem("attendify_drawer_tab_v3");
       const saved = raw ? JSON.parse(raw) : null;
       if (saved && saved.edge) {
         drawerTab.dataset.edge = saved.edge;
@@ -3603,8 +3630,8 @@ if (mobileMenuBtn && navLinks) {
               saved.edge === "top" || saved.edge === "bottom";
             const max = horizontalEdge
               ? window.innerWidth - 60
-              : window.innerHeight - 90;
-            const clamped = Math.max(72, Math.min(max, val));
+              : tabMaxOffset();
+            const clamped = Math.max(TAB_MIN, Math.min(max, val));
             drawerTab.style.setProperty("--tab-offset", `${clamped}px`);
           }
         }
@@ -3642,6 +3669,9 @@ if (mobileMenuBtn && navLinks) {
   }
 
   restoreTabPosition();
+  // Zoom / window resize changes the CSS viewport — re-clamp so the tab can
+  // never end up off-screen after the window changes shape.
+  window.addEventListener("resize", clampTabToViewport);
 
   // Expose for back-button: drawer open → close drawer (modal-like trap).
   window.__attendifyCloseDrawer = () => {

@@ -1384,7 +1384,7 @@ input:focus::placeholder {
   position: fixed;
   z-index: 9500;
   width: 36px;
-  height: 84px;
+  height: 80px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1430,16 +1430,16 @@ input:focus::placeholder {
 .drawer-tab.dragging {
   transition: none;
 }
+/* --tab-offset on side edges = the tab's TOP edge in px (no centering
+   transform), so the default reads as "just below the sticky navbar". */
 .drawer-tab[data-edge="right"] {
   right: 0;
-  top: var(--tab-offset, 108px);
-  transform: translateY(-50%);
+  top: var(--tab-offset, 76px);
   border-radius: 12px 0 0 12px;
 }
 .drawer-tab[data-edge="left"] {
   left: 0;
-  top: var(--tab-offset, 108px);
-  transform: translateY(-50%);
+  top: var(--tab-offset, 76px);
   border-radius: 0 12px 12px 0;
 }
 .drawer-tab[data-edge="top"] {
@@ -1453,6 +1453,24 @@ input:focus::placeholder {
   left: var(--tab-offset, 40%);
   transform: translateX(-50%);
   border-radius: 10px 10px 0 0;
+}
+/* Desktop: same spot, just scaled up for the bigger screen. */
+@media (min-width: 768px) {
+  .drawer-tab {
+    width: 46px;
+    height: 104px;
+    gap: 5px;
+  }
+  .drawer-tab .tab-glyph {
+    font-size: 1.45rem;
+  }
+  .drawer-tab .tab-label {
+    font-size: 0.68rem;
+  }
+  .drawer-tab[data-edge="right"],
+  .drawer-tab[data-edge="left"] {
+    top: var(--tab-offset, 84px);
+  }
 }
 .drawer-tab.hidden {
   display: none;
