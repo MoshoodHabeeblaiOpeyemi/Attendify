@@ -3547,13 +3547,18 @@ if (mobileMenuBtn && navLinks) {
 
   function updateTabDrag(pointer) {
     if (!tabDragState || !drawerTab) return;
-    const delta = tabDragState.isHorizontal
-      ? pointer.y - tabDragState.start.y
-      : pointer.x - tabDragState.start.x;
-    const pos = Math.max(
-      24,
-      Math.min(window.innerHeight - 90, tabDragState.start.y + delta),
-    );
+    // Use the axis that matches the docked edge: right/left tabs slide
+    // vertically (seeded by start.y, clamped to height); top/bottom tabs
+    // slide horizontally (seeded by start.x, clamped to width).
+    const horizontalEdge = tabDragState.edge === "top" || tabDragState.edge === "bottom";
+    const delta = horizontalEdge
+      ? pointer.x - tabDragState.start.x
+      : pointer.y - tabDragState.start.y;
+    const seed = horizontalEdge ? tabDragState.start.x : tabDragState.start.y;
+    const max = horizontalEdge
+      ? window.innerWidth - 60
+      : window.innerHeight - 90;
+    const pos = Math.max(24, Math.min(max, seed + delta));
     drawerTab.style.setProperty("--tab-offset", `${pos}px`);
   }
 
@@ -3586,7 +3591,19 @@ if (mobileMenuBtn && navLinks) {
       if (saved && saved.edge) {
         drawerTab.dataset.edge = saved.edge;
         if (saved.offset) {
-          drawerTab.style.setProperty("--tab-offset", saved.offset);
+          // Clamp the saved offset to the CURRENT viewport — a position
+          // stored on a different screen size (or before an edge rotation)
+          // could otherwise restore the tab off-screen, hiding it forever.
+          const val = parseFloat(saved.offset);
+          if (!Number.isNaN(val)) {
+            const horizontalEdge =
+              saved.edge === "top" || saved.edge === "bottom";
+            const max = horizontalEdge
+              ? window.innerWidth - 60
+              : window.innerHeight - 90;
+            const clamped = Math.max(24, Math.min(max, val));
+            drawerTab.style.setProperty("--tab-offset", `${clamped}px`);
+          }
         }
       }
     } catch (e) {
