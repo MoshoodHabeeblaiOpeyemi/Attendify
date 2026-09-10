@@ -1383,17 +1383,46 @@ input:focus::placeholder {
 .drawer-tab {
   position: fixed;
   z-index: 9500;
-  width: 30px;
-  height: 64px;
+  width: 36px;
+  height: 84px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 3px;
   background: var(--violet);
   color: #fff;
   border: none;
   cursor: grab;
   box-shadow: 0 4px 14px rgba(11, 13, 23, 0.35);
   touch-action: none;
+  animation: drawerTabPulse 2.4s ease-in-out infinite;
+}
+@keyframes drawerTabPulse {
+  0%,
+  100% {
+    box-shadow:
+      0 4px 14px rgba(11, 13, 23, 0.35),
+      0 0 0 0 rgba(139, 92, 246, 0.55);
+  }
+  50% {
+    box-shadow:
+      0 4px 14px rgba(11, 13, 23, 0.35),
+      0 0 0 9px rgba(139, 92, 246, 0);
+  }
+}
+.drawer-tab .tab-glyph {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+.drawer-tab .tab-label {
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+  line-height: 1;
+  opacity: 0.9;
 }
 .drawer-tab:active {
   cursor: grabbing;
@@ -1403,15 +1432,15 @@ input:focus::placeholder {
 }
 .drawer-tab[data-edge="right"] {
   right: 0;
-  top: var(--tab-offset, 40%);
+  top: var(--tab-offset, 108px);
   transform: translateY(-50%);
-  border-radius: 10px 0 0 10px;
+  border-radius: 12px 0 0 12px;
 }
 .drawer-tab[data-edge="left"] {
   left: 0;
-  top: var(--tab-offset, 40%);
+  top: var(--tab-offset, 108px);
   transform: translateY(-50%);
-  border-radius: 0 10px 10px 0;
+  border-radius: 0 12px 12px 0;
 }
 .drawer-tab[data-edge="top"] {
   top: 0;

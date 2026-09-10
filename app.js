@@ -3555,10 +3555,13 @@ if (mobileMenuBtn && navLinks) {
       ? pointer.x - tabDragState.start.x
       : pointer.y - tabDragState.start.y;
     const seed = horizontalEdge ? tabDragState.start.x : tabDragState.start.y;
+    // Keep the tab in the visible band below the header — never under the
+    // top nav, never off-screen. Same band is enforced in restoreTabPosition.
+    const TAB_MIN = 72;
     const max = horizontalEdge
       ? window.innerWidth - 60
       : window.innerHeight - 90;
-    const pos = Math.max(24, Math.min(max, seed + delta));
+    const pos = Math.max(TAB_MIN, Math.min(max, seed + delta));
     drawerTab.style.setProperty("--tab-offset", `${pos}px`);
   }
 
@@ -3575,7 +3578,7 @@ if (mobileMenuBtn && navLinks) {
     const offsetVal = drawerTab.style.getPropertyValue("--tab-offset");
     try {
       localStorage.setItem(
-        "attendify_drawer_tab",
+        "attendify_drawer_tab_v2",
         JSON.stringify({ edge, offset: offsetVal }),
       );
     } catch (e) {
@@ -3586,7 +3589,7 @@ if (mobileMenuBtn && navLinks) {
   function restoreTabPosition() {
     if (!drawerTab) return;
     try {
-      const raw = localStorage.getItem("attendify_drawer_tab");
+      const raw = localStorage.getItem("attendify_drawer_tab_v2");
       const saved = raw ? JSON.parse(raw) : null;
       if (saved && saved.edge) {
         drawerTab.dataset.edge = saved.edge;
@@ -3601,7 +3604,7 @@ if (mobileMenuBtn && navLinks) {
             const max = horizontalEdge
               ? window.innerWidth - 60
               : window.innerHeight - 90;
-            const clamped = Math.max(24, Math.min(max, val));
+            const clamped = Math.max(72, Math.min(max, val));
             drawerTab.style.setProperty("--tab-offset", `${clamped}px`);
           }
         }
