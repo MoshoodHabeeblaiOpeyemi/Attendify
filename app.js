@@ -1,6 +1,6 @@
 // 🔖 BUILD MARKER — proves which version of app.js the browser is running.
 // If your console does NOT print "build 256052f-drawer", the running JS is stale.
-console.log("%cAttendify build: tab-top-anchor (handle pinned near the navbar)", "color:#6C5DD3;font-weight:bold");
+console.log("%cAttendify build: repeater-mode (QR + PIN, projector or repeater students, GPS prototype off)", "color:#6C5DD3;font-weight:bold");
 
 // --- FIREBASE IMPORTS & CONFIGURATION ---
 // --- FIREBASE IMPORTS & CONFIGURATION ---
@@ -2384,6 +2384,12 @@ if (mobileMenuBtn && navLinks) {
     }
     if (rejectBtn) rejectBtn.disabled = true;
 
+    // 🛡️ Approval reliability: serverless cold starts + slow networks can
+    // legitimately take >15s. We allow 30s per attempt, and — critically —
+    // after the last attempt fails we CHECK THE LIVE REQUEST STATE in
+    // Firestore before showing an error. If the approval actually landed
+    // (request doc deleted server-side), the rep sees success, not a scary
+    // false "Slow Network" that makes them retry a finished decision.
     let lastError = null;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -2398,7 +2404,7 @@ if (mobileMenuBtn && navLinks) {
             },
             body: JSON.stringify({ courseId: activeCourse.id, targetUid }),
           },
-          15000,
+          30000,
         );
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Approval failed.");
@@ -2411,16 +2417,39 @@ if (mobileMenuBtn && navLinks) {
       } catch (error) {
         console.error("Approve manual request error:", error);
         lastError = error;
+        // A server-side decision (403/404/409) is final — retrying a
+        // rejected/already-decided request just burns time.
+        if (error && /403|404|already|final|Only the/i.test(error.message || "")) {
+          break;
+        }
         if (attempt < 2) {
           await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
         }
       }
     }
     if (lastError) {
-      toast.error(
-        "Network is too slow right now — the approval did not go through. Tap Approve again in a moment.",
-        "Slow Network",
-      );
+      // Verify against live Firestore state: if the request is gone, the
+      // approval DID go through despite the timeout/network error.
+      let actuallyApproved = false;
+      try {
+        const reqSnap = await getDoc(
+          doc(db, "courses", activeCourse.id, "manualRequests", targetUid),
+        );
+        actuallyApproved = !reqSnap.exists();
+      } catch (_) {
+        /* can't verify — treat as failed */
+      }
+      if (actuallyApproved) {
+        toast.success(
+          "Manual attendance approved and logged.",
+          "Approved ✅",
+        );
+      } else {
+        toast.error(
+          "Network is too slow right now — the approval did not go through. Tap Approve again in a moment.",
+          "Slow Network",
+        );
+      }
     }
     // Restore buttons (the listener re-renders the card on success anyway).
     if (approveBtn) {
@@ -2642,7 +2671,7 @@ if (mobileMenuBtn && navLinks) {
   }
 
   function buildQrPayload(pin) {
-    // The 4-digit PIN is the real secret — it rotates every 30s and dies with
+    // The 4-digit PIN is the real secret — it rotates every 10s and dies with
     // the session, so screenshots are as useless as shouting the PIN late.
     // The t= nonce just makes every refresh render a unique code visually.
     // The check-in pipeline only reads code + pin (all guardrails still run).
@@ -2651,6 +2680,24 @@ if (mobileMenuBtn && navLinks) {
     return `${location.origin}${location.pathname}?code=${encodeURIComponent(
       courseCode,
     )}&qrpin=${encodeURIComponent(pin)}&t=${nonce}`;
+  }
+
+  // 🎨 Brand QR: stamp the Attendify logo dead-center. Error-correction
+  // level "H" tolerates ~30% occlusion, so a logo occupying ≤22% of the area
+  // still scans reliably (same trick restaurant menu codes use).
+  const QR_LOGO_SRC = "/Attendify Logo.png";
+  let qrLogoImage = null;
+  function loadQrLogo() {
+    if (qrLogoImage) return Promise.resolve(qrLogoImage);
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        qrLogoImage = img;
+        resolve(img);
+      };
+      img.onerror = () => resolve(null); // logo is decorative only
+      img.src = QR_LOGO_SRC;
+    });
   }
 
   async function renderQrOverlay() {
@@ -2667,13 +2714,34 @@ if (mobileMenuBtn && navLinks) {
       courseTitle.textContent = activeCourse.name;
     if (pinText) pinText.textContent = pin;
 
+    // 📐 Maximal QR: in fullscreen landscape the shorter dimension governs —
+    // size the code to it so back-row phones can read it.
+    const qrWidth = Math.min(
+      760,
+      Math.min(window.innerWidth, window.innerHeight) - 80,
+      window.innerWidth - 60,
+    );
     try {
       const lib = await loadQrLibrary();
       const QRCode = lib.default || lib;
       await QRCode.toCanvas(canvas, buildQrPayload(pin), {
-        width: Math.min(420, window.innerWidth - 60),
+        width: Math.max(280, qrWidth),
         margin: 1,
+        errorCorrectionLevel: "H", // headroom for the center logo
+        color: { dark: "#0b1220", light: "#ffffff" },
       });
+      const logo = await loadQrLogo();
+      if (logo) {
+        const ctx = canvas.getContext("2d");
+        const side = Math.round(canvas.width * 0.2); // ≤22% of QR area
+        const x = (canvas.width - side) / 2;
+        const y = (canvas.height - side) / 2;
+        // White plate behind the logo keeps contrast for quiet-zone readers.
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(x, y, side, side);
+        const pad = Math.round(side * 0.08);
+        ctx.drawImage(logo, x + pad, y + pad, side - pad * 2, side - pad * 2);
+      }
     } catch (err) {
       console.warn(
         "QR library unavailable — the live PIN is still displayed:",
@@ -2684,12 +2752,59 @@ if (mobileMenuBtn && navLinks) {
 
   window.closeQrMode = function () {
     const overlay = document.getElementById("qrModeOverlay");
-    if (overlay) overlay.classList.add("hidden");
+    if (overlay) {
+      overlay.classList.add("hidden");
+      overlay.classList.remove("qr-landscape-fallback");
+    }
     if (window.__qrCountdownInterval) {
       clearInterval(window.__qrCountdownInterval);
       window.__qrCountdownInterval = null;
     }
+    releaseQrWakeLock();
+    try {
+      if (document.fullscreenElement) document.exitFullscreen();
+    } catch (_) {
+      /* fullscreen already gone */
+    }
   };
+
+  // 🔋 Wake Lock: rotation is driven by the rep's device — if the phone
+  // sleeps mid-lecture, the code freezes and every student's check-in
+  // starts failing. Holding a wake lock keeps the projector screen alive.
+  let qrWakeLock = null;
+  async function requestQrWakeLock() {
+    try {
+      if ("wakeLock" in navigator) {
+        qrWakeLock = await navigator.wakeLock.request("screen");
+        qrWakeLock.addEventListener("release", () => (qrWakeLock = null));
+      }
+    } catch (_) {
+      /* denied/unsupported — normal screen timeout applies instead */
+    }
+  }
+  function releaseQrWakeLock() {
+    try {
+      if (qrWakeLock) {
+        qrWakeLock.release();
+        qrWakeLock = null;
+      }
+    } catch (_) {
+      /* already released */
+    }
+  }
+  document.addEventListener("visibilitychange", () => {
+    // Wake locks drop when the tab hides — reacquire on return if the
+    // projector overlay is still open.
+    const ov = document.getElementById("qrModeOverlay");
+    if (
+      document.visibilityState === "visible" &&
+      qrWakeLock === null &&
+      ov &&
+      !ov.classList.contains("hidden")
+    ) {
+      requestQrWakeLock();
+    }
+  });
 
   window.showQrMode = function () {
     const overlay = document.getElementById("qrModeOverlay");
@@ -2704,6 +2819,23 @@ if (mobileMenuBtn && navLinks) {
     }
     overlay.classList.remove("hidden");
     renderQrOverlay();
+    requestQrWakeLock();
+
+    // 📱 Landscape for the biggest possible QR. Android/PWA supports the
+    // Screen Orientation API inside fullscreen; iOS Safari can't lock, so
+    // the overlay rotates itself 90° via CSS as the fallback.
+    (async () => {
+      try {
+        if (!document.fullscreenElement) {
+          await overlay.requestFullscreen();
+        }
+        await screen.orientation.lock("landscape");
+        overlay.classList.remove("qr-landscape-fallback");
+      } catch (_) {
+        const isPortrait = window.innerHeight > window.innerWidth;
+        overlay.classList.toggle("qr-landscape-fallback", isPortrait);
+      }
+    })();
 
     // Live countdown to the next rotation, driven by the secret doc timestamp.
     if (window.__qrCountdownInterval)
@@ -2720,7 +2852,7 @@ if (mobileMenuBtn && navLinks) {
         hint.textContent = "";
         return;
       }
-      const rotationMs = 30000;
+      const rotationMs = ((current.pinRotationInterval || 10) * 1000);
       const base = current.pinRotationTime || Date.now();
       const msLeft = Math.max(
         0,
@@ -2735,6 +2867,20 @@ if (mobileMenuBtn && navLinks) {
   const closeQrBtn = document.getElementById("closeQrBtn");
   if (closeQrBtn)
     closeQrBtn.addEventListener("click", () => window.closeQrMode());
+
+  // Window resized while projecting? Re-render the QR at the new maximal
+  // size and refresh the CSS-rotation fallback (portrait↔landscape flip).
+  window.addEventListener("resize", () => {
+    const ov = document.getElementById("qrModeOverlay");
+    if (!ov || ov.classList.contains("hidden")) return;
+    renderQrOverlay();
+    if (ov.classList.contains("qr-landscape-fallback")) {
+      ov.classList.toggle(
+        "qr-landscape-fallback",
+        window.innerHeight > window.innerWidth,
+      );
+    }
+  });
 
   // ============================================================
   // FCM EMERGENCY PUSH (phone buzzes even when the app is closed)
@@ -4127,6 +4273,125 @@ if (mobileMenuBtn && navLinks) {
   }
 
   // --- ASSISTANT REPS MANAGEMENT LOGIC ---
+  // --- 👥 REPEATER MODE — trusted, physically-present students broadcast the
+  // rotating QR from their own phones. Reuse the existing session_assistant
+  // machinery: role auto-revokes at session close, secret listener keeps
+  // every repeater's QR in perfect sync with the rep's rotation clock.
+  const REPEATERS_MAX = 5;
+
+  function openRepeaterPicker() {
+    const modal = document.getElementById("repeaterPickerModal");
+    if (!modal || !activeCourse) return;
+    if (!currentUser || activeCourse.repUid !== currentUser.uid) {
+      toast.warning(
+        "Only the Course Rep can appoint repeater students.",
+        "Rep Only",
+      );
+      return;
+    }
+    renderRepeaterOptions();
+    modal.classList.add("show");
+  }
+
+  function renderRepeaterOptions() {
+    const list = document.getElementById("repeaterOptionsList");
+    if (!list || !activeCourse) return;
+    const currentAssistants = (activeCourse.assistants || [])
+      .map(normalizeMatric);
+    const enrolled = (activeCourse.enrolled || [])
+      .map(normalizeMatric)
+      .filter((m) => m && !currentAssistants.includes(m));
+    if (enrolled.length === 0) {
+      list.innerHTML =
+        '<p style="font-size: 0.8rem; color: var(--muted); text-align: center;">No other enrolled students to appoint.</p>';
+      return;
+    }
+    list.innerHTML = "";
+    enrolled.forEach((matric) => {
+      const member = (activeCourse.members || []).find(
+        (m) => normalizeMatric(m.matric) === matric,
+      );
+      const label = document.createElement("label");
+      label.style.cssText =
+        "display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; font-size: 0.82rem; color: var(--text); cursor: pointer;";
+      label.innerHTML = `<input type="checkbox" value="${matric}" data-repeater-check style="accent-color: var(--teal); width: 16px; height: 16px;"><span><strong>${matric}</strong>${member && member.name ? ` · ${member.name}` : ""}</span>`;
+      list.appendChild(label);
+    });
+  }
+
+  async function grantRepeaters() {
+    const modal = document.getElementById("repeaterPickerModal");
+    const list = document.getElementById("repeaterOptionsList");
+    if (!modal || !list || !activeCourse || !auth.currentUser) return;
+    if (activeCourse.repUid !== auth.currentUser.uid) {
+      toast.warning("Only the Course Rep can grant repeater power.", "Rep Only");
+      return;
+    }
+
+    const checked = Array.from(
+      list.querySelectorAll("input[data-repeater-check]:checked"),
+    ).map((el) => normalizeMatric(el.value));
+    if (checked.length === 0) {
+      toast.warning("Tick at least one present student first.");
+      return;
+    }
+    const alreadyRepeaterCount = (activeCourse.assistants || []).length;
+    if (alreadyRepeaterCount + checked.length > REPEATERS_MAX) {
+      toast.error(
+        `Repeater cap is ${REPEATERS_MAX} per course (including existing assistants) — a QR shown on too many screens multiplies leak risk.`,
+        "Too Many Repeaters",
+      );
+      return;
+    }
+
+    if (!activeCourse.assistants) activeCourse.assistants = [];
+    let granted = 0;
+    for (const matric of checked) {
+      const memberRecord = (activeCourse.members || []).find(
+        (m) => normalizeMatric(m.matric) === matric,
+      );
+      if (memberRecord) {
+        try {
+          await updateDoc(
+            doc(db, "courses", activeCourse.id, "members", memberRecord.uid),
+            { role: "session_assistant" }, // auto-revoked at session close
+          );
+        } catch (err) {
+          console.error("Could not update member role:", err);
+          toast.error(`Failed to assign ${matric}. Skipping.`);
+          continue;
+        }
+      }
+      activeCourse.assistants.push(matric);
+      granted++;
+    }
+
+    if (granted > 0) {
+      await updateCourseInFirestore();
+      renderPortalState();
+      toast.success(
+        `${granted} repeater${granted > 1 ? "s" : ""} live — their apps now show the rotating QR. Power ends when class closes.`,
+        "Repeaters On Air 📡",
+      );
+    }
+    modal.classList.remove("show");
+  }
+
+  const grantRepeatersBtn = document.getElementById("grantRepeatersBtn");
+  if (grantRepeatersBtn)
+    grantRepeatersBtn.addEventListener("click", () => grantRepeaters());
+  const closeRepeaterPickerBtn = document.getElementById(
+    "closeRepeaterPickerBtn",
+  );
+  if (closeRepeaterPickerBtn)
+    closeRepeaterPickerBtn.addEventListener("click", () => {
+      const modal = document.getElementById("repeaterPickerModal");
+      if (modal) modal.classList.remove("show");
+    });
+
+  const repeatersBtn = document.getElementById("repeatersBtn");
+  if (repeatersBtn)
+    repeatersBtn.addEventListener("click", () => openRepeaterPicker());
   const appointAssistantBtn = document.getElementById("appointAssistantBtn");
   if (appointAssistantBtn) {
     appointAssistantBtn.addEventListener("click", async () => {
@@ -4397,6 +4662,11 @@ if (mobileMenuBtn && navLinks) {
   // ============================================================
   // ATTENDANCE MODE SELECTOR — setup-time choice of HOW students verify
   // ============================================================
+  // 🛑 GPS PROTOTYPE TOGGLE — browser geolocation is unreliable/permissive on
+  // desktop web; geofencing reaches its full potential in the native app.
+  // Until then, GPS modes are hidden. Flip to true to re-enable.
+  const GPS_PROTOTYPE_ENABLED = false;
+
   const ATTENDANCE_MODES = {
     qr_mode: {
       icon: "📺",
@@ -4412,21 +4682,77 @@ if (mobileMenuBtn && navLinks) {
       icon: "📍",
       title: "Live GPS (Rep Anchor)",
       desc: "Your live position becomes the fence when you generate.",
+      prototype: true,
     },
     full_combo: {
       icon: "🎯",
       title: "PIN + Device + Hall GPS",
       desc: "Maximum security: PIN + saved-hall geofence + device lock.",
+      prototype: true,
     },
   };
+
+  // 📺 QR DISPLAY CHOICE — projector vs repeater students. Visible only when
+  // the QR + Device Lock mode is selected; choice persists per course.
+  function getQrDisplayChoice() {
+    if (!activeCourse) return "projector";
+    return (
+      localStorage.getItem(`attendify_qrdisplay_${activeCourse.id}`) ||
+      "projector"
+    );
+  }
+
+  function syncQrDisplayChoiceUI() {
+    const row = document.getElementById("qrDisplayChoiceRow");
+    if (!row || !activeCourse) return;
+    const mode = getSelectedAttendanceMode();
+    const isLive =
+      activeCourse.activeSession &&
+      !activeCourse.activeSession.expired &&
+      getAccurateNow() < activeCourse.activeSession.expiresAt;
+    row.classList.toggle("hidden", mode !== "qr_mode" || isLive);
+    const choice = getQrDisplayChoice();
+    row.querySelectorAll("button[data-qr-display]").forEach((btn) => {
+      const active = btn.dataset.qrDisplay === choice;
+      btn.style.borderColor = active ? "var(--teal)" : "var(--border)";
+      btn.style.background = active ? "rgba(45, 224, 201, 0.12)" : "var(--bg)";
+      btn.innerHTML = btn.innerHTML.replace(/ ✓$/, "");
+      if (active) btn.innerHTML += " ✓";
+    });
+  }
+
+  function initQrDisplayChoice() {
+    const row = document.getElementById("qrDisplayChoiceRow");
+    if (!row) return;
+    row.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-qr-display]");
+      if (!btn || !activeCourse) return;
+      localStorage.setItem(
+        `attendify_qrdisplay_${activeCourse.id}`,
+        btn.dataset.qrDisplay,
+      );
+      syncQrDisplayChoiceUI();
+    });
+  }
+  initQrDisplayChoice();
 
   function getSelectedAttendanceMode() {
     if (!activeCourse) return "pin_only";
     const halls = activeCourse.savedHalls || [];
-    return (
+    let mode =
       localStorage.getItem(`attendify_mode_${activeCourse.id}`) ||
-      (halls.length > 0 ? "full_combo" : "pin_only")
-    );
+      (halls.length > 0 ? "full_combo" : "pin_only");
+    // Prototype gating: GPS modes are unavailable while the toggle is off —
+    // silently fall back to the strongest non-GPS mode so a stale saved
+    // selection can never route a session into the disabled path.
+    if (
+      !GPS_PROTOTYPE_ENABLED &&
+      mode !== "qr_mode" &&
+      mode !== "pin_only"
+    ) {
+      mode = "qr_mode";
+    }
+    return mode;
   }
 
   function renderModeCards() {
@@ -4435,6 +4761,7 @@ if (mobileMenuBtn && navLinks) {
     const current = getSelectedAttendanceMode();
     grid.innerHTML = "";
     Object.entries(ATTENDANCE_MODES).forEach(([mode, cfg]) => {
+      if (cfg.prototype && !GPS_PROTOTYPE_ENABLED) return; // prototype gate
       const btn = document.createElement("button");
       btn.type = "button";
       const active = mode === current;
@@ -4455,6 +4782,7 @@ if (mobileMenuBtn && navLinks) {
     const selectEl = document.getElementById("repHallSelect");
     const hint = document.getElementById("modeHint");
     const usesLocation = mode === "full_combo" || mode === "live_gps";
+    syncQrDisplayChoiceUI();
 
     if (selectEl) {
       selectEl.disabled = !usesLocation;
@@ -4735,13 +5063,17 @@ if (mobileMenuBtn && navLinks) {
       );
       const mode = getSelectedAttendanceMode();
 
-      // 📺 QR + Device Lock: students scan the projected rotating QR (or
-      // type the PIN). No GPS fence — createSession shows the confirmation.
+      // 📺 QR + Device Lock: students scan the rotating QR (or type the PIN).
+      // No GPS fence. Where the code lives — projector or repeater students —
+      // is the rep's pre-set choice in the setup card.
       if (mode === "qr_mode") {
         await createSession(randomPin, managerMatric, {
           mode: "no_gps",
           qrMode: true,
         });
+        if (getQrDisplayChoice() === "repeaters") {
+          openRepeaterPicker();
+        }
         return;
       }
 
@@ -4861,7 +5193,9 @@ if (mobileMenuBtn && navLinks) {
 
     const now = getAccurateNow();
     const sessionDurationSeconds = 300; // 5 minutes total session duration
-    const pinRotationIntervalSeconds = 30; // PIN changes every 30 seconds
+    // ⏱️ 10s rotation: a relayed/screenshot code is stale almost instantly —
+    // the whole anti-WhatsApp-relay engine. Grace on the server drops to 2s.
+    const pinRotationIntervalSeconds = 10; // PIN changes every 10 seconds
     const expiresAt = now + sessionDurationSeconds * 1000;
     const locationMode = locData.mode || "no_gps";
 
@@ -4955,7 +5289,7 @@ if (mobileMenuBtn && navLinks) {
       // devices can never disagree about the active PIN.
       const canRotate =
         currentUser && activeCourse.repUid === currentUser.uid;
-      const pinRotationInterval = (session.pinRotationInterval || 30) * 1000; // 30 seconds default
+      const pinRotationInterval = (session.pinRotationInterval || 10) * 1000; // 10s rotation (anti-relay)
       const timeSinceRotation =
         Date.now() - (session.pinRotationTime || Date.now());
       const timeUntilRotation = Math.max(
@@ -5468,6 +5802,44 @@ if (mobileMenuBtn && navLinks) {
     const isSessionActive =
       session && !session.expired && getAccurateNow() < session.expiresAt;
 
+    // 🆙 REPEATER PROMOTION (mid-session): a student granted repeater power
+    // while their portal is already open reloads the same activeCourse through
+    // the course listener, but entered as a plain student — so swap them to
+    // staff chrome and start the staff listeners they're now entitled to
+    // (the secret listener is what feeds the live PIN into their QR card).
+    const repControlsEl = document.getElementById("repControls");
+    const studentControlsEl = document.getElementById("studentControls");
+    const wasStudentView =
+      repControlsEl && repControlsEl.classList.contains("hidden");
+    if ((isRep || isAssistant) && wasStudentView) {
+      if (repControlsEl) repControlsEl.classList.remove("hidden");
+      if (studentControlsEl) studentControlsEl.classList.add("hidden");
+      const managementToolbarPromo = document.getElementById(
+        "managementToolbar",
+      );
+      if (managementToolbarPromo) {
+        managementToolbarPromo.classList.remove("hidden");
+      }
+      if (typeof syncDrawerTabVisibility === "function") {
+        syncDrawerTabVisibility();
+        showDrawerView("checkin");
+      }
+      startSessionSecretListener(activeCourse.id);
+      startDeviceFlagsListener(activeCourse.id);
+      startManualRequestsListener(activeCourse.id);
+      startAbsentFlagsListener(activeCourse.id);
+      startSessionLiveListener(activeCourse.id);
+    } else if (!isRep && !isAssistant && !wasStudentView) {
+      // Revoked mid-session (session close flips session_assistant back to
+      // student while we're watching): restore the student chrome.
+      if (repControlsEl) repControlsEl.classList.add("hidden");
+      if (studentControlsEl) studentControlsEl.classList.remove("hidden");
+      if (typeof syncDrawerTabVisibility === "function") {
+        syncDrawerTabVisibility();
+      }
+      if (activeCourse.id) startMyManualRequestListener(activeCourse.id);
+    }
+
     // ⚠️ ANCHOR HEALTH: clustered GPS rejections mean the rep's captured
     // anchor is probably off (indoor WiFi-positioning lies). Surface it so
     // the rep can re-anchor or switch modes instead of students failing
@@ -5532,7 +5904,17 @@ if (mobileMenuBtn && navLinks) {
         if (closeClassWrapper) closeClassWrapper.classList.remove("hidden");
 
         const showQrBtnEl = document.getElementById("showQrBtn");
-        if (showQrBtnEl) showQrBtnEl.classList.remove("hidden");
+        // Authoritative source is the LIVE session's qrMode flag (set at
+        // creation), not the viewer's localStorage mode — repeaters never
+        // picked a mode on their own device.
+        const isQrLive =
+          session &&
+          session.qrMode === true &&
+          !session.expired &&
+          getAccurateNow() < session.expiresAt;
+        const repeatersBtnEl = document.getElementById("repeatersBtn");
+        if (showQrBtnEl) showQrBtnEl.classList.toggle("hidden", !isQrLive);
+        if (repeatersBtnEl) repeatersBtnEl.classList.toggle("hidden", !isQrLive);
         // Session live — mode/hall selection is locked in; hide the pickers.
         const modeSectionLive = document.getElementById("attendanceModeSection");
         if (modeSectionLive) modeSectionLive.classList.add("hidden");
@@ -5581,6 +5963,8 @@ if (mobileMenuBtn && navLinks) {
 
         const showQrBtnEl = document.getElementById("showQrBtn");
         if (showQrBtnEl) showQrBtnEl.classList.add("hidden");
+        const repeatersBtnEl = document.getElementById("repeatersBtn");
+        if (repeatersBtnEl) repeatersBtnEl.classList.add("hidden");
         // No live session → bring the setup pickers back.
         const modeSectionIdle = document.getElementById("attendanceModeSection");
         if (modeSectionIdle) modeSectionIdle.classList.remove("hidden");

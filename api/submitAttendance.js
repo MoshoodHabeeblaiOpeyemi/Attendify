@@ -147,7 +147,7 @@ module.exports = async (req, res) => {
     const currentPin = String(sessionData.pin || "");
     const previousPin = sessionData.previousPin ? String(sessionData.previousPin) : null;
     const pinRotationTime = sessionData.pinRotationTime || 0;
-    const gracePeriodMs = 5000; // 5-second grace period
+    const gracePeriodMs = 2000; // 2s grace — at 10s rotation a 5s grace would leave the old PIN half-valid for 20s
     const now = Date.now();
     
     const isCurrentPinValid = String(pin) === currentPin;

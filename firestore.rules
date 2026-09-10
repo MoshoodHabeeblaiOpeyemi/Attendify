@@ -128,11 +128,11 @@ service cloud.firestore {
         // The backend uses Firebase Admin credentials and bypasses client rules.
         allow create: if isCourseRep(courseId)
           && request.resource.data.uid == memberUid
-          && request.resource.data.role in ['student', 'assistant', 'rep'];
+          && request.resource.data.role in ['student', 'assistant', 'session_assistant', 'rep'];
 
         allow update: if isCourseRep(courseId)
           && request.resource.data.uid == resource.data.uid
-          && request.resource.data.role in ['student', 'assistant', 'rep'];
+          && request.resource.data.role in ['student', 'assistant', 'session_assistant', 'rep'];
 
         allow delete: if isCourseRep(courseId)
           || (signedIn() && request.auth.uid == memberUid);

@@ -257,6 +257,27 @@
             </p>
             <div id="modeCardsGrid" class="mode-cards-grid"></div>
             <div id="modeHint" style="font-size: 0.75rem; color: var(--muted); margin-top: 8px; line-height: 1.4;"></div>
+            <!-- 📺 QR DISPLAY CHOICE — appears when QR + Device Lock is selected:
+                 where does the big rolling code live? Projector or trusted
+                 physically-present students acting as live "repeaters". -->
+            <div id="qrDisplayChoiceRow" class="hidden"
+              style="margin-top: 10px; padding: 10px; border-radius: 10px; background: var(--bg); border: 1.5px dashed var(--teal);">
+              <p style="font-size: 0.75rem; font-weight: 700; color: var(--navy); margin: 0 0 8px;">
+                Where will the rotating QR be shown?
+              </p>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button type="button" data-qr-display="projector"
+                  style="flex: 1; min-width: 130px; padding: 10px 8px; border-radius: 10px; cursor: pointer; font-size: 0.75rem; border: 1.5px solid var(--border); background: var(--bg); color: var(--text);">
+                  <div style="font-weight: 700;">📺 Projector</div>
+                  <div style="color: var(--muted); margin-top: 2px;">Halls with a projector/cast — auto-landscape, biggest QR</div>
+                </button>
+                <button type="button" data-qr-display="repeaters"
+                  style="flex: 1; min-width: 130px; padding: 10px 8px; border-radius: 10px; cursor: pointer; font-size: 0.75rem; border: 1.5px solid var(--border); background: var(--bg); color: var(--text);">
+                  <div style="font-weight: 700;">👥 Repeater Students</div>
+                  <div style="color: var(--muted); margin-top: 2px;">No projector — pick trusted students in the hall to show the QR</div>
+                </button>
+              </div>
+            </div>
           </div>
 
           <button id="generatePinBtn" class="btn">
@@ -273,14 +294,20 @@
             <span id="pinCodeText"
               style="font-size: 2rem; font-weight: bold; color: var(--teal); letter-spacing: 8px;">----</span>
             <p style="font-size: 0.75rem; color: var(--muted); margin-top: 8px;">New PIN in: <strong
-                id="pinRotationTimer" style="color: var(--navy);">0:30</strong></p>
+                id="pinRotationTimer" style="color: var(--navy);">0:10</strong></p>
           </div>
 
           <!-- MODE 2: PROJECTOR QR (large halls with a screen) -->
-          <button id="showQrBtn" type="button" class="btn btn-outline hidden"
-            style="width: 100%; font-size: 0.85rem; margin-top: 10px;">
-            <i data-lucide="qr-code"></i> 📺 Display Rotating QR (Projector Mode)
-          </button>
+          <div style="display: flex; gap: 8px; margin-top: 10px;">
+            <button id="showQrBtn" type="button" class="btn btn-outline hidden"
+              style="flex: 1; font-size: 0.85rem;">
+              <i data-lucide="qr-code"></i> 📺 Show Rotating QR
+            </button>
+            <button id="repeatersBtn" type="button" class="btn btn-outline hidden"
+              style="flex: 1; font-size: 0.85rem;">
+              <i data-lucide="users"></i> 👥 Repeaters
+            </button>
+          </div>
 
           <!-- CLOSE CLASS & SAVE -->
           <div id="closeClassWrapper" class="hidden"
@@ -779,7 +806,7 @@
       <div class="guide-section" style="border: 1.5px solid var(--border);">
         <strong style="color: var(--navy);"><i data-lucide="shield"></i> The Invisible Shield — Why You Can Trust the Numbers</strong>
         <div style="font-size: 0.82rem; color: var(--text-primary); display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
-          <div><span class="guide-check">⏱️</span> <strong>Rotating PIN</strong> — the code dies every 30s, so a WhatsApp screenshot is already expired by the time it lands.</div>
+          <div><span class="guide-check">⏱️</span> <strong>Rotating PIN</strong> — the code dies every 10s, so a WhatsApp screenshot is already expired by the time it lands.</div>
           <div><span class="guide-check">🔒</span> <strong>Device Lock</strong> — the first phone you use is bound to your matric forever. One phone, one student.</div>
           <div><span class="guide-check">📍</span> <strong>Geofence</strong> — check-ins only count inside the hall area. No hostel check-ins, no "I'm on my way."</div>
           <div><span class="guide-check">🤝</span> <strong>Fail-Safe override</strong> — real problems (dead GPS, dropped network) get a human rescue hatch. Never a dead end.</div>
@@ -944,6 +971,31 @@
     <button id="closeQrBtn" type="button" class="btn" style="width: auto; padding: 8px 22px; margin-top: 6px;">
       ✖ Close Projector View
     </button>
+  </div>
+
+  <!-- 👥 REPEATER PICKER — choose trusted, physically-present students to
+       broadcast the rotating QR from their own phones (session-scoped). -->
+  <div id="repeaterPickerModal" class="modal">
+    <div class="modal-card" style="max-width: 440px;">
+      <h3 style="color: var(--navy); margin-bottom: 6px;">
+        <i data-lucide="users"></i> Pick Repeater Students
+      </h3>
+      <p style="font-size: 0.8rem; color: var(--muted); margin-bottom: 12px;">
+        Choose up to <strong>5</strong> trusted students who are <strong>physically in the hall</strong> right now.
+        Each becomes a session repeater: their app shows the same rotating QR for nearby students to scan.
+        Their power ends automatically when this class closes.
+      </p>
+      <div id="repeaterOptionsList"
+        style="max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; padding: 8px; margin-bottom: 12px; background: var(--bg);"></div>
+      <div style="display: flex; gap: 8px;">
+        <button id="grantRepeatersBtn" class="btn" style="flex: 1; font-size: 0.85rem;">
+          <i data-lucide="broadcast"></i> Grant Repeater Power
+        </button>
+        <button id="closeRepeaterPickerBtn" class="btn btn-outline" style="flex: 0 0 auto; font-size: 0.85rem;">
+          Cancel
+        </button>
+      </div>
+    </div>
   </div>
 
   <!-- TOAST CONTAINER -->
