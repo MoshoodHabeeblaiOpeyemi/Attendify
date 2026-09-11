@@ -134,9 +134,9 @@ service cloud.firestore {
           && request.resource.data.uid == resource.data.uid
           && request.resource.data.role in ['student', 'assistant', 'session_assistant', 'rep']
           && (
-            // 🎯 PROOF-OF-PRESENCE: appointing a session repeater is only
+            // 🎯 PROOF-OF-PRESENCE: appointing a session hotspot is only
             // legal while a live session exists AND the candidate has ALREADY
-            // scanned in for it. The grantRepeater API enforces the same —
+            // scanned in for it. The grantHotspot API enforces the same —
             // this rule closes the direct client-write path too. You cannot
             // scan the rep's screen from home, so an absent friend can never
             // be handed the rotating code.
@@ -217,11 +217,11 @@ service cloud.firestore {
         allow write: if false;
       }
 
-      // 📡 PUBLIC REPEATER LOG — transparency by design: every enrolled
-      // student can see who was granted repeater power, when, and by whom.
-      // Written ONLY by the trusted backend (the grantRepeater API);
+      // 📡 PUBLIC HOTSPOT LOG — transparency by design: every enrolled
+      // student can see who was granted hotspot power, when, and by whom.
+      // Written ONLY by the trusted backend (the grantHotspot API);
       // immutable from any client.
-      match /repeaterLog/{logId} {
+      match /hotspotLog/{logId} {
         allow read: if isCourseMember(courseId) || isCourseStaff(courseId);
         allow write: if false;
       }

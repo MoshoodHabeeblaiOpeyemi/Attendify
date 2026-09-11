@@ -21,7 +21,7 @@ try {
 }
 
 const db = getFirestore();
-const REPEATERS_MAX = 5;
+const HOTSPOTS_MAX = 5;
 
 module.exports = async (req, res) => {
   if (req.method !== "POST")
@@ -46,7 +46,7 @@ module.exports = async (req, res) => {
     if (courseSnap.data().repUid !== decoded.uid)
       return res
         .status(403)
-        .json({ error: "Only the course rep can appoint repeaters." });
+        .json({ error: "Only the course rep can appoint hotspots." });
 
     const liveSnap = await courseRef.collection("session").doc("live").get();
     if (
@@ -56,7 +56,7 @@ module.exports = async (req, res) => {
     ) {
       return res.status(409).json({
         error:
-          "No live session. Repeaters can only be appointed during an active class.",
+          "No live session. hotspots can only be appointed during an active class.",
       });
     }
     const sessionExpiresAt = liveSnap.data().expiresAt;
@@ -79,17 +79,17 @@ module.exports = async (req, res) => {
     if (target.data().role !== "student")
       return res
         .status(409)
-        .json({ error: "Only regular students can be appointed repeaters." });
+        .json({ error: "Only regular students can be appointed hotspots." });
     if (
       membersSnap.docs.some(
         (d) => d.data().role === "session_assistant" && d.id === target.id,
       )
     )
-      return res.status(409).json({ error: "Already a repeater." });
+      return res.status(409).json({ error: "Already a hotspot." });
 
     // 🎯 PROOF-OF-PRESENCE (the strict rule): the candidate must ALREADY have
     // scanned in for THIS session. You cannot scan the rep's screen from
-    // home — so an absent friend can never be granted repeater power, and
+    // home — so an absent friend can never be granted hotspot power, and
     // the rotating code never reaches a device outside the hall via grants.
     if (!attendees.includes(normalizedTarget)) {
       return res.status(403).json({
@@ -97,13 +97,13 @@ module.exports = async (req, res) => {
       });
     }
 
-    // Cap the blast radius: the QR lives on at most REPEATERS_MAX screens.
-    const currentRepeaters = membersSnap.docs.filter(
+    // Cap the blast radius: the QR lives on at most HOTSPOTS_MAX screens.
+    const currenthotspots = membersSnap.docs.filter(
       (d) => d.data().role === "session_assistant",
     );
-    if (currentRepeaters.length >= REPEATERS_MAX) {
+    if (currenthotspots.length >= HOTSPOTS_MAX) {
       return res.status(409).json({
-        error: `Repeater cap is ${REPEATERS_MAX} per class — a QR shown on too many screens multiplies leak risk.`,
+        error: `Hotspot cap is ${HOTSPOTS_MAX} per class — a QR shown on too many screens multiplies leak risk.`,
       });
     }
 
@@ -116,10 +116,10 @@ module.exports = async (req, res) => {
       tx.update(target.ref, { role: "session_assistant" });
       tx.update(courseRef, { assistants: FieldValue.arrayUnion(normalizedTarget) });
       // 📡 PUBLIC GRANT LOG — every enrolled student can see who was granted
-      // repeater power, when, and by whom. Accountability is written in data.
+      // hotspot power, when, and by whom. Accountability is written in data.
       tx.set(
         courseRef
-          .collection("repeaterLog")
+          .collection("hotspotLog")
           .doc(`${sessionExpiresAt}_${normalizedTarget}`),
         {
           matric: normalizedTarget,
@@ -135,12 +135,12 @@ module.exports = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: `${normalizedTarget} is now a repeater — power ends when class closes.`,
+      message: `${normalizedTarget} is now a hotspot — power ends when class closes.`,
     });
   } catch (error) {
-    console.error("Grant repeater error:", error);
+    console.error("Grant hotspot error:", error);
     return res
       .status(500)
-      .json({ error: "Server error while appointing repeater." });
+      .json({ error: "Server error while appointing hotspot." });
   }
 };

@@ -1,6 +1,6 @@
 // 🔖 BUILD MARKER — proves which version of app.js the browser is running.
 // If your console does NOT print "build 256052f-drawer", the running JS is stale.
-console.log("%cAttendify build: proof-of-presence + public-transparency (repeaters must be checked-in first, grants public to the whole class, archives tag auto-marked + repeaters, reject reasons, removal alerts)", "color:#6C5DD3;font-weight:bold");
+console.log("%cAttendify build: proof-of-presence + public-transparency (hotspots must be checked-in first, grants public to the whole class, archives tag auto-marked + hotspots, reject reasons, removal alerts)", "color:#6C5DD3;font-weight:bold");
 
 // --- FIREBASE IMPORTS & CONFIGURATION ---
 // --- FIREBASE IMPORTS & CONFIGURATION ---
@@ -3090,7 +3090,7 @@ if (mobileMenuBtn && navLinks) {
   }
 
   function stopPortalListeners() {
-    stopRepeaterLogListener();
+    stopHotspotLogListener();
     if (unsubscribeSessionLive) {
       unsubscribeSessionLive();
       unsubscribeSessionLive = null;
@@ -3269,7 +3269,7 @@ if (mobileMenuBtn && navLinks) {
         startSecurityEventsListener(courseId);
       }
       renderLectureHallOptions();
-      syncRepeaterChrome();
+      syncHotspotChrome();
     } else {
       if (repControls) repControls.classList.add("hidden");
       if (studentControls) studentControls.classList.remove("hidden");
@@ -3676,9 +3676,9 @@ if (mobileMenuBtn && navLinks) {
         .includes(userMatric),
     );
   }
-  // A session repeater is a TRUSTED STUDENT promoted for one class only —
+  // A session hotspot is a TRUSTED STUDENT promoted for one class only —
   // not real staff. Their single job: display the rotating QR.
-  function isSessionRepeaterForActiveCourse() {
+  function isSessionHotspotForActiveCourse() {
     if (!activeCourse || !currentUser) return false;
     if (isRepForActiveCourse()) return false;
     if (!isAssistantForActiveCourse()) return false;
@@ -3688,29 +3688,29 @@ if (mobileMenuBtn && navLinks) {
     return Boolean(rec && rec.role === "session_assistant");
   }
 
-  // 📡 REPEATER CHROME: strips every rep-only control from a repeater's
+  // 📡 HOTSPOT CHROME: strips every rep-only control from a hotspot's
   // screen — setup card, Close Class, headcount, manual queue, maintenance
   // toolbar, Mission-Control drawer — leaving only the live QR card and the
   // fullscreen "Show Rotating QR" button. closeSession.js matches this by
   // refusing session_assistant close requests server-side.
-  function syncRepeaterChrome() {
+  function syncHotspotChrome() {
     if (!activeCourse || !currentUser) return;
     if (!isRepForActiveCourse() && !isAssistantForActiveCourse()) {
       const rc = document.getElementById("repControls");
-      if (rc) rc.classList.remove("repeater-view");
+      if (rc) rc.classList.remove("hotspot-view");
       return; // plain student — the student chrome handles everything
     }
-    const isSessionRepeater = isSessionRepeaterForActiveCourse();
+    const isSessionHotspot = isSessionHotspotForActiveCourse();
     const repControls = document.getElementById("repControls");
     if (repControls && !repControls.classList.contains("hidden")) {
-      repControls.classList.toggle("repeater-view", isSessionRepeater);
+      repControls.classList.toggle("hotspot-view", isSessionHotspot);
     }
     const toolbar = document.getElementById("managementToolbar");
-    if (toolbar) toolbar.classList.toggle("hidden", isSessionRepeater);
+    if (toolbar) toolbar.classList.toggle("hidden", isSessionHotspot);
     const title = document.getElementById("repControlsTitle");
     if (title) {
-      title.innerHTML = isSessionRepeater
-        ? '<i data-lucide="radio"></i> 📡 Repeater Screen — hold this up for students'
+      title.innerHTML = isSessionHotspot
+        ? '<i data-lucide="radio"></i> 📡 Hotspot Screen — hold this up for students'
         : '<i data-lucide="shield-check"></i> Course Rep Control Center';
       if (typeof refreshIcons === "function") refreshIcons();
     }
@@ -3728,11 +3728,11 @@ if (mobileMenuBtn && navLinks) {
         !portalSection.classList.contains("hidden"),
     );
     // Staff chrome: the drawer is for the rep and permanent assistants —
-    // session repeaters get the focused repeater screen instead (their only
+    // session hotspots get the focused hotspot screen instead (their only
     // job is the QR, and everything they need lives on the portal itself).
     const staff =
       isRepForActiveCourse() ||
-      (isAssistantForActiveCourse() && !isSessionRepeaterForActiveCourse());
+      (isAssistantForActiveCourse() && !isSessionHotspotForActiveCourse());
     drawerTab.classList.toggle("hidden", !(inPortal && staff));
     if (!(inPortal && staff)) closePortalDrawer();
   }
@@ -4332,28 +4332,28 @@ if (mobileMenuBtn && navLinks) {
   }
 
   // --- ASSISTANT REPS MANAGEMENT LOGIC ---
-  // --- 👥 REPEATER MODE — trusted, physically-present students broadcast the
+  // --- 👥 HOTSPOT MODE — trusted, physically-present students broadcast the
   // rotating QR from their own phones. Reuse the existing session_assistant
   // machinery: role auto-revokes at session close, secret listener keeps
-  // every repeater's QR in perfect sync with the rep's rotation clock.
-  const REPEATERS_MAX = 5;
+  // every hotspot's QR in perfect sync with the rep's rotation clock.
+  const HOTSPOTS_MAX = 5;
 
-  function openRepeaterPicker() {
-    const modal = document.getElementById("repeaterPickerModal");
+  function openHotspotPicker() {
+    const modal = document.getElementById("hotspotPickerModal");
     if (!modal || !activeCourse) return;
     if (!currentUser || activeCourse.repUid !== currentUser.uid) {
       toast.warning(
-        "Only the Course Rep can appoint repeater students.",
+        "Only the Course Rep can appoint Hotspot students.",
         "Rep Only",
       );
       return;
     }
-    renderRepeaterOptions();
+    renderHotspotOptions();
     modal.classList.add("show");
   }
 
-  function renderRepeaterOptions() {
-    const list = document.getElementById("repeaterOptionsList");
+  function renderHotspotOptions() {
+    const list = document.getElementById("hotspotOptionsList");
     if (!list || !activeCourse) return;
 
     // 🎯 PROOF-OF-PRESENCE picker: candidates must be regular students who
@@ -4373,7 +4373,7 @@ if (mobileMenuBtn && navLinks) {
 
     if (!isSessionLive) {
       list.innerHTML =
-        '<p style="font-size: 0.8rem; color: var(--muted); text-align: center;">No live session. Start the class first — repeaters can only be picked from students who have already checked in (proof-of-presence).</p>';
+        '<p style="font-size: 0.8rem; color: var(--muted); text-align: center;">No live session. Start the class first — hotspots can only be picked from students who have already checked in (proof-of-presence).</p>';
       return;
     }
 
@@ -4391,7 +4391,7 @@ if (mobileMenuBtn && navLinks) {
 
     if (eligible.length === 0) {
       list.innerHTML =
-        '<p style="font-size: 0.8rem; color: var(--muted); text-align: center;">No eligible repeaters yet — a student must scan the code (or type the PIN) first. Everyone checked in appears here instantly.</p>';
+        '<p style="font-size: 0.8rem; color: var(--muted); text-align: center;">No eligible hotspots yet — a student must scan the code (or type the PIN) first. Everyone checked in appears here instantly.</p>';
       return;
     }
 
@@ -4401,40 +4401,40 @@ if (mobileMenuBtn && navLinks) {
       const label = document.createElement("label");
       label.style.cssText =
         "display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; font-size: 0.82rem; color: var(--text); cursor: pointer;";
-      label.innerHTML = `<input type="checkbox" value="${matric}" data-repeater-check style="accent-color: var(--teal); width: 16px; height: 16px;"><span><strong>${matric}</strong>${member.name ? ` · ${member.name}` : ""} <span style="color: #28a745; font-size: 0.7rem;">✅ checked in</span></span>`;
+      label.innerHTML = `<input type="checkbox" value="${matric}" data-hotspot-check style="accent-color: var(--teal); width: 16px; height: 16px;"><span><strong>${matric}</strong>${member.name ? ` · ${member.name}` : ""} <span style="color: #28a745; font-size: 0.7rem;">✅ checked in</span></span>`;
       list.appendChild(label);
     });
   }
 
-  async function grantRepeaters() {
-    const modal = document.getElementById("repeaterPickerModal");
-    const list = document.getElementById("repeaterOptionsList");
+  async function granthotspots() {
+    const modal = document.getElementById("hotspotPickerModal");
+    const list = document.getElementById("hotspotOptionsList");
     if (!modal || !list || !activeCourse || !auth.currentUser) return;
     if (activeCourse.repUid !== auth.currentUser.uid) {
-      toast.warning("Only the Course Rep can grant repeater power.", "Rep Only");
+      toast.warning("Only the Course Rep can grant Hotspot power.", "Rep Only");
       return;
     }
 
     const checked = Array.from(
-      list.querySelectorAll("input[data-repeater-check]:checked"),
+      list.querySelectorAll("input[data-hotspot-check]:checked"),
     ).map((el) => normalizeMatric(el.value));
     if (checked.length === 0) {
       toast.warning("Tick at least one checked-in student first.");
       return;
     }
     // Fast client-side feedback; the server enforces the same cap strictly.
-    const currentRepeaterCount = (activeCourse.members || []).filter(
+    const currentHotspotCount = (activeCourse.members || []).filter(
       (m) => m.role === "session_assistant",
     ).length;
-    if (currentRepeaterCount + checked.length > REPEATERS_MAX) {
+    if (currentHotspotCount + checked.length > HOTSPOTS_MAX) {
       toast.error(
-        `Repeater cap is ${REPEATERS_MAX} per class — a QR shown on too many screens multiplies leak risk.`,
-        "Too Many Repeaters",
+        `Hotspot cap is ${HOTSPOTS_MAX} per class — a QR shown on too many screens multiplies leak risk.`,
+        "Too Many Hotspots",
       );
       return;
     }
 
-    const grantBtn = document.getElementById("grantRepeatersBtn");
+    const grantBtn = document.getElementById("granthotspotsBtn");
     if (grantBtn) {
       grantBtn.disabled = true;
       grantBtn.textContent = "⏳ Granting…";
@@ -4446,7 +4446,7 @@ if (mobileMenuBtn && navLinks) {
       for (const matric of checked) {
         try {
           const response = await fetchWithTimeout(
-            "/api/grantRepeater",
+            "/api/grantHotspot",
             {
               method: "POST",
               headers: {
@@ -4464,7 +4464,7 @@ if (mobileMenuBtn && navLinks) {
           if (!response.ok) throw new Error(result.error || "Grant failed.");
           granted++;
         } catch (err) {
-          console.error("Grant repeater error:", err);
+          console.error("Grant hotspot error:", err);
           failures.push(err.message || "Unknown error");
         }
       }
@@ -4472,18 +4472,18 @@ if (mobileMenuBtn && navLinks) {
       if (grantBtn) {
         grantBtn.disabled = false;
         grantBtn.innerHTML =
-          '<i data-lucide="broadcast"></i> Grant Repeater Power';
+          '<i data-lucide="broadcast"></i> Grant Hotspot Power';
         refreshIcons();
       }
     }
 
     if (granted > 0) {
       toast.success(
-        `${granted} repeater${granted > 1 ? "s" : ""} on air — the whole class can see who they are, and the grant is permanently logged.`,
-        "Repeaters On Air 📡",
+        `${granted} hotspot${granted > 1 ? "s" : ""} on air — the whole class can see who they are, and the grant is permanently logged.`,
+        "Hotspots On Air 📡",
       );
-      renderRepeaterOptions();
-      renderRepeaterStrip();
+      renderHotspotOptions();
+      renderHotspotStrip();
     }
     if (failures.length > 0) {
       toast.error(
@@ -4496,56 +4496,56 @@ if (mobileMenuBtn && navLinks) {
     modal.classList.remove("show");
   }
 
-  // 📡 PUBLIC REPEATER STRIP + GRANT LOG — transparency for the whole class.
+  // 📡 PUBLIC HOTSPOT STRIP + GRANT LOG — transparency for the whole class.
   // Everyone enrolled sees who holds the rotating QR right now, granted by
-  // whom and when. The log is backend-written (grantRepeater API) and
+  // whom and when. The log is backend-written (grantHotspot API) and
   // immutable from any client.
-  let unsubscribeRepeaterLog = null;
-  let repeaterLogCourseId = null;
-  let repeaterLogCache = [];
+  let unsubscribeHotspotLog = null;
+  let hotspotLogCourseId = null;
+  let hotspotLogCache = [];
 
-  function ensureRepeaterLogListener() {
+  function ensureHotspotLogListener() {
     if (!activeCourse || !activeCourse.id || !auth.currentUser) return;
-    if (unsubscribeRepeaterLog && repeaterLogCourseId === activeCourse.id)
+    if (unsubscribeHotspotLog && hotspotLogCourseId === activeCourse.id)
       return;
-    if (unsubscribeRepeaterLog) {
-      unsubscribeRepeaterLog();
-      unsubscribeRepeaterLog = null;
+    if (unsubscribeHotspotLog) {
+      unsubscribeHotspotLog();
+      unsubscribeHotspotLog = null;
     }
-    repeaterLogCourseId = activeCourse.id;
-    unsubscribeRepeaterLog = onSnapshot(
+    hotspotLogCourseId = activeCourse.id;
+    unsubscribeHotspotLog = onSnapshot(
       query(
-        collection(db, "courses", activeCourse.id, "repeaterLog"),
+        collection(db, "courses", activeCourse.id, "hotspotLog"),
         orderBy("grantedAt", "desc"),
         limit(30),
       ),
       (snap) => {
-        repeaterLogCache = snap.docs.map((d) => ({
+        hotspotLogCache = snap.docs.map((d) => ({
           id: d.id,
           ...d.data(),
         }));
-        renderRepeaterStrip();
+        renderHotspotStrip();
       },
-      (err) => console.error("Repeater log listener error:", err),
+      (err) => console.error("Hotspot log listener error:", err),
     );
   }
 
-  function stopRepeaterLogListener() {
-    if (unsubscribeRepeaterLog) {
-      unsubscribeRepeaterLog();
-      unsubscribeRepeaterLog = null;
-      repeaterLogCourseId = null;
-      repeaterLogCache = [];
+  function stopHotspotLogListener() {
+    if (unsubscribeHotspotLog) {
+      unsubscribeHotspotLog();
+      unsubscribeHotspotLog = null;
+      hotspotLogCourseId = null;
+      hotspotLogCache = [];
     }
   }
 
-  function renderRepeaterStrip() {
-    const strip = document.getElementById("repeaterStrip");
+  function renderHotspotStrip() {
+    const strip = document.getElementById("hotspotStrip");
     if (!strip || !activeCourse) return;
-    const repeaters = (activeCourse.members || []).filter(
+    const hotspots = (activeCourse.members || []).filter(
       (m) => m.role === "session_assistant",
     );
-    if (repeaters.length === 0) {
+    if (hotspots.length === 0) {
       strip.classList.add("hidden");
       strip.innerHTML = "";
       return;
@@ -4554,10 +4554,10 @@ if (mobileMenuBtn && navLinks) {
     const sessionExpiresAt = activeCourse.activeSession
       ? activeCourse.activeSession.expiresAt
       : null;
-    const chips = repeaters
+    const chips = hotspots
       .map((m) => {
         const matric = normalizeMatric(m.matric);
-        const log = repeaterLogCache.find(
+        const log = hotspotLogCache.find(
           (l) =>
             normalizeMatric(l.matric) === matric &&
             (!sessionExpiresAt || l.sessionExpiresAt === sessionExpiresAt),
@@ -4575,24 +4575,24 @@ if (mobileMenuBtn && navLinks) {
         return `<span style="display:inline-block; background: var(--bg); border:1px solid var(--border); border-radius:999px; padding:3px 10px; margin:2px 4px 2px 0;">📡 <strong>${m.name || matric}</strong> (${matric}) — granted by <strong>${by}</strong>${when ? ` at ${when}` : ""}</span>`;
       })
       .join(" ");
-    strip.innerHTML = `<strong>📡 Repeating this class:</strong> ${chips}<div style="font-size:0.72rem; color:var(--muted); margin-top:4px;">Repeaters can only be picked from students who already checked in (proof-of-presence). Grants are public and end when class closes.</div>`;
+    strip.innerHTML = `<strong>📡 Hotspots this class:</strong> ${chips}<div style="font-size:0.72rem; color:var(--muted); margin-top:4px;">Hotspots can only be picked from students who already checked in (proof-of-presence). Grants are public and end when class closes.</div>`;
   }
 
-  const grantRepeatersBtn = document.getElementById("grantRepeatersBtn");
-  if (grantRepeatersBtn)
-    grantRepeatersBtn.addEventListener("click", () => grantRepeaters());
-  const closeRepeaterPickerBtn = document.getElementById(
-    "closeRepeaterPickerBtn",
+  const granthotspotsBtn = document.getElementById("granthotspotsBtn");
+  if (granthotspotsBtn)
+    granthotspotsBtn.addEventListener("click", () => granthotspots());
+  const closeHotspotPickerBtn = document.getElementById(
+    "closeHotspotPickerBtn",
   );
-  if (closeRepeaterPickerBtn)
-    closeRepeaterPickerBtn.addEventListener("click", () => {
-      const modal = document.getElementById("repeaterPickerModal");
+  if (closeHotspotPickerBtn)
+    closeHotspotPickerBtn.addEventListener("click", () => {
+      const modal = document.getElementById("hotspotPickerModal");
       if (modal) modal.classList.remove("show");
     });
 
-  const repeatersBtn = document.getElementById("repeatersBtn");
-  if (repeatersBtn)
-    repeatersBtn.addEventListener("click", () => openRepeaterPicker());
+  const hotspotsBtn = document.getElementById("hotspotsBtn");
+  if (hotspotsBtn)
+    hotspotsBtn.addEventListener("click", () => openHotspotPicker());
   const appointAssistantBtn = document.getElementById("appointAssistantBtn");
   if (appointAssistantBtn) {
     appointAssistantBtn.addEventListener("click", async () => {
@@ -4893,7 +4893,7 @@ if (mobileMenuBtn && navLinks) {
     },
   };
 
-  // 📺 QR DISPLAY CHOICE — projector vs repeater students. Visible only when
+  // 📺 QR DISPLAY CHOICE — projector vs hotspot students. Visible only when
   // the QR + Device Lock mode is selected; choice persists per course.
   function getQrDisplayChoice() {
     if (!activeCourse) return "projector";
@@ -5265,7 +5265,7 @@ if (mobileMenuBtn && navLinks) {
       const mode = getSelectedAttendanceMode();
 
       // 📺 QR + Device Lock: students scan the rotating QR (or type the PIN).
-      // No GPS fence. Where the code lives — projector or repeater students —
+      // No GPS fence. Where the code lives — projector or hotspot students —
       // is the rep's pre-set choice in the setup card.
       if (mode === "qr_mode") {
         await createSession(randomPin, managerMatric, {
@@ -5273,11 +5273,11 @@ if (mobileMenuBtn && navLinks) {
           qrMode: true,
         });
         // 🎯 Proof-of-presence: nobody has checked in at creation time, so
-        // the repeater picker would be empty. Guide the rep to appoint after
+        // the hotspot picker would be empty. Guide the rep to appoint after
         // the first check-ins land instead.
-        if (getQrDisplayChoice() === "repeaters") {
+        if (getQrDisplayChoice() === "hotspots") {
           toast.info(
-            "Once a few students check in, tap 👥 Repeaters to appoint who broadcasts the QR — only checked-in students are eligible.",
+            "Once a few students check in, tap 👥 Hotspots to appoint who broadcasts the QR — only checked-in students are eligible.",
             "Proof-of-Presence Mode",
           );
         }
@@ -6013,7 +6013,7 @@ if (mobileMenuBtn && navLinks) {
     const isSessionActive =
       session && !session.expired && getAccurateNow() < session.expiresAt;
 
-    // 🆙 REPEATER PROMOTION (mid-session): a student granted repeater power
+    // 🆙 HOTSPOT PROMOTION (mid-session): a student granted hotspot power
     // while their portal is already open reloads the same activeCourse through
     // the course listener, but entered as a plain student — so swap them to
     // staff chrome and start the staff listeners they're now entitled to
@@ -6051,14 +6051,14 @@ if (mobileMenuBtn && navLinks) {
       if (activeCourse.id) startMyManualRequestListener(activeCourse.id);
     }
 
-    // Keep repeater chrome in sync on every course/members snapshot — a
+    // Keep hotspot chrome in sync on every course/members snapshot — a
     // mid-session promotion or the auto-revoke at close both land here.
-    syncRepeaterChrome();
+    syncHotspotChrome();
 
-    // 📡 Public repeater strip: live for EVERYONE in the portal (students
+    // 📡 Public hotspot strip: live for EVERYONE in the portal (students
     // included) — transparency is not a staff privilege.
-    ensureRepeaterLogListener();
-    renderRepeaterStrip();
+    ensureHotspotLogListener();
+    renderHotspotStrip();
 
     // ⚠️ ANCHOR HEALTH: clustered GPS rejections mean the rep's captured
     // anchor is probably off (indoor WiFi-positioning lies). Surface it so
@@ -6125,16 +6125,16 @@ if (mobileMenuBtn && navLinks) {
 
         const showQrBtnEl = document.getElementById("showQrBtn");
         // Authoritative source is the LIVE session's qrMode flag (set at
-        // creation), not the viewer's localStorage mode — repeaters never
+        // creation), not the viewer's localStorage mode — hotspots never
         // picked a mode on their own device.
         const isQrLive =
           session &&
           session.qrMode === true &&
           !session.expired &&
           getAccurateNow() < session.expiresAt;
-        const repeatersBtnEl = document.getElementById("repeatersBtn");
+        const hotspotsBtnEl = document.getElementById("hotspotsBtn");
         if (showQrBtnEl) showQrBtnEl.classList.toggle("hidden", !isQrLive);
-        if (repeatersBtnEl) repeatersBtnEl.classList.toggle("hidden", !isQrLive);
+        if (hotspotsBtnEl) hotspotsBtnEl.classList.toggle("hidden", !isQrLive);
         // Session live — mode/hall selection is locked in; hide the pickers.
         const modeSectionLive = document.getElementById("attendanceModeSection");
         if (modeSectionLive) modeSectionLive.classList.add("hidden");
@@ -6183,8 +6183,8 @@ if (mobileMenuBtn && navLinks) {
 
         const showQrBtnEl = document.getElementById("showQrBtn");
         if (showQrBtnEl) showQrBtnEl.classList.add("hidden");
-        const repeatersBtnEl = document.getElementById("repeatersBtn");
-        if (repeatersBtnEl) repeatersBtnEl.classList.add("hidden");
+        const hotspotsBtnEl = document.getElementById("hotspotsBtn");
+        if (hotspotsBtnEl) hotspotsBtnEl.classList.add("hidden");
         // No live session → bring the setup pickers back.
         const modeSectionIdle = document.getElementById("attendanceModeSection");
         if (modeSectionIdle) modeSectionIdle.classList.remove("hidden");
@@ -6466,11 +6466,11 @@ if (mobileMenuBtn && navLinks) {
             const whenText = dg.latest
               ? new Date(dg.latest).toLocaleString()
               : "Just now";
-            const repeatBadge =
+            const hotspotBadge =
               dg.attemptedMatrics.length > 1
                 ? `<span style="background: #dc3545; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold;">🔁 MULTI-ACCOUNT: ${dg.attemptedMatrics.length} matrics on ONE device</span>`
                 : dg.group.length > 1
-                  ? `<span style="background: #fd7e14; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold;">🔁 ${dg.group.length} repeat attempts</span>`
+                  ? `<span style="background: #fd7e14; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold;">🔁 ${dg.group.length} hotspot attempts</span>`
                   : "";
             const matricList = dg.attemptedMatrics
               .map((m) => `<strong>${m}</strong>`)
@@ -6480,7 +6480,7 @@ if (mobileMenuBtn && navLinks) {
                 <div style="font-size: 0.85rem;">
                   📱 Device …${(dg.deviceId || "").slice(-6)} locked to <strong>${dg.group[0].boundMatric || "?"}</strong>
                 </div>
-                ${repeatBadge}
+                ${hotspotBadge}
               </div>
               <div style="font-size: 0.78rem; color: var(--muted); margin-top: 4px;">
                 Attempted: ${matricList} · ${dg.group.length} attempt(s) · last: ${whenText}

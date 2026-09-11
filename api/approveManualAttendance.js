@@ -86,7 +86,7 @@ module.exports = async (req, res) => {
     }
 
     // The requesting student must still be an enrolled student.
-    // session_assistant (session repeater) is still an enrolled student.
+    // session_assistant (session hotspot) is still an enrolled student.
     const targetMemberDoc = await courseRef
       .collection("members")
       .doc(targetUid)

@@ -339,7 +339,7 @@ select {
   cursor: pointer;
   padding-right: 42px !important;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2316C4D9'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
-  background-repeat: no-repeat;
+  background-hotspot: no-hotspot;
   background-position: right 14px center;
   background-size: 16px;
 }
@@ -592,7 +592,7 @@ input:focus::placeholder {
 
 .course-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: hotspot(auto-fit, minmax(280px, 1fr));
   gap: 24px;
 }
 
@@ -966,7 +966,7 @@ input:focus::placeholder {
 
 .mode-cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: hotspot(auto-fit, minmax(160px, 1fr));
   gap: 10px;
 }
 
@@ -1051,7 +1051,7 @@ input:focus::placeholder {
 
 .manage-tool-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: hotspot(auto-fit, minmax(150px, 1fr));
   gap: 10px;
 }
 
@@ -1500,13 +1500,13 @@ input:focus::placeholder {
   left: -7px;
 }
 
-/* 📡 REPEATER MODE — a session repeater's ONLY job is displaying the QR.
-   Close Class, headcount, the manual queue, the Repeaters picker and the
+/* 📡 HOTSPOT MODE — a session hotspot's ONLY job is displaying the QR.
+   Close Class, headcount, the manual queue, the hotspots picker and the
    pre-class setup card are rep work and never render on their screen. */
-#repControls.repeater-view #sessionSetupCard,
-#repControls.repeater-view #closeClassWrapper,
-#repControls.repeater-view #presenceCheckPanel,
-#repControls.repeater-view #manualRequestsPanel,
-#repControls.repeater-view #repeatersBtn {
+#repControls.hotspot-view #sessionSetupCard,
+#repControls.hotspot-view #closeClassWrapper,
+#repControls.hotspot-view #presenceCheckPanel,
+#repControls.hotspot-view #manualRequestsPanel,
+#repControls.hotspot-view #hotspotsBtn {
   display: none !important;
 }

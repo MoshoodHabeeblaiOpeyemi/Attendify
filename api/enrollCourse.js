@@ -92,7 +92,7 @@ module.exports = async (req, res) => {
       tx.set(memberRef, {
         uid: decoded.uid,
         matric,
-        // Names power the roster, repeater picker and flag badges — write
+        // Names power the roster, hotspot picker and flag badges — write
         // it at join time so the rep always sees who the student is.
         name: String(userData.name || "").trim() || matric,
         role: "student",

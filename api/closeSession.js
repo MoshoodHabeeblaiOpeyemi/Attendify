@@ -48,7 +48,7 @@ module.exports = async (req, res) => {
     const memberSnap = await courseRef.collection("members").doc(decoded.uid).get();
     const isRep = courseData.repUid === decoded.uid;
     // Only the rep or a PERMANENT assistant can close a session. Session
-    // repeaters (trusted students showing the QR) have zero closing power —
+    // hotspots (trusted students showing the QR) have zero closing power —
     // their single job is displaying the code.
     const isAssistant =
       memberSnap.exists && memberSnap.data().role === "assistant";
@@ -125,7 +125,7 @@ module.exports = async (req, res) => {
 
     // 📡 TRANSPARENCY SNAPSHOT — the archive itself records (a) who was
     // auto-marked without scanning (the session creator) and (b) exactly who
-    // broadcast the QR as a repeater, with grant attribution. Every enrolled
+    // broadcast the QR as a hotspot, with grant attribution. Every enrolled
     // student can read the archive, so rep-side decisions stay public.
     const secretManagerMatric = secretSnap.exists
       ? String(secretSnap.data().managerMatric || "").trim().toUpperCase() ||
@@ -134,14 +134,14 @@ module.exports = async (req, res) => {
     const autoMarked = secretManagerMatric
       ? [{ matric: secretManagerMatric, reason: "session_creator" }]
       : [];
-    let sessionRepeaters = [];
+    let sessionhotspots = [];
     if (sessionExpiresAt) {
       try {
         const rlSnap = await courseRef
-          .collection("repeaterLog")
+          .collection("hotspotLog")
           .where("sessionExpiresAt", "==", sessionExpiresAt)
           .get();
-        sessionRepeaters = rlSnap.docs.map((d) => {
+        sessionhotspots = rlSnap.docs.map((d) => {
           const v = d.data();
           return {
             matric: v.matric || "",
@@ -154,7 +154,7 @@ module.exports = async (req, res) => {
           };
         });
       } catch (rlErr) {
-        console.warn("Repeater log lookup skipped:", rlErr && rlErr.message);
+        console.warn("Hotspot log lookup skipped:", rlErr && rlErr.message);
       }
     }
 
@@ -171,7 +171,7 @@ module.exports = async (req, res) => {
       physicalHeadcount,
       flaggedAbsent,
       autoMarked,
-      repeaters: sessionRepeaters,
+      hotspots: sessionhotspots,
     });
 
     // Auto-revoke session_assistant members — restore their role back to "student"

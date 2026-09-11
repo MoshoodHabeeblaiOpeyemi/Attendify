@@ -200,10 +200,10 @@
               style="font-size: 1.2rem;">5:00</strong></p>
         </div>
 
-        <!-- 📡 PUBLIC REPEATER STRIP — transparency: EVERY enrolled student
+        <!-- 📡 PUBLIC HOTSPOT STRIP — transparency: EVERY enrolled student
              sees who is broadcasting the rotating QR, granted by whom and
              when. Written by the backend grant log; hidden when empty. -->
-        <div id="repeaterStrip" class="hidden"
+        <div id="hotspotStrip" class="hidden"
           style="margin-bottom: 15px; padding: 10px 12px; background: rgba(108, 93, 211, 0.1); border: 1px solid rgba(139, 92, 246, 0.5); border-radius: 10px; font-size: 0.8rem; color: var(--text); line-height: 1.6;">
         </div>
 
@@ -266,7 +266,7 @@
             <div id="modeHint" style="font-size: 0.75rem; color: var(--muted); margin-top: 8px; line-height: 1.4;"></div>
             <!-- 📺 QR DISPLAY CHOICE — appears when QR + Device Lock is selected:
                  where does the big rolling code live? Projector or trusted
-                 physically-present students acting as live "repeaters". -->
+                 physically-present students acting as live "hotspots". -->
             <div id="qrDisplayChoiceRow" class="hidden"
               style="margin-top: 10px; padding: 10px; border-radius: 10px; background: var(--bg); border: 1.5px dashed var(--teal);">
               <p style="font-size: 0.75rem; font-weight: 700; color: var(--navy); margin: 0 0 8px;">
@@ -278,9 +278,9 @@
                   <div style="font-weight: 700;">📺 Projector</div>
                   <div style="color: var(--muted); margin-top: 2px;">Halls with a projector/cast — fullscreen portrait, biggest QR</div>
                 </button>
-                <button type="button" data-qr-display="repeaters"
+                <button type="button" data-qr-display="hotspots"
                   style="flex: 1; min-width: 130px; padding: 10px 8px; border-radius: 10px; cursor: pointer; font-size: 0.75rem; border: 1.5px solid var(--border); background: var(--bg); color: var(--text);">
-                  <div style="font-weight: 700;">👥 Repeater Students</div>
+                  <div style="font-weight: 700;">👥 Hotspot Students</div>
                   <div style="color: var(--muted); margin-top: 2px;">No projector — pick trusted students in the hall to show the QR</div>
                 </button>
               </div>
@@ -310,9 +310,9 @@
               style="flex: 1; font-size: 0.85rem;">
               <i data-lucide="qr-code"></i> 📺 Show Rotating QR
             </button>
-            <button id="repeatersBtn" type="button" class="btn btn-outline hidden"
+            <button id="hotspotsBtn" type="button" class="btn btn-outline hidden"
               style="flex: 1; font-size: 0.85rem;">
-              <i data-lucide="users"></i> 👥 Repeaters
+              <i data-lucide="users"></i> 👥 Hotspots
             </button>
           </div>
 
@@ -598,7 +598,7 @@
           university thresholds (Min: 70%).</p>
 
         <div
-          style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 15px;">
+          style="display: grid; grid-template-columns: hotspot(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 15px;">
           <div
             style="background: var(--bg); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid var(--border);">
             <span style="font-size: 0.75rem; color: var(--muted);">Classes Attended</span>
@@ -980,27 +980,27 @@
     </button>
   </div>
 
-  <!-- 👥 REPEATER PICKER — choose trusted, physically-present students to
+  <!-- 👥 HOTSPOT PICKER — choose trusted, physically-present students to
        broadcast the rotating QR from their own phones (session-scoped). -->
-  <div id="repeaterPickerModal" class="modal">
+  <div id="hotspotPickerModal" class="modal">
     <div class="modal-card" style="max-width: 440px;">
       <h3 style="color: var(--navy); margin-bottom: 6px;">
-        <i data-lucide="users"></i> Pick Repeater Students
+        <i data-lucide="users"></i> Pick Hotspot Students
       </h3>
       <p style="font-size: 0.8rem; color: var(--muted); margin-bottom: 12px;">
         Choose up to <strong>5</strong> students who have <strong>already checked in to this class</strong> — that's the
         proof-of-presence rule: you cannot appoint someone who hasn't scanned the code, so the rotating QR can never
-        reach a phone outside the hall. Each becomes a session repeater: their app shows the same rotating QR for
-        nearby students to scan. <strong>Grants are public</strong> — the whole class sees who repeats and who appointed
+        reach a phone outside the hall. Each becomes a session hotspot: their app shows the same rotating QR for
+        nearby students to scan. <strong>Grants are public</strong> — the whole class sees who hotspots and who appointed
         them — and their power ends automatically when this class closes.
       </p>
-      <div id="repeaterOptionsList"
+      <div id="hotspotOptionsList"
         style="max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; padding: 8px; margin-bottom: 12px; background: var(--bg);"></div>
       <div style="display: flex; gap: 8px;">
-        <button id="grantRepeatersBtn" class="btn" style="flex: 1; font-size: 0.85rem;">
-          <i data-lucide="broadcast"></i> Grant Repeater Power
+        <button id="granthotspotsBtn" class="btn" style="flex: 1; font-size: 0.85rem;">
+          <i data-lucide="broadcast"></i> Grant Hotspot Power
         </button>
-        <button id="closeRepeaterPickerBtn" class="btn btn-outline" style="flex: 1; font-size: 0.85rem;">
+        <button id="closeHotspotPickerBtn" class="btn btn-outline" style="flex: 1; font-size: 0.85rem;">
           Cancel
         </button>
       </div>

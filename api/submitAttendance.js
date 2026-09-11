@@ -86,7 +86,7 @@ module.exports = async (req, res) => {
     const memberRef = courseRef.collection("members").doc(uid);
     const memberDoc = await memberRef.get();
     // session_assistant = an enrolled student temporarily acting as a
-    // session repeater — they are still a student and MUST be able to
+    // session hotspot — they are still a student and MUST be able to
     // check in (they were picked because they are physically present).
     const role = memberDoc.exists ? memberDoc.data().role : null;
     if (!memberDoc.exists || (role !== "student" && role !== "session_assistant")) {
