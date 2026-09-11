@@ -1,6 +1,6 @@
 // 🔖 BUILD MARKER — proves which version of app.js the browser is running.
 // If your console does NOT print "build 256052f-drawer", the running JS is stale.
-console.log("%cAttendify build: repeater-mode (QR + PIN, projector or repeater students, GPS prototype off)", "color:#6C5DD3;font-weight:bold");
+console.log("%cAttendify build: attendance-unblocked (slash-in-matric doc-ID fix, repeater-students can check in, portrait QR only)", "color:#6C5DD3;font-weight:bold");
 
 // --- FIREBASE IMPORTS & CONFIGURATION ---
 // --- FIREBASE IMPORTS & CONFIGURATION ---
@@ -2428,14 +2428,16 @@ if (mobileMenuBtn && navLinks) {
       }
     }
     if (lastError) {
-      // Verify against live Firestore state: if the request is gone, the
-      // approval DID go through despite the timeout/network error.
+      // Verify against live Firestore state: an approval that timed out on
+      // the client may have succeeded on the server — the request doc then
+      // EXISTS with status "approved" (it is never deleted).
       let actuallyApproved = false;
       try {
         const reqSnap = await getDoc(
           doc(db, "courses", activeCourse.id, "manualRequests", targetUid),
         );
-        actuallyApproved = !reqSnap.exists();
+        actuallyApproved =
+          reqSnap.exists() && reqSnap.data().status === "approved";
       } catch (_) {
         /* can't verify — treat as failed */
       }
@@ -2754,7 +2756,6 @@ if (mobileMenuBtn && navLinks) {
     const overlay = document.getElementById("qrModeOverlay");
     if (overlay) {
       overlay.classList.add("hidden");
-      overlay.classList.remove("qr-landscape-fallback");
     }
     if (window.__qrCountdownInterval) {
       clearInterval(window.__qrCountdownInterval);
@@ -2821,19 +2822,16 @@ if (mobileMenuBtn && navLinks) {
     renderQrOverlay();
     requestQrWakeLock();
 
-    // 📱 Landscape for the biggest possible QR. Android/PWA supports the
-    // Screen Orientation API inside fullscreen; iOS Safari can't lock, so
-    // the overlay rotates itself 90° via CSS as the fallback.
+    // 📺 PORTRAIT ONLY. Real-hall testing showed the orientation lock
+    // clipped the overlay top and bottom on narrow phones, so landscape
+    // was dropped. Fullscreen (best effort) + the biggest portrait QR.
     (async () => {
       try {
         if (!document.fullscreenElement) {
           await overlay.requestFullscreen();
         }
-        await screen.orientation.lock("landscape");
-        overlay.classList.remove("qr-landscape-fallback");
       } catch (_) {
-        const isPortrait = window.innerHeight > window.innerWidth;
-        overlay.classList.toggle("qr-landscape-fallback", isPortrait);
+        /* fullscreen denied — the inline overlay still works */
       }
     })();
 
@@ -2874,12 +2872,6 @@ if (mobileMenuBtn && navLinks) {
     const ov = document.getElementById("qrModeOverlay");
     if (!ov || ov.classList.contains("hidden")) return;
     renderQrOverlay();
-    if (ov.classList.contains("qr-landscape-fallback")) {
-      ov.classList.toggle(
-        "qr-landscape-fallback",
-        window.innerHeight > window.innerWidth,
-      );
-    }
   });
 
   // ============================================================
@@ -3751,7 +3743,7 @@ if (mobileMenuBtn && navLinks) {
     const offsetVal = drawerTab.style.getPropertyValue("--tab-offset");
     try {
       localStorage.setItem(
-        "attendify_drawer_tab_v3",
+        "attendify_drawer_tab_v4",
         JSON.stringify({ edge, offset: offsetVal }),
       );
     } catch (e) {
@@ -3762,7 +3754,7 @@ if (mobileMenuBtn && navLinks) {
   function restoreTabPosition() {
     if (!drawerTab) return;
     try {
-      const raw = localStorage.getItem("attendify_drawer_tab_v3");
+      const raw = localStorage.getItem("attendify_drawer_tab_v4");
       const saved = raw ? JSON.parse(raw) : null;
       if (saved && saved.edge) {
         drawerTab.dataset.edge = saved.edge;

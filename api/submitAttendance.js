@@ -85,7 +85,11 @@ module.exports = async (req, res) => {
 
     const memberRef = courseRef.collection("members").doc(uid);
     const memberDoc = await memberRef.get();
-    if (!memberDoc.exists || memberDoc.data().role !== "student") {
+    // session_assistant = an enrolled student temporarily acting as a
+    // session repeater — they are still a student and MUST be able to
+    // check in (they were picked because they are physically present).
+    const role = memberDoc.exists ? memberDoc.data().role : null;
+    if (!memberDoc.exists || (role !== "student" && role !== "session_assistant")) {
       return res
         .status(403)
         .json({ error: "You are not enrolled in this course." });
@@ -256,7 +260,12 @@ module.exports = async (req, res) => {
     // flaky-network retry) can no longer slip past the attendees check, and
     // the attendees list can never desync from the check-in record.
     const sessionTimestamp = liveDoc.data().expiresAt;
-    const uniqueCheckinId = `session_${sessionTimestamp}_${matric}`;
+    // 🚨 Firestore FORBIDS "/" in document IDs — and every UNILORIN matric
+    // is "24/56EA057"-shaped. Building the ID from the matric made the
+    // final write throw on EVERY real student's check-in (the generic
+    // "Server error during check-in authorization"). uid is always a safe
+    // 28-char Firebase key; the matric lives inside the doc.
+    const uniqueCheckinId = `session_${sessionTimestamp}_${uid}`;
 
     try {
       await db.runTransaction(async (tx) => {

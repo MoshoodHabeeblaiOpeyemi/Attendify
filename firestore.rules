@@ -231,6 +231,24 @@ service cloud.firestore {
             && request.resource.data.reason.size() > 0
             && request.resource.data.reason.size() <= 200
           ) || (
+            // ...or, once the request's OWN session is over (the live
+            // session is gone or is a different session), a decided
+            // request no longer binds: the student can ask again for the
+            // new session. The rep still must physically verify them —
+            // approving into an expired session is impossible by design.
+            isOwner(requestUid)
+            && resource.data.status in ['approved', 'rejected']
+            && (
+              !exists(/databases/$(database)/documents/courses/$(courseId)/session/live)
+              || get(/databases/$(database)/documents/courses/$(courseId)/session/live).data.expiresAt
+                != resource.data.sessionExpiresAt
+            )
+            && request.resource.data.uid == requestUid
+            && request.resource.data.status == 'pending'
+            && request.resource.data.reason is string
+            && request.resource.data.reason.size() > 0
+            && request.resource.data.reason.size() <= 200
+          ) || (
             // ...but ONLY staff can resolve it, and only from pending.
             isCourseStaff(courseId)
             && resource.data.status == 'pending'

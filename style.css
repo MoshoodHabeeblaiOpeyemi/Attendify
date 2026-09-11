@@ -1443,7 +1443,7 @@ input:focus::placeholder {
   border-radius: 0 12px 12px 0;
 }
 .drawer-tab[data-edge="top"] {
-  top: 0;
+  top: 66px; /* below the sticky navbar — flush top hid it behind the bar on mobile */
   left: var(--tab-offset, 40%);
   transform: translateX(-50%);
   border-radius: 0 0 10px 10px;
@@ -1492,4 +1492,10 @@ input:focus::placeholder {
   padding: 0 4px;
   line-height: 1;
   border: 2px solid #fff;
+}
+/* Right-docked tab: the badge sits on the INNER side (toward the content),
+   never under the browser scrollbar that hugs the right screen edge. */
+.drawer-tab[data-edge="right"] .drawer-tab-badge {
+  right: auto;
+  left: -7px;
 }

@@ -86,11 +86,18 @@ module.exports = async (req, res) => {
     }
 
     // The requesting student must still be an enrolled student.
+    // session_assistant (session repeater) is still an enrolled student.
     const targetMemberDoc = await courseRef
       .collection("members")
       .doc(targetUid)
       .get();
-    if (!targetMemberDoc.exists || targetMemberDoc.data().role !== "student") {
+    const targetRole = targetMemberDoc.exists
+      ? targetMemberDoc.data().role
+      : null;
+    if (
+      !targetMemberDoc.exists ||
+      (targetRole !== "student" && targetRole !== "session_assistant")
+    ) {
       return res
         .status(403)
         .json({ error: "Requesting user is not an enrolled student." });
@@ -146,7 +153,9 @@ module.exports = async (req, res) => {
       tx.update(secretRef, { attendees: FieldValue.arrayUnion(targetMatric) });
 
       const sessionTimestamp = liveDoc.data().expiresAt;
-      const uniqueCheckinId = `session_${sessionTimestamp}_${targetMatric}`;
+      // 🚨 Same "/"-in-doc-ID trap as submitAttendance.js — UNILORIN matrics
+      // contain a slash, so the ID must be built from the safe uid instead.
+      const uniqueCheckinId = `session_${sessionTimestamp}_${targetUid}`;
       tx.set(courseRef.collection("checkins").doc(uniqueCheckinId), {
         uid: targetUid,
         matric: targetMatric,
