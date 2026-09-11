@@ -1,6 +1,6 @@
 // 🔖 BUILD MARKER — proves which version of app.js the browser is running.
 // If your console does NOT print "build 256052f-drawer", the running JS is stale.
-console.log("%cAttendify build: attendance-unblocked (slash-in-matric doc-ID fix, repeater-students can check in, portrait QR only)", "color:#6C5DD3;font-weight:bold");
+console.log("%cAttendify build: attendance-unblocked + repeater-screen (slash-in-matric doc-ID fix, repeaters can check in, repeaters see ONLY the QR — no close power, portrait QR only)", "color:#6C5DD3;font-weight:bold");
 
 // --- FIREBASE IMPORTS & CONFIGURATION ---
 // --- FIREBASE IMPORTS & CONFIGURATION ---
@@ -3250,6 +3250,7 @@ if (mobileMenuBtn && navLinks) {
         startSecurityEventsListener(courseId);
       }
       renderLectureHallOptions();
+      syncRepeaterChrome();
     } else {
       if (repControls) repControls.classList.add("hidden");
       if (studentControls) studentControls.classList.remove("hidden");
@@ -3656,6 +3657,48 @@ if (mobileMenuBtn && navLinks) {
         .includes(userMatric),
     );
   }
+  // A session repeater is a TRUSTED STUDENT promoted for one class only —
+  // not real staff. Their single job: display the rotating QR.
+  function isSessionRepeaterForActiveCourse() {
+    if (!activeCourse || !currentUser) return false;
+    if (isRepForActiveCourse()) return false;
+    if (!isAssistantForActiveCourse()) return false;
+    const rec = (activeCourse.members || []).find(
+      (m) => normalizeMatric(m.matric) === normalizeMatric(currentUser.matric),
+    );
+    return Boolean(rec && rec.role === "session_assistant");
+  }
+
+  // 📡 REPEATER CHROME: strips every rep-only control from a repeater's
+  // screen — setup card, Close Class, headcount, manual queue, maintenance
+  // toolbar, Mission-Control drawer — leaving only the live QR card and the
+  // fullscreen "Show Rotating QR" button. closeSession.js matches this by
+  // refusing session_assistant close requests server-side.
+  function syncRepeaterChrome() {
+    if (!activeCourse || !currentUser) return;
+    if (!isRepForActiveCourse() && !isAssistantForActiveCourse()) {
+      const rc = document.getElementById("repControls");
+      if (rc) rc.classList.remove("repeater-view");
+      return; // plain student — the student chrome handles everything
+    }
+    const isSessionRepeater = isSessionRepeaterForActiveCourse();
+    const repControls = document.getElementById("repControls");
+    if (repControls && !repControls.classList.contains("hidden")) {
+      repControls.classList.toggle("repeater-view", isSessionRepeater);
+    }
+    const toolbar = document.getElementById("managementToolbar");
+    if (toolbar) toolbar.classList.toggle("hidden", isSessionRepeater);
+    const title = document.getElementById("repControlsTitle");
+    if (title) {
+      title.innerHTML = isSessionRepeater
+        ? '<i data-lucide="radio"></i> 📡 Repeater Screen — hold this up for students'
+        : '<i data-lucide="shield-check"></i> Course Rep Control Center';
+      if (typeof refreshIcons === "function") refreshIcons();
+    }
+    if (typeof syncDrawerTabVisibility === "function") {
+      syncDrawerTabVisibility();
+    }
+  }
 
   // Show the tab only inside a portal for staff/assistants.
   function syncDrawerTabVisibility() {
@@ -3665,7 +3708,12 @@ if (mobileMenuBtn && navLinks) {
         portalSection &&
         !portalSection.classList.contains("hidden"),
     );
-    const staff = isRepForActiveCourse() || isAssistantForActiveCourse();
+    // Staff chrome: the drawer is for the rep and permanent assistants —
+    // session repeaters get the focused repeater screen instead (their only
+    // job is the QR, and everything they need lives on the portal itself).
+    const staff =
+      isRepForActiveCourse() ||
+      (isAssistantForActiveCourse() && !isSessionRepeaterForActiveCourse());
     drawerTab.classList.toggle("hidden", !(inPortal && staff));
     if (!(inPortal && staff)) closePortalDrawer();
   }
@@ -5831,6 +5879,10 @@ if (mobileMenuBtn && navLinks) {
       }
       if (activeCourse.id) startMyManualRequestListener(activeCourse.id);
     }
+
+    // Keep repeater chrome in sync on every course/members snapshot — a
+    // mid-session promotion or the auto-revoke at close both land here.
+    syncRepeaterChrome();
 
     // ⚠️ ANCHOR HEALTH: clustered GPS rejections mean the rep's captured
     // anchor is probably off (indoor WiFi-positioning lies). Surface it so

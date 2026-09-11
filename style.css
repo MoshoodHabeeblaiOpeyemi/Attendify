@@ -1499,3 +1499,14 @@ input:focus::placeholder {
   right: auto;
   left: -7px;
 }
+
+/* 📡 REPEATER MODE — a session repeater's ONLY job is displaying the QR.
+   Close Class, headcount, the manual queue, the Repeaters picker and the
+   pre-class setup card are rep work and never render on their screen. */
+#repControls.repeater-view #sessionSetupCard,
+#repControls.repeater-view #closeClassWrapper,
+#repControls.repeater-view #presenceCheckPanel,
+#repControls.repeater-view #manualRequestsPanel,
+#repControls.repeater-view #repeatersBtn {
+  display: none !important;
+}

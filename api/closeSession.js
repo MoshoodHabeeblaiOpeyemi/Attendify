@@ -47,8 +47,11 @@ module.exports = async (req, res) => {
     const courseData = courseSnap.data();
     const memberSnap = await courseRef.collection("members").doc(decoded.uid).get();
     const isRep = courseData.repUid === decoded.uid;
-    const isAssistant = memberSnap.exists &&
-      (memberSnap.data().role === "assistant" || memberSnap.data().role === "session_assistant");
+    // Only the rep or a PERMANENT assistant can close a session. Session
+    // repeaters (trusted students showing the QR) have zero closing power —
+    // their single job is displaying the code.
+    const isAssistant =
+      memberSnap.exists && memberSnap.data().role === "assistant";
 
     if (!isRep && !isAssistant)
       return res.status(403).json({ error: "Only course staff can close a session." });
