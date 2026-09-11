@@ -300,6 +300,7 @@ function showConfirm({
   cancelText = "Cancel",
   danger = true,
   icon = "⚠️",
+  details = null, // optional [{label, value}] table — e.g. the signup double-check
 }) {
   return new Promise((resolve) => {
     const overlay = document.getElementById("confirm-overlay");
@@ -319,6 +320,32 @@ function showConfirm({
     iconEl.innerHTML = `<i data-lucide="${icon}" style="width: 32px; height: 32px;"></i>`;
     titleEl.textContent = title || "Are you sure?";
     msgEl.textContent = message || "";
+
+    // Optional key/value table (the signup double-check). Values are written
+    // via textContent so user-supplied strings can never inject markup.
+    const detailsEl = document.getElementById("confirm-details");
+    if (detailsEl) {
+      detailsEl.innerHTML = "";
+      if (Array.isArray(details) && details.length) {
+        details.forEach(({ label, value } = {}) => {
+          const row = document.createElement("div");
+          row.className = "confirm-detail-row";
+          const labelEl = document.createElement("span");
+          labelEl.className = "confirm-detail-label";
+          labelEl.textContent = String(label ?? "");
+          const valueEl = document.createElement("span");
+          valueEl.className = "confirm-detail-value";
+          valueEl.textContent = String(value ?? "");
+          row.appendChild(labelEl);
+          row.appendChild(valueEl);
+          detailsEl.appendChild(row);
+        });
+        detailsEl.classList.remove("hidden");
+      } else {
+        detailsEl.classList.add("hidden");
+      }
+    }
+
     okBtn.innerHTML = danger
       ? `<i data-lucide="trash-2" style="width:16px; height:16px;"></i> ${okText}`
       : `<i data-lucide="check" style="width:16px; height:16px;"></i> ${okText}`;
@@ -1448,6 +1475,33 @@ if (mobileMenuBtn && navLinks) {
       const level = levelInput
         ? levelInput.value.trim().toUpperCase()
         : "GENERAL";
+
+      // 🛑 DOUBLE-CHECK GATE: the form does NOT create anything yet. First the
+      // user reviews every value they entered and explicitly confirms. Their
+      // matric number is shown as locked because it becomes their permanent
+      // identity across courses and can NEVER be changed after signup.
+      const confirmed = await showConfirm({
+        title: "Confirm Your Details",
+        message:
+          "Please double-check everything below. Your matric number is PERMANENT — it cannot be changed after signup.",
+        okText: "Yes, Create Account",
+        cancelText: "No, Let Me Fix It",
+        danger: false,
+        icon: "📝",
+        details: [
+          { label: "Full Name", value: name },
+          {
+            label: "🔒 Matric Number",
+            value: `${matric} (permanent — cannot be changed)`,
+          },
+          { label: "Institution", value: institution },
+          { label: "Department", value: department },
+          { label: "Level", value: level },
+          { label: "Email", value: email },
+          { label: "Account Type", value: isRep ? "Course Rep" : "Student" },
+        ],
+      });
+      if (!confirmed) return; // form stays filled so they can correct and retry
 
       isCreatingAccount = true; // 🔒 LOCK THE BLOCKER
       let signupSucceeded = false;

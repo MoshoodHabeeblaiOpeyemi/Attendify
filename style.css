@@ -1024,6 +1024,50 @@ input:focus::placeholder {
   margin-bottom: 24px;
 }
 
+/* Key/value table shown when showConfirm receives `details`
+   (e.g. the signup double-check review). */
+#confirm-details {
+  margin: -12px 0 16px;
+  padding: 4px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  max-height: 200px;
+  overflow-y: auto;
+  text-align: left;
+}
+
+#confirm-details.hidden {
+  display: none !important;
+}
+
+.confirm-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 7px 0;
+  font-size: 0.82rem;
+  border-bottom: 1px dashed var(--border);
+}
+
+.confirm-detail-row:last-child {
+  border-bottom: none;
+}
+
+.confirm-detail-label {
+  color: var(--text-muted);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.confirm-detail-value {
+  color: var(--text-primary);
+  font-weight: 700;
+  text-align: right;
+  word-break: break-word;
+}
+
 #confirm-actions {
   display: flex;
   gap: 12px;

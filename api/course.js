@@ -22,6 +22,21 @@ const db = getFirestore();
 // COURSE ACTIONS - enroll, leave, remove, delete.
 const norm = (v) => String(v || "").trim().toUpperCase();
 
+// Firestore document IDs cannot contain "/", but matric numbers often do
+// (e.g. 24/56SV002) — that crashed enroll with "Expected documentPath".
+// Registry keys percent-encode the illegal/ambiguous characters. "%" MUST be
+// encoded first so the mapping stays reversible: no two different matrics can
+// ever collapse into the same registry document.
+const escKeyPart = (v) =>
+  String(v || "")
+    .trim()
+    .toUpperCase()
+    .replace(/%/g, "%25")
+    .replace(/\//g, "%2F")
+    .replace(/\|/g, "%7C");
+const registryDocId = (institution, matric) =>
+  `${escKeyPart(institution) || "UNKNOWN"}|${escKeyPart(matric)}`;
+
 async function handleEnroll(req, res, decoded) {
   try {
     const { courseId: bodyCourseId, courseCode } = req.body || {};
@@ -59,7 +74,7 @@ async function handleEnroll(req, res, decoded) {
       return res.status(403).json({ error: "Level mismatch." });
     const memberRef = courseRef.collection("members").doc(decoded.uid);
     const regInst = norm(userData.institution) || "UNKNOWN";
-    const registryKey = regInst + "|" + matric;
+    const registryKey = registryDocId(regInst, matric);
     const registryRef = db.collection("matricRegistry").doc(registryKey);
     if (String(process.env.REQUIRE_EMAIL_VERIFIED || "").toLowerCase() === "true") {
       if (!decoded.email_verified)

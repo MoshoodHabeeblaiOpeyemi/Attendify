@@ -9,6 +9,10 @@ try {
 
 const db = getFirestore();
 const norm = (v) => String(v || "").trim().toUpperCase();
+// Firestore doc IDs cannot contain "/", but matric numbers often do (24/56SV002) — that crashed enroll with "Expected documentPath".
+// Registry keys percent-encode illegal/ambiguous chars; "%" is encoded FIRST so the mapping stays reversible (no collisions).
+const escKeyPart = (v) => String(v || "").trim().toUpperCase().replace(/%/g, "%25").replace(/\//g, "%2F").replace(/\|/g, "%7C");
+const registryDocId = (institution, matric) => `${escKeyPart(institution) || "UNKNOWN"}|${escKeyPart(matric)}`;
 const COURSE_SUBS = ["members","session","attendance","checkins","deviceFlags","absentFlags","manualRequests","hotspotLog","removalLog","exemptions","exemptionReasons","securityEvents","notifications"];
 
 async function delSub(ref) {
@@ -42,7 +46,7 @@ async function handleDeleteAccount(req, res, decoded) {
       }
     }
     if (matric) {
-      const regRef = db.collection("matricRegistry").doc(`${institution}|${matric}`);
+      const regRef = db.collection("matricRegistry").doc(registryDocId(institution, matric));
       const regSnap = await regRef.get();
       if (regSnap.exists && regSnap.data().uid === uid) await regRef.delete();
     }
@@ -62,7 +66,7 @@ async function handleClaimMatric(req, res, decoded) {
     const profile = await db.collection("users").doc(decoded.uid).get();
     if (!profile.exists || !profile.data().matric) return res.status(400).json({ error: "Profile with matric required." });
     const matric = norm(profile.data().matric), institution = norm(profile.data().institution) || "UNKNOWN";
-    const regRef = db.collection("matricRegistry").doc(`${institution}|${matric}`);
+    const regRef = db.collection("matricRegistry").doc(registryDocId(institution, matric));
     try {
       await db.runTransaction(async (tx) => {
         const snap = await tx.get(regRef);
