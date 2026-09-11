@@ -67,10 +67,14 @@ module.exports = async (req, res) => {
     const normalizedMatric = String(targetMatric).trim().toUpperCase();
     const membersQuery = courseRef.collection("members");
 
+    // Hoist to outer scope so we can fire the transparency notification
+    // AFTER the transaction commits. Declaring inside the transaction
+    // callback would cause a ReferenceError here (the crash bug).
+    let targetMemberDoc = null;
+
     await db.runTransaction(async (tx) => {
-      // Move the member lookup inside the transaction to close the race condition
       const membersSnap = await tx.get(membersQuery);
-      const targetMemberDoc = membersSnap.docs.find(
+      targetMemberDoc = membersSnap.docs.find(
         (d) =>
           String(d.data().matric || "").trim().toUpperCase() ===
           normalizedMatric,

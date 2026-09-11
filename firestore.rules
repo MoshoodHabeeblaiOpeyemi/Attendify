@@ -332,5 +332,14 @@ service cloud.firestore {
         allow update, delete: if false;
       }
     }
+
+    // 🔒 MATRIC REGISTRY — server-written only. Maps "institution|matric" → uid.
+    // Written exclusively by the trusted backend (Admin SDK bypasses rules);
+    // clients can never forge a claim. Client reads are not needed — the
+    // enrollment and claimMatric endpoints handle all checks server-side.
+    match /matricRegistry={registryKey} {
+      allow read: if false;
+      allow write: if false;
+    }
   }
 }

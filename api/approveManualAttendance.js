@@ -123,6 +123,22 @@ module.exports = async (req, res) => {
       return res.status(403).json({ error: "Attendance session has expired!" });
     }
 
+    // 🔒 SESSION BINDING: a request filed in one session cannot be approved in
+    // a later session. Without this, a Monday request could be approved on
+    // Wednesday — the student gets marked present for a class they never
+    // attended. The request's sessionExpiresAt MUST match the live session's.
+    const requestSessionExpiresAt = requestDoc.data().sessionExpiresAt;
+    const liveSessionExpiresAt = liveDoc.data().expiresAt;
+    if (
+      requestSessionExpiresAt &&
+      requestSessionExpiresAt !== liveSessionExpiresAt
+    ) {
+      return res.status(409).json({
+        error:
+          "This request was for a different session. It cannot be approved during the current session.",
+      });
+    }
+
     const secretRef = courseRef.collection("session").doc("secret");
     const secretDoc = await secretRef.get();
     if (!secretDoc.exists) {

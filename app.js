@@ -870,6 +870,19 @@ function nameForMatric(matric) {
   return nm ? `${nm} (${norm})` : norm;
 }
 
+// 🛡️ XSS DEFENCE — escape any string before it touches innerHTML.
+// User-controlled values (matric, names, reasons, dates) flow through this
+// helper so a crafted value like `<img src=x onerror=alert(1)>` renders as
+// literal text instead of executing.
+function escapeHTML(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function normalizeCourseCode(value) {
   const raw = String(value || "")
     .toUpperCase()
@@ -883,6 +896,14 @@ function normalizeCourseCode(value) {
 document.addEventListener("DOMContentLoaded", () => {
   const themeToggle = document.getElementById("themeToggle");
   const htmlElement = document.documentElement;
+
+  // 🎨 THEME PERSISTENCE — restore the saved theme before first paint.
+  // Falls back to the HTML attribute default ("dark") if nothing is stored.
+  const savedTheme = localStorage.getItem("attendify_theme");
+  if (savedTheme === "light" || savedTheme === "dark") {
+    htmlElement.setAttribute("data-theme", savedTheme);
+  }
+
   if (themeToggle) {
     themeToggle.innerHTML =
       htmlElement.getAttribute("data-theme") === "dark"
@@ -1060,6 +1081,7 @@ if (mobileMenuBtn && navLinks) {
       const currentTheme = htmlElement.getAttribute("data-theme");
       const newTheme = currentTheme === "light" ? "dark" : "light";
       htmlElement.setAttribute("data-theme", newTheme);
+      localStorage.setItem("attendify_theme", newTheme);
       themeToggleBtn.innerHTML =
         newTheme === "dark"
           ? '<i data-lucide="sun"></i>'
@@ -1583,7 +1605,7 @@ if (mobileMenuBtn && navLinks) {
         await showConfirm({
           title: "Delete Account",
           message:
-            "This will permanently delete your account and remove you from all courses. This cannot be undone.",
+            "This will permanently delete your account, remove you from all courses, and release your matric number. This cannot be undone.",
           okText: "Yes, Delete",
           cancelText: "Keep Account",
           icon: "🗑️",
@@ -1591,53 +1613,33 @@ if (mobileMenuBtn && navLinks) {
         })
       ) {
         try {
-          const uid = auth.currentUser.uid;
           const idToken = await auth.currentUser.getIdToken();
 
-          // Clean up membership + enrolled[]/assistants[] via the same
-          // trusted backend endpoint leaveCourse uses — one course at a
-          // time, each cleaned atomically instead of leaving stale matric
-          // entries behind.
-          for (const course of courses) {
-            try {
-              const response = await fetch("/api/leaveCourse", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${idToken}`,
-                },
-                body: JSON.stringify({ courseId: course.id }),
-              });
-              if (!response.ok) {
-                const result = await response.json().catch(() => ({}));
-                console.warn(
-                  `Could not leave course ${course.id}:`,
-                  result.error,
-                );
-              }
-            } catch (courseError) {
-              console.warn(`Could not leave course ${course.id}:`, courseError);
-            }
+          const response = await fetch("/api/deleteAccount", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${idToken}`,
+            },
+          });
+
+          if (!response.ok) {
+            const result = await response.json().catch(() => ({}));
+            throw new Error(result.error || "Server error during deletion.");
           }
 
-          // Delete the actual database document
-          await deleteDoc(doc(db, "users", uid));
           localStorage.removeItem("attendify_device_uuid");
-
-          // Attempt to delete the Firebase Auth user (if recent login), otherwise force sign out
-          try {
-            await auth.currentUser.delete();
-          } catch (error) {
-            console.warn(
-              "Requires recent login to delete auth object. Signing out instead.",
-            );
-            await signOut(auth);
-          }
+          localStorage.removeItem("attendify_theme");
 
           toast.info(
             "Your account has been deleted. Goodbye! 👋",
             "Account Deleted",
           );
+
+          // Redirect to auth screen after a short delay
+          setTimeout(() => {
+            window.location.reload();
+          }, 2000);
         } catch (error) {
           console.error("Delete account error:", error);
           toast.error(
@@ -4877,7 +4879,7 @@ if (mobileMenuBtn && navLinks) {
       const label = document.createElement("label");
       label.style.cssText =
         "display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; font-size: 0.82rem; color: var(--text); cursor: pointer;";
-      label.innerHTML = `<input type="checkbox" value="${matric}" data-hotspot-check style="accent-color: var(--teal); width: 16px; height: 16px;"><span><strong>${matric}</strong>${member.name ? ` · ${member.name}` : ""} <span style="color: #28a745; font-size: 0.7rem;">✅ checked in</span></span>`;
+      label.innerHTML = `<input type="checkbox" value="${escapeHTML(matric)}" data-hotspot-check style="accent-color: var(--teal); width: 16px; height: 16px;"><span><strong>${escapeHTML(matric)}</strong>${member.name ? ` · ${escapeHTML(member.name)}` : ""} <span style="color: #28a745; font-size: 0.7rem;">✅ checked in</span></span>`;
       list.appendChild(label);
     });
   }
@@ -5048,7 +5050,7 @@ if (mobileMenuBtn && navLinks) {
                 })
             : "";
         const by = log && log.grantedByMatric ? log.grantedByMatric : "rep";
-        return `<span style="display:inline-block; background: var(--bg); border:1px solid var(--border); border-radius:999px; padding:3px 10px; margin:2px 4px 2px 0;">📡 <strong>${m.name || matric}</strong> (${matric}) — granted by <strong>${by}</strong>${when ? ` at ${when}` : ""}</span>`;
+        return `<span style="display:inline-block; background: var(--bg); border:1px solid var(--border); border-radius:999px; padding:3px 10px; margin:2px 4px 2px 0;">📡 <strong>${escapeHTML(m.name || matric)}</strong> (${escapeHTML(matric)}) — granted by <strong>${escapeHTML(by)}</strong>${when ? ` at ${escapeHTML(when)}` : ""}</span>`;
       })
       .join(" ");
     strip.innerHTML = `<strong>📡 Hotspots this class:</strong> ${chips}<div style="font-size:0.72rem; color:var(--muted); margin-top:4px;">Hotspots can only be picked from students who already checked in (proof-of-presence). Grants are public and end when class closes.</div>`;
@@ -5222,6 +5224,15 @@ if (mobileMenuBtn && navLinks) {
     const listEl = document.getElementById("assistantsList");
     if (!selectEl || !listEl) return;
 
+    // Event delegation for revoke buttons (XSS-safe: matric from data attribute)
+    listEl.addEventListener("click", (e) => {
+      const revokeBtn = e.target.closest(".revoke-assistant-btn");
+      if (revokeBtn) {
+        e.preventDefault();
+        revokeAssistant(revokeBtn.dataset.matric);
+      }
+    });
+
     selectEl.innerHTML = `<option value="">-- Choose student to appoint --</option>`;
     const assistants = (activeCourse.assistants || []).map(normalizeMatric);
 
@@ -5254,7 +5265,7 @@ if (mobileMenuBtn && navLinks) {
         const li = document.createElement("li");
         li.style.cssText =
           "display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: var(--card-bg); border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem;";
-        li.innerHTML = `<span>👑 ${matric} ${scopeBadge}</span> <button onclick="revokeAssistant('${matric}')" style="background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 0.8rem;">Remove ❌</button>`;
+        li.innerHTML = `<span>👑 ${escapeHTML(matric)} ${scopeBadge}</span> <button data-matric="${escapeHTML(matric)}" class="revoke-assistant-btn" style="background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 0.8rem;">Remove ❌</button>`;
         listEl.appendChild(li);
       });
     }
@@ -5730,6 +5741,19 @@ if (mobileMenuBtn && navLinks) {
   const rosterList = document.getElementById("rosterList");
   const rosterCount = document.getElementById("rosterCount");
 
+  // 🎯 EVENT DELEGATION for dynamically-rendered roster buttons.
+  // XSS-safe: matric comes from the data attribute (already escapeHTML'd at
+  // render time), never from innerHTML parsing.
+  if (rosterList) {
+    rosterList.addEventListener("click", (e) => {
+      const flagBtn = e.target.closest(".flag-absent-btn");
+      if (flagBtn) {
+        e.preventDefault();
+        flagStudentAbsent(flagBtn.dataset.matric);
+      }
+    });
+  }
+
   if (generatePinBtn) {
     generatePinBtn.addEventListener("click", async () => {
       if (!activeCourse) return;
@@ -5739,6 +5763,45 @@ if (mobileMenuBtn && navLinks) {
         currentUser ? currentUser.matric : "REP-001",
       );
       const mode = getSelectedAttendanceMode();
+
+      // 🔄 REGENERATE PIN safety: if there is already a live session, archive
+      // it before creating a new one. Otherwise the current attendees are
+      // silently dropped from the record.
+      const existingSession = activeCourse.activeSession;
+      if (existingSession && !existingSession.expired) {
+        const proceed = await showConfirm({
+          title: "Start a New Session?",
+          message: `A live session is already running (PIN ${existingSession.pin}). Starting a new session will archive the current attendees and generate a fresh PIN. Continue?`,
+          okText: "Start New Session",
+          cancelText: "Cancel",
+          icon: "🔄",
+          danger: false,
+        });
+        if (!proceed) return;
+
+        // Archive the current session to attendanceHistory
+        try {
+          const historyEntry = {
+            date: new Date().toLocaleDateString("en-GB", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+            }),
+            attendees: [...(existingSession.attendees || [])],
+            flaggedAbsent: [],
+            systemCount: existingSession.attendees.length,
+            physicalHeadcount: null,
+          };
+          await updateDoc(doc(db, "courses", activeCourse.id), {
+            attendanceHistory: arrayUnion(historyEntry),
+          });
+          activeCourse.attendanceHistory = activeCourse.attendanceHistory || [];
+          activeCourse.attendanceHistory.push(historyEntry);
+        } catch (archiveErr) {
+          console.warn("Could not archive session before regenerate:", archiveErr);
+          toast.warning("Could not archive the old session — proceeding anyway.");
+        }
+      }
 
       // 📺 QR + Device Lock: students scan the rotating QR (or type the PIN).
       // No GPS fence. Where the code lives — projector or hotspot students —
@@ -6780,17 +6843,17 @@ if (mobileMenuBtn && navLinks) {
           (g.members || []).map(normalizeMatric).includes(normalizedM),
         );
         const groupBadgeHTML = groupInfo
-          ? `<span style="background: var(--bg); border: 1px solid var(--border); color: var(--text-muted); padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 4px;">🏷️ ${groupInfo.name}</span>`
+          ? `<span style="background: var(--bg); border: 1px solid var(--border); color: var(--text-muted); padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 4px;">🏷️ ${escapeHTML(groupInfo.name)}</span>`
           : "";
         const flagBtnHTML =
           (isRep || isAssistant) && !flagRecord
-            ? `<button onclick="flagStudentAbsent('${matric}')" title="Empty seat linked to this check-in? Flag it — the student gets an emergency alert and cannot be quietly deleted" style="background: transparent; border: 1px solid #dc3545; color: #dc3545; border-radius: 6px; cursor: pointer; font-size: 0.72rem; font-weight: bold; padding: 3px 8px; margin-left: 8px;">🚩 Flag Absent</button>`
+            ? `<button data-matric="${escapeHTML(matric)}" class="flag-absent-btn" title="Empty seat linked to this check-in? Flag it — the student gets an emergency alert and cannot be quietly deleted" style="background: transparent; border: 1px solid #dc3545; color: #dc3545; border-radius: 6px; cursor: pointer; font-size: 0.72rem; font-weight: bold; padding: 3px 8px; margin-left: 8px;">🚩 Flag Absent</button>`
             : "";
 
         const li = document.createElement("li");
         li.style.cssText =
           "display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem;";
-        li.innerHTML = `<span>🎓 <strong>${attendeeRole === "rep" || isRepAttendee ? "Rep" : "Student"}</strong> · ${nameForMatric(matric)} ${badgeHTML}${groupBadgeHTML}</span> <span style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">${statusHTML}${flagBtnHTML}</span>`;
+        li.innerHTML = `<span>🎓 <strong>${attendeeRole === "rep" || isRepAttendee ? "Rep" : "Student"}</strong> · ${escapeHTML(nameForMatric(matric))} ${badgeHTML}${groupBadgeHTML}</span> <span style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">${statusHTML}${flagBtnHTML}</span>`;
         rosterList.appendChild(li);
       });
     }
@@ -6827,10 +6890,11 @@ if (mobileMenuBtn && navLinks) {
         } else {
           enrolledMatrics.forEach((matric) => {
             const isRepMatric = userMatric === normalizeMatric(matric);
+            const safeMatric = escapeHTML(matric);
             studentRowsHTML += `
             <li style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: var(--bg); border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem;">
-              <span>🎓 <strong>${matric}</strong> ${isRepMatric ? "(You - Rep)" : ""}</span>
-              ${!isRepMatric ? `<button onclick="removeStudentFromCourse('${matric}')" style="background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 0.8rem; font-weight: bold;">Remove 🚪❌</button>` : ""}
+              <span>🎓 <strong>${safeMatric}</strong> ${isRepMatric ? "(You - Rep)" : ""}</span>
+              ${!isRepMatric ? `<button data-matric="${safeMatric}" class="remove-student-btn" style="background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 0.8rem; font-weight: bold;">Remove 🚪❌</button>` : ""}
             </li>
           `;
           });
@@ -6843,6 +6907,15 @@ if (mobileMenuBtn && navLinks) {
           ${studentRowsHTML}
         </ul>
       `;
+
+      // Event delegation for remove buttons (XSS-safe: matric from data attribute)
+      enrolledListDiv.addEventListener("click", (e) => {
+        const removeBtn = e.target.closest(".remove-student-btn");
+        if (removeBtn) {
+          e.preventDefault();
+          removeStudentFromCourse(removeBtn.dataset.matric);
+        }
+      });
       }
     }
 
@@ -6867,7 +6940,7 @@ if (mobileMenuBtn && navLinks) {
 
           const attendeesListHTML = sessionRecord.attendees
             .map((m) => {
-              return `<li style="font-size: 0.85rem; padding: 2px 0;">🎓 ${nameForMatric(m)}</li>`;
+              return `<li style="font-size: 0.85rem; padding: 2px 0;">🎓 ${escapeHTML(nameForMatric(m))}</li>`;
             })
             .join("");
 
@@ -6883,7 +6956,7 @@ if (mobileMenuBtn && navLinks) {
 
           archiveCard.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-            <strong>📅 Session on ${sessionRecord.date}</strong>
+            <strong>📅 Session on ${escapeHTML(sessionRecord.date)}</strong>
             <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end;">
               <span style="font-size: 0.8rem; background: var(--teal); color: white; padding: 2px 6px; border-radius: 4px;">${sessionRecord.attendees.length} Present</span>
               ${headcountBadgeHTML}
@@ -6956,12 +7029,12 @@ if (mobileMenuBtn && navLinks) {
                   ? `<span style="background: #fd7e14; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold;">🔁 ${dg.group.length} hotspot attempts</span>`
                   : "";
             const matricList = dg.attemptedMatrics
-              .map((m) => `<strong>${m}</strong>`)
+              .map((m) => `<strong>${escapeHTML(m)}</strong>`)
               .join(", ");
             flagCard.innerHTML = `
               <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap;">
                 <div style="font-size: 0.85rem;">
-                  📱 Device …${(dg.deviceId || "").slice(-6)} locked to <strong>${dg.group[0].boundMatric || "?"}</strong>
+                  📱 Device …${escapeHTML((dg.deviceId || "").slice(-6))} locked to <strong>${escapeHTML(dg.group[0].boundMatric || "?")}</strong>
                 </div>
                 ${hotspotBadge}
               </div>
