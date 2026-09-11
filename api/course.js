@@ -82,13 +82,15 @@ async function handleEnroll(req, res, decoded) {
     }
     try {
       await db.runTransaction(async (tx) => {
+        // ALL reads first — Firestore transactions require every read to
+        // happen before any write.
         const regSnap = await tx.get(registryRef);
+        const memberSnap = await tx.get(memberRef);
         if (regSnap.exists && regSnap.data().uid !== decoded.uid)
           throw new Error("MATRIC_CLAIMED_BY_ANOTHER");
         tx.set(registryRef, { uid: decoded.uid, matric, institution: regInst,
           department: norm(userData.department) || null, level: norm(userData.level) || null,
           claimedAt: FieldValue.serverTimestamp() }, { merge: true });
-        const memberSnap = await tx.get(memberRef);
         if (memberSnap.exists) return;
         tx.set(memberRef, { uid: decoded.uid, matric,
           name: String(userData.name || "").trim() || matric,
