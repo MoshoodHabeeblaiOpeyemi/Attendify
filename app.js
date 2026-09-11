@@ -1,8 +1,22 @@
 // 🔖 BUILD MARKER — proves which version of app.js the browser is running.
 // If your console does NOT print "build 256052f-drawer", the running JS is stale.
-console.log("%cAttendify build: transparency-names + qr-fit-to-viewport (every list shows 'Name (MATRIC)', CSV gains a Name column, QR auto-sizes to screen with reserved chrome)", "color:#6C5DD3;font-weight:bold");
+console.log("%cAttendify build: premium-design-system (palette refresh, button micro-interactions, success celebration, skeleton shimmer, toast slide-in)", "color:#7C6CF0;font-weight:bold");
 
-// --- FIREBASE IMPORTS & CONFIGURATION ---
+// --- SUCCESS CELEBRATION (premium check-in moment) ---
+function showCheckInSuccess() {
+  const overlay = document.createElement("div");
+  overlay.className = "success-overlay";
+  overlay.innerHTML =
+    '<svg class="success-checkmark" viewBox="0 0 24 24" fill="none"><path d="M4 12l5 5L20 7" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+    '<div class="success-text">Checked In! 🎉</div>';
+  document.body.appendChild(overlay);
+  setTimeout(() => {
+    overlay.style.transition = "opacity 0.4s ease";
+    overlay.style.opacity = "0";
+    setTimeout(() => overlay.remove(), 400);
+  }, 1400);
+}
+
 // --- FIREBASE IMPORTS & CONFIGURATION ---
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
 import {
@@ -6066,6 +6080,7 @@ if (mobileMenuBtn && navLinks) {
 
           // Success instantly clears the hidden strike counter.
           resetCheckInFailures(activeCourse.id);
+          showCheckInSuccess();
           toast.success("Your attendance has been recorded!", "Checked In! 🎉");
           checkInForm.reset();
         } catch (error) {
@@ -6122,6 +6137,7 @@ if (mobileMenuBtn && navLinks) {
 
           // Success instantly clears the hidden strike counter.
           resetCheckInFailures(activeCourse.id);
+          showCheckInSuccess();
           toast.success("Your attendance has been recorded!", "Checked In! 🎉");
           checkInForm.reset();
         } catch (error) {

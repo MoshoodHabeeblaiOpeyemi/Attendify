@@ -2,7 +2,7 @@
 
 /* --- DESIGN TOKENS --- */
 :root {
-  --bg-base: #F4F7FE;
+  --bg-base: #F5F3FF;
   --bg-base-2: #E2E8F0;
   --bg: #F8FAFC;
   --card-bg: #FFFFFF;
@@ -14,23 +14,30 @@
   --muted: #64748B;
   --navy: #1E293B;
 
-  --violet: #6C5DD3;
-  --violet-2: #8B7CFF;
-  --teal: #16C4D9;
-  --teal-glow: rgba(22, 196, 217, 0.28);
-  --accent-glow: rgba(108, 93, 211, 0.30);
-  --danger: #E1435A;
-  --success: #22C58C;
+  --violet: #7C6CF0;
+  --violet-2: #9F8BFF;
+  --teal: #06D6A0;
+  --teal-glow: rgba(6, 214, 160, 0.28);
+  --accent-glow: rgba(124, 108, 240, 0.30);
+  --danger: #EF4444;
+  --success: #10B981;
 
   --shadow: 0 20px 45px -18px rgba(31, 22, 90, 0.22);
   --glass-blur: blur(18px);
 
   --font-display: 'Space Grotesk', system-ui, sans-serif;
   --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+
+  /* Motion tokens — centralized so the whole app eases the same way */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 0.15s;
+  --dur-med: 0.28s;
+  --dur-slow: 0.45s;
 }
 
 [data-theme="dark"] {
-  --bg-base: #0B0D17;
+  --bg-base: #0A0B14;
   --bg-base-2: #15182B;
   --bg: #111424;
   --card-bg: #181B2E;
@@ -42,15 +49,48 @@
   --muted: #94A3B8;
   --navy: #E2E8F0;
 
-  --violet: #6C5DD3;
+  --violet: #7C6CF0;
   --violet-2: #9F8BFF;
-  --teal: #2DE0C9;
-  --teal-glow: rgba(45, 224, 201, 0.24);
-  --accent-glow: rgba(108, 93, 211, 0.32);
-  --danger: #E1435A;
-  --success: #22C58C;
+  --teal: #06D6A0;
+  --teal-glow: rgba(6, 214, 160, 0.24);
+  --accent-glow: rgba(124, 108, 240, 0.32);
+  --danger: #EF4444;
+  --success: #10B981;
 
   --shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.65);
+}
+
+/* --- AURORA BACKGROUND MESH (light theme only, very subtle) --- */
+body {
+  position: relative;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+  transition: background var(--dur-med) ease, color var(--dur-med) ease;
+}
+
+/* GPU-only pseudo-element: two large radial gradients that drift slowly */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 60% 40% at 15% 20%, var(--teal-glow) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 35% at 85% 75%, var(--accent-glow) 0%, transparent 70%);
+  animation: auroraDrift 18s ease-in-out infinite alternate;
+  opacity: 0.6;
+}
+
+[data-theme="dark"] body::before {
+  opacity: 0.35;
+}
+
+@keyframes auroraDrift {
+  0%   { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(30px, -25px) scale(1.08); }
 }
 
 /* --- RESET & BASE --- */
@@ -63,15 +103,6 @@
 
 html { color-scheme: light; }
 [data-theme="dark"] { color-scheme: dark; }
-
-body {
-  position: relative;
-  background: var(--bg-base);
-  color: var(--text-primary);
-  min-height: 100vh;
-  overflow-x: hidden;
-  transition: background 0.3s ease, color 0.3s ease;
-}
 
 /* --- CUSTOM SCROLLBAR STYLING --- */
 ::-webkit-scrollbar {
@@ -104,24 +135,81 @@ body {
   scrollbar-color: var(--teal) var(--bg-base-2);
 }
 
+/* --- FOCUS-VISIBLE (keyboard navigation) --- */
+:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 /* --- ANIMATIONS --- */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @keyframes pulseGlow {
-  0%   { box-shadow: 0 0 0 0 rgba(34, 197, 140, 0.45); }
-  70%  { box-shadow: 0 0 0 14px rgba(34, 197, 140, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(34, 197, 140, 0); }
+  0%   { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45); }
+  70%  { box-shadow: 0 0 0 14px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
 }
 
 @keyframes spinOrbit {
   to { transform: rotate(360deg); }
 }
 
-.card, section {
-  animation: fadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+@keyframes successPop {
+  0%   { opacity: 0; transform: scale(0.3); }
+  50%  { opacity: 1; transform: scale(1.15); }
+  70%  { transform: scale(0.95); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes checkmarkDraw {
+  from { stroke-dashoffset: 24; }
+  to   { stroke-dashoffset: 0; }
+}
+
+@keyframes toastSlideIn {
+  from { opacity: 0; transform: translateX(40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes badgePop {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+/* --- REDUCED MOTION (accessibility) --- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* --- STAGGERED CARD ENTRY (course grid reveals one-by-one) --- */
+.course-grid .card {
+  animation: fadeIn var(--dur-slow) var(--ease-out-expo) both;
+}
+.course-grid .card:nth-child(1) { animation-delay: 0ms; }
+.course-grid .card:nth-child(2) { animation-delay: 60ms; }
+.course-grid .card:nth-child(3) { animation-delay: 120ms; }
+.course-grid .card:nth-child(4) { animation-delay: 180ms; }
+.course-grid .card:nth-child(5) { animation-delay: 240ms; }
+.course-grid .card:nth-child(n+6) { animation-delay: 300ms; }
+
+/* Cards outside the grid keep their original animation */
+.card:not(.course-grid .card), section {
+  animation: fadeIn var(--dur-slow) var(--ease-out-expo) forwards;
 }
 
 /* --- NAVBAR --- */
@@ -772,6 +860,7 @@ input:focus::placeholder {
   line-height: 1.45;
   pointer-events: all;
   animation: toastIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
 }
 
 .toast.toast-exit {
@@ -813,6 +902,61 @@ input:focus::placeholder {
 @keyframes toastOut {
   from { opacity: 1; transform: translateX(0) scale(1); }
   to   { opacity: 0; transform: translateX(24px) scale(0.94); }
+}
+
+/* --- BUTTON MICRO-INTERACTIONS --- */
+.btn, .drawer-item, .hamburger-btn {
+  transition: transform 0.1s ease, background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.btn:active, .drawer-item:active {
+  transform: scale(0.96);
+}
+
+/* --- SKELETON SHIMMER (loading states) --- */
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-base-2) 25%, var(--card-bg) 50%, var(--bg-base-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+/* --- SUCCESS CELEBRATION (check-in) --- */
+.success-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9800;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 11, 20, 0.85);
+  backdrop-filter: blur(8px);
+  animation: fadeIn 0.25s ease forwards;
+}
+
+.success-checkmark {
+  width: 80px;
+  height: 80px;
+  animation: successPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.success-checkmark path {
+  stroke: var(--success);
+  stroke-width: 3;
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: checkmarkDraw 0.4s 0.2s ease forwards;
+}
+
+.success-text {
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-top: 16px;
+  opacity: 0;
+  animation: fadeIn 0.3s 0.4s ease forwards;
 }
 
 /* ============================================================
@@ -1500,6 +1644,8 @@ input:focus::placeholder {
   padding: 0 4px;
   line-height: 1;
   border: 2px solid #fff;
+  animation: badgePop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  transform-origin: center;
 }
 /* Right-docked tab: the badge sits on the INNER side (toward the content),
    never under the browser scrollbar that hugs the right screen edge. */
