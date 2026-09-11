@@ -1,6 +1,6 @@
 // 🔖 BUILD MARKER — proves which version of app.js the browser is running.
 // If your console does NOT print "build 256052f-drawer", the running JS is stale.
-console.log("%cAttendify build: menu-tab top-band v2 (drag anchored to grab-time offset + tap-vs-drag dead zone, v5 storage, bottom-edge safe-area)", "color:#6C5DD3;font-weight:bold");
+console.log("%cAttendify build: transparency-names + qr-fit-to-viewport (every list shows 'Name (MATRIC)', CSV gains a Name column, QR auto-sizes to screen with reserved chrome)", "color:#6C5DD3;font-weight:bold");
 
 // --- FIREBASE IMPORTS & CONFIGURATION ---
 // --- FIREBASE IMPORTS & CONFIGURATION ---
@@ -838,6 +838,22 @@ function normalizeMatric(value) {
   return String(value || "")
     .trim()
     .toUpperCase();
+}
+
+// 🧑‍🎓 TRANSPARENCY DISPLAY RULE: "Name (MATRIC)" everywhere a human reads a
+// list. Matric is the stable ID; names live on course members. Unknown names
+// fall back to matric-only — never blank.
+function nameForMatric(matric) {
+  const norm = normalizeMatric(matric);
+  if (!norm) return "";
+  const rec =
+    typeof activeCourse !== "undefined" &&
+    activeCourse &&
+    Array.isArray(activeCourse.members)
+      ? activeCourse.members.find((m) => normalizeMatric(m.matric) === norm)
+      : null;
+  const nm = rec && rec.name ? String(rec.name).trim() : "";
+  return nm ? `${nm} (${norm})` : norm;
 }
 
 function normalizeCourseCode(value) {
@@ -2759,20 +2775,23 @@ if (mobileMenuBtn && navLinks) {
       courseTitle.textContent = activeCourse.name;
     if (pinText) pinText.textContent = pin;
 
-    // 📐 Maximal QR: in fullscreen landscape the shorter dimension governs —
-    // size the code to it so back-row phones can read it.
-    const qrWidth = Math.min(
-      760,
-      Math.min(window.innerWidth, window.innerHeight) - 80,
-      window.innerWidth - 60,
-    );
+    // 📐 FIT-TO-VIEWPORT QR: the overlay is a vertical stack — title + QR +
+    // PIN + instructions + countdown + Close button. On a PC the raw "760px
+    // max" lets the QR eat the whole viewport and the Close button/countdown
+    // fall off the bottom, forcing the rep to zoom out. We reserve the chrome
+    // (~220px desktop / ~170px mobile) FIRST, then size the QR into whatever
+    // is left. Canvas is CSS-clamped as a belt-and-braces guarantee.
+    const reservedHeight = window.innerWidth <= 768 ? 170 : 230;
+    const availableH = Math.max(200, window.innerHeight - reservedHeight);
+    const availableW = Math.max(200, window.innerWidth - 50);
+    const qrWidth = Math.min(availableH, availableW, 540);
     try {
       const lib = await loadQrLibrary();
       const QRCode = lib.default || lib;
       await QRCode.toCanvas(canvas, buildQrPayload(pin), {
-        width: Math.max(280, qrWidth),
+        width: qrWidth,
         margin: 1,
-        errorCorrectionLevel: "H", // headroom for the center logo
+        errorCorrectionLevel: "H",
         color: { dark: "#0b1220", light: "#ffffff" },
       });
       const logo = await loadQrLogo();
@@ -6426,10 +6445,15 @@ if (mobileMenuBtn && navLinks) {
       return;
 
     const sessionRecord = activeCourse.attendanceHistory[index];
-    let csvContent = "data:text/csv;charset=utf-8,Matric Number,Status\n";
+    let csvContent = "data:text/csv;charset=utf-8,Name,Matric Number,Status\n";
 
     sessionRecord.attendees.forEach((matric) => {
-      csvContent += `"${matric}","Present"\r\n`;
+      const norm = normalizeMatric(matric);
+      const rec = (activeCourse.members || []).find(
+        (m) => normalizeMatric(m.matric) === norm,
+      );
+      const nm = rec && rec.name ? String(rec.name).replace(/"/g, "'") : "";
+      csvContent += `"${nm}","${norm}","Present"\r\n`;
     });
 
     const encodedUri = encodeURI(csvContent);
@@ -6750,7 +6774,7 @@ if (mobileMenuBtn && navLinks) {
         const li = document.createElement("li");
         li.style.cssText =
           "display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem;";
-        li.innerHTML = `<span>🎓 <strong>${attendeeRole === "rep" || isRepAttendee ? "Rep" : "Student"}</strong> (${matric}) ${badgeHTML}${groupBadgeHTML}</span> <span style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">${statusHTML}${flagBtnHTML}</span>`;
+        li.innerHTML = `<span>🎓 <strong>${attendeeRole === "rep" || isRepAttendee ? "Rep" : "Student"}</strong> · ${nameForMatric(matric)} ${badgeHTML}${groupBadgeHTML}</span> <span style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">${statusHTML}${flagBtnHTML}</span>`;
         rosterList.appendChild(li);
       });
     }
@@ -6827,7 +6851,7 @@ if (mobileMenuBtn && navLinks) {
 
           const attendeesListHTML = sessionRecord.attendees
             .map((m) => {
-              return `<li style="font-size: 0.85rem; padding: 2px 0;">🎓 Student (${m})</li>`;
+              return `<li style="font-size: 0.85rem; padding: 2px 0;">🎓 ${nameForMatric(m)}</li>`;
             })
             .join("");
 

@@ -1239,11 +1239,19 @@ input:focus::placeholder {
     letter-spacing: 6px;
   }
 
-  /* QR projector overlay: fit narrow screens */
+  /* QR projector overlay: fit narrow screens, never overflow the viewport */
+  #qrModeOverlay {
+    overflow-y: auto;
+  }
   #qrCourseTitle {
     font-size: 1.1rem;
   }
-
+  #qrCanvas {
+    max-width: min(86vw, 540px);
+    max-height: min(70vh, 540px);
+    width: auto;
+    height: auto;
+  }
   #qrPinText {
     font-size: 1.2rem;
     letter-spacing: 6px;
