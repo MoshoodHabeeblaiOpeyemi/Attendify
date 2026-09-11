@@ -688,7 +688,7 @@ async function seedServerDevice() {
   try {
     if (!auth.currentUser) return;
     const idToken = await auth.currentUser.getIdToken();
-    const response = await fetch("/api/registerDevice", {
+    const response = await fetch("/api/session?action=registerDevice", {
       method: "POST",
       headers: { Authorization: `Bearer ${idToken}` },
     });
@@ -1615,7 +1615,7 @@ if (mobileMenuBtn && navLinks) {
         try {
           const idToken = await auth.currentUser.getIdToken();
 
-          const response = await fetch("/api/deleteAccount", {
+          const response = await fetch("/api/account?action=deleteAccount", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -1905,7 +1905,7 @@ if (mobileMenuBtn && navLinks) {
     ) {
       try {
         const idToken = await auth.currentUser.getIdToken();
-        const response = await fetch("/api/deleteCourse", {
+        const response = await fetch("/api/course?action=delete", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -1942,7 +1942,7 @@ if (mobileMenuBtn && navLinks) {
     ) {
       try {
         const idToken = await auth.currentUser.getIdToken();
-        const response = await fetch("/api/leaveCourse", {
+        const response = await fetch("/api/course?action=leave", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -2455,8 +2455,7 @@ if (mobileMenuBtn && navLinks) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const idToken = await auth.currentUser.getIdToken();
-        const response = await fetchWithTimeout(
-          "/api/approveManualAttendance",
+        const response = await fetchWithTimeout("/api/approval?action=approveManual",
           {
             method: "POST",
             headers: {
@@ -4422,7 +4421,7 @@ if (mobileMenuBtn && navLinks) {
         }
 
         const idToken = await auth.currentUser.getIdToken();
-        const response = await fetch("/api/enrollCourse", {
+        const response = await fetch("/api/course?action=enroll", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -4924,7 +4923,7 @@ if (mobileMenuBtn && navLinks) {
       for (const matric of checked) {
         try {
           const response = await fetchWithTimeout(
-            "/api/grantHotspot",
+            "/api/approval?action=grantHotspot",
             {
               method: "POST",
               headers: {
@@ -5176,7 +5175,7 @@ if (mobileMenuBtn && navLinks) {
     ) {
       try {
         const idToken = await auth.currentUser.getIdToken();
-        const response = await fetch("/api/removeStudent", {
+        const response = await fetch("/api/course?action=remove", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -6125,7 +6124,7 @@ if (mobileMenuBtn && navLinks) {
         toast.info("Submitting attendance...", "Checking In");
         try {
           const idToken = await auth.currentUser.getIdToken();
-          const response = await fetch("/api/submitAttendance", {
+          const response = await fetch("/api/attendance?action=submit", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -6177,7 +6176,7 @@ if (mobileMenuBtn && navLinks) {
 
         try {
           const idToken = await auth.currentUser.getIdToken();
-          const response = await fetch("/api/submitAttendance", {
+          const response = await fetch("/api/attendance?action=submit", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -6342,7 +6341,7 @@ if (mobileMenuBtn && navLinks) {
     if (!ok) return;
     try {
       const idToken = await auth.currentUser.getIdToken();
-      const response = await fetch("/api/flagAbsent", {
+      const response = await fetch("/api/attendance?action=flagAbsent", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -6385,7 +6384,7 @@ if (mobileMenuBtn && navLinks) {
       ) {
         try {
           const idToken = await auth.currentUser.getIdToken();
-          const response = await fetch("/api/closeSession", {
+          const response = await fetch("/api/session?action=close", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -6442,7 +6441,7 @@ if (mobileMenuBtn && navLinks) {
       ) {
         try {
           const idToken = await auth.currentUser.getIdToken();
-          const response = await fetch("/api/endSemester", {
+          const response = await fetch("/api/semester?action=endSemester", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

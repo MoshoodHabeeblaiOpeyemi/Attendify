@@ -2,13 +2,11 @@ const { getAppCheck } = require("firebase-admin/app-check");
 
 // 🛡️ App Check verification helper for API endpoints.
 //
-// SOFT MODE (default): when the ENFORCE_APP_CHECK env var is not "true", this
-// is a no-op so the app keeps working before App Check is configured in the
-// Firebase Console. This lets you ship now and flip enforcement on later.
+// SOFT MODE (default): when ENFORCE_APP_CHECK env var is not "true", this
+// is a no-op so the app keeps working before App Check is configured.
 //
-// To enforce: Console → App Check → register the web app (reCAPTCHA v3), fill
-// APP_CHECK_SITE_KEY in app.js, and set ENFORCE_APP_CHECK=true in this
-// deployment's environment variables.
+// To enforce: Console → App Check → register the web app (reCAPTCHA v3),
+// fill APP_CHECK_SITE_KEY in app.js, and set ENFORCE_APP_CHECK=true.
 module.exports = async function verifyAppCheck(req) {
   if (String(process.env.ENFORCE_APP_CHECK || "").toLowerCase() !== "true") {
     return;
