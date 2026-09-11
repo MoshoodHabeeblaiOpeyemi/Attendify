@@ -1,6 +1,6 @@
 // 🔖 BUILD MARKER — proves which version of app.js the browser is running.
 // If your console does NOT print "build 256052f-drawer", the running JS is stale.
-console.log("%cAttendify build: proof-of-presence + public-transparency (hotspots must be checked-in first, grants public to the whole class, archives tag auto-marked + hotspots, reject reasons, removal alerts)", "color:#6C5DD3;font-weight:bold");
+console.log("%cAttendify build: in-app-qr-scanner (hotspots proof-of-presence, public grants, portrait QR, students scan inside the app)", "color:#6C5DD3;font-weight:bold");
 
 // --- FIREBASE IMPORTS & CONFIGURATION ---
 // --- FIREBASE IMPORTS & CONFIGURATION ---
@@ -3204,6 +3204,133 @@ if (mobileMenuBtn && navLinks) {
       }, 400);
     }
   }
+
+  // ============================================================
+  // 📸 IN-APP QR SCANNER — students scan the class QR from their seat,
+  // inside Attendify (no third-party camera app). Uses the browser's
+  // native BarcodeDetector (supported by every Android Chrome — the
+  // student population's reality). Unsupported/denied browsers get a
+  // clear message and fall back to the camera-app deep-link flow.
+  // Detection REUSES the deep-link pipeline: the scanned URL sets
+  // pendingQrScan → tryHandlePendingQrScan() routes, fills the PIN and
+  // auto-submits through the SAME submit handler (device lock etc).
+  // ============================================================
+  let qrScannerStream = null;
+  let qrScannerInterval = null;
+
+  function stopQrScanner() {
+    if (qrScannerInterval) {
+      clearInterval(qrScannerInterval);
+      qrScannerInterval = null;
+    }
+    if (qrScannerStream) {
+      qrScannerStream.getTracks().forEach((t) => t.stop());
+      qrScannerStream = null;
+    }
+    const sheet = document.getElementById("qrScannerSheet");
+    if (sheet) sheet.classList.add("hidden");
+  }
+
+  function handleScannedQrText(text) {
+    try {
+      const url = new URL(String(text).trim(), location.origin);
+      const code = (url.searchParams.get("code") || "").trim().toUpperCase();
+      const pin = (url.searchParams.get("qrpin") || "").trim();
+      if (!code || !/^\d{4}$/.test(pin)) {
+        toast.warning(
+          "That QR isn't an Attendify class code. Point at the QR shown by your Course Rep.",
+          "Wrong Code",
+        );
+        return false; // keep scanning
+      }
+      const match = courses.find(
+        (c) => (c.code || "").toUpperCase() === code,
+      );
+      if (!match) {
+        stopQrScanner();
+        toast.error(
+          `You are not enrolled in ${code}. Join the course first, then scan again.`,
+          "Not Enrolled",
+        );
+        return true;
+      }
+      stopQrScanner();
+      // Same entry as the camera-app deep link — the whole existing
+      // routing (open portal, fill PIN, auto-submit) takes over from here.
+      pendingQrScan = { code, pin };
+      qrScanHandled = false;
+      tryHandlePendingQrScan();
+      return true;
+    } catch (_) {
+      return false; // unparsable — keep scanning
+    }
+  }
+
+  window.openQrScanner = async function () {
+    const sheet = document.getElementById("qrScannerSheet");
+    const video = document.getElementById("qrScannerVideo");
+    const status = document.getElementById("qrScannerStatus");
+    if (!sheet || !video || !currentUser) return;
+
+    if (!("BarcodeDetector" in window)) {
+      toast.info(
+        "This browser can't scan in-app. Point your camera app at the class QR — Attendify opens and checks you in automatically — or type the PIN below.",
+        "Scanner Unavailable",
+      );
+      return;
+    }
+
+    sheet.classList.remove("hidden");
+    if (status) status.textContent = "Starting camera…";
+    try {
+      qrScannerStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+      video.srcObject = qrScannerStream;
+      if (status) status.textContent = "Looking for a QR code…";
+    } catch (err) {
+      console.error("QR scanner camera error:", err);
+      stopQrScanner();
+      toast.error(
+        "Camera access was blocked. Allow camera permission for Attendify, or type the PIN below.",
+        "Camera Blocked",
+      );
+      return;
+    }
+
+    try {
+      const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+      qrScannerInterval = setInterval(async () => {
+        if (!qrScannerStream || video.readyState < 2) return;
+        try {
+          const codes = await detector.detect(video);
+          if (codes && codes.length > 0 && codes[0].rawValue) {
+            handleScannedQrText(codes[0].rawValue);
+            if (status && !sheet.classList.contains("hidden")) {
+              status.textContent = "✅ QR detected — checking you in…";
+            }
+          }
+        } catch (_) {
+          /* frame not ready — next tick retries */
+        }
+      }, 250);
+    } catch (err) {
+      console.error("BarcodeDetector setup error:", err);
+      stopQrScanner();
+      toast.info(
+        "Scanning isn't supported here. Use your camera app on the class QR — Attendify opens and checks you in automatically.",
+        "Scanner Unavailable",
+      );
+    }
+  };
+
+  const scanQrBtn = document.getElementById("scanQrBtn");
+  if (scanQrBtn)
+    scanQrBtn.addEventListener("click", () => window.openQrScanner());
+  const qrScannerCloseBtn = document.getElementById("qrScannerCloseBtn");
+  if (qrScannerCloseBtn)
+    qrScannerCloseBtn.addEventListener("click", () => stopQrScanner());
 
   window.openPortal = function (courseId) {
     const selectedCourse = courses.find((c) => c.id === courseId);
