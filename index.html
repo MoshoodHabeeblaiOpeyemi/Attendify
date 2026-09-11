@@ -615,6 +615,47 @@
         </div>
       </div>
 
+      <!-- 🛡️ CLASS EXEMPTIONS (public board) — every enrolled student can see
+           WHO is excused on WHICH dates. The REASON stays private (staff +
+           the affected student only) because it's stored in the staff-only
+           exemptionReasons subcollection. -->
+      <div id="classExemptionsSection" class="hidden"
+        style="margin-top: 20px; background: var(--card-bg); padding: 20px; border-radius: 12px; border: 1.5px solid var(--border);">
+        <h3 style="color: var(--navy); margin-bottom: 5px;">
+          <i data-lucide="shield-check"></i> Class Exemptions
+        </h3>
+        <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">
+          Who is excused and on which dates — public for the whole class. Details stay private.
+        </p>
+        <div id="classExemptionsList"
+          style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: var(--bg);">
+          <p style="font-size: 0.85rem; color: var(--muted); text-align: center; padding: 10px;">No exemptions recorded yet.</p>
+        </div>
+      </div>
+
+      <!-- 📚 CLASS REPORTS (public, read-only) — the same facts the rep's
+           archive has, minus other students' private details: date, present
+           count, physical headcount vs system count, flags, who was
+           auto-marked and who the Hotspots were. -->
+      <div id="classReportsSection" class="hidden"
+        style="margin-top: 20px; background: var(--card-bg); padding: 20px; border-radius: 12px; border: 1.5px solid var(--border);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+          <h3 style="color: var(--navy); margin: 0;">
+            <i data-lucide="layers"></i> Class Reports
+          </h3>
+          <button id="refreshClassReportsBtn" type="button" class="btn btn-outline"
+            style="width: auto; font-size: 0.75rem; padding: 6px 12px;">
+            <i data-lucide="refresh-cw"></i> Refresh
+          </button>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--muted); margin-bottom: 15px;">
+          Every closed class's public record — present count, headcount check, flags and Hotspots.
+        </p>
+        <div id="classReportsList" style="border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: var(--bg);">
+          <p style="font-size: 0.85rem; color: var(--muted); text-align: center; padding: 10px;">No closed classes yet.</p>
+        </div>
+      </div>
+
       <!-- STUDENT ATTENDANCE ANALYTICS SECTION -->
       <div id="studentAnalyticsSection" class="hidden"
         style="margin-top: 20px; background: var(--card-bg); padding: 20px; border-radius: 12px; border: 1.5px solid var(--border);">
@@ -1068,8 +1109,9 @@
     </div>
   </div>
 
-  <!-- 🎛️ REP MISSION-CONTROL DRAWER: one view at a time, everything else one
-       tap away. Rep/assistant-only — students never see this chrome. -->
+  <!-- 🎛️ MISSION-CONTROL DRAWER: one view at a time, everything else one tap
+       away. The rep/assistant set AND a separate student set share the same
+       slide-out; which set shows depends on who is inside the portal. -->
   <div id="drawerBackdrop" class="drawer-backdrop"></div>
   <aside id="portalDrawer" class="portal-drawer" aria-label="Course tools">
     <div class="drawer-header">
@@ -1077,18 +1119,26 @@
       <button id="drawerCloseBtn" class="drawer-close" aria-label="Close">&times;</button>
     </div>
     <nav class="drawer-nav">
-      <button class="drawer-item" data-view="checkinView">✋ Check-in
+      <!-- REP / STAFF TOOLS -->
+      <button class="drawer-item staff-only" data-view="checkinView">✋ Check-in
         <span class="drawer-badge hidden" id="badgeCheckin">0</span>
       </button>
-      <button class="drawer-item" data-view="rosterView">👥 Live Roster
+      <button class="drawer-item staff-only" data-view="rosterView">👥 Live Roster
         <span class="drawer-badge hidden" id="badgeRoster">0</span>
       </button>
-      <button class="drawer-item" data-view="studentsView">🎓 Students</button>
-      <button class="drawer-item" data-view="assistantsView">⭐ Assistants &amp; Groups</button>
-      <button class="drawer-item" data-view="bulkView">📥 Bulk Import</button>
-      <button class="drawer-item" data-view="exemptionsView">🛡️ Exemptions</button>
-      <button class="drawer-item" data-view="archiveView">📚 Archive &amp; Audit</button>
-      <button class="drawer-item" data-view="analyticsView">📊 Analytics</button>
+      <button class="drawer-item staff-only" data-view="studentsView">🎓 Students</button>
+      <button class="drawer-item staff-only" data-view="assistantsView">⭐ Assistants &amp; Groups</button>
+      <button class="drawer-item staff-only" data-view="bulkView">📥 Bulk Import</button>
+      <button class="drawer-item staff-only" data-view="exemptionsView">🛡️ Exemptions</button>
+      <button class="drawer-item staff-only" data-view="archiveView">📚 Archive &amp; Audit</button>
+      <button class="drawer-item staff-only" data-view="analyticsView">📊 Analytics</button>
+
+      <!-- STUDENT TOOLS (shown only for plain enrolled students) -->
+      <button class="drawer-item student-only hidden" data-student-view="checkinView">✋ Check-in</button>
+      <button class="drawer-item student-only hidden" data-student-view="rosterView">👥 Class Roster</button>
+      <button class="drawer-item student-only hidden" data-student-view="analyticsView">📊 My Analytics</button>
+      <button class="drawer-item student-only hidden" data-student-view="exemptionsView">🛡️ Class Exemptions</button>
+      <button class="drawer-item student-only hidden" data-student-view="reportsView">📚 Class Reports</button>
     </nav>
     <p class="drawer-footnote">Tap a tool to focus on it — badges wait until you check.</p>
   </aside>

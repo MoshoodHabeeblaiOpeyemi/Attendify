@@ -95,11 +95,41 @@ module.exports = async (req, res) => {
         .json({ error: "You are not enrolled in this course." });
     }
 
-    // One-phone binding. A website cannot make this unbreakable (clearing
-    // site data mints a new id). On mismatch we deny AND leave a flag the
-    // rep can review — not a silent drop.
-    if (deviceId && typeof deviceId === "string" && deviceId.length >= 8) {
-      const deviceRef = db.collection("devices").doc(deviceId);
+    // G1 🛡️ SERVER-MINTED DEVICE IDENTITY (defense in depth): the browser's
+    // localStorage id can be cleared/forged, so the server anchors a device
+    // id in an HttpOnly cookie too. When both exist they MUST MATCH — an
+    // attacker clearing storage can mint a fresh localStorage id, but the
+    // cookie stays pinned and a mismatch is denied + flagged. First-time
+    // devices get the cookie minted in this very response.
+    const serverDeviceId = readDeviceCookieValues(req.headers.cookie || "");
+
+    let resolvedDeviceId = serverDeviceId || deviceId;
+    if (
+      deviceId &&
+      typeof deviceId === "string" &&
+      deviceId.length >= 8 &&
+      serverDeviceId &&
+      deviceId !== serverDeviceId
+    ) {
+      await tryAddDeviceFlag(courseRef, {
+        deviceId: serverDeviceId,
+        attemptedMatric: matric,
+        boundMatric: "",
+        uid,
+        type: "identity_mismatch",
+      });
+      return res.status(403).json({
+        error:
+          "Device identity mismatch — this phone is already anchored to another device ID. Proxy attendance is strictly prohibited.",
+      });
+    }
+
+    if (
+      resolvedDeviceId &&
+      typeof resolvedDeviceId === "string" &&
+      resolvedDeviceId.length >= 8
+    ) {
+      const deviceRef = db.collection("devices").doc(resolvedDeviceId);
       const deviceDoc = await deviceRef.get();
       if (deviceDoc.exists) {
         const boundMatric = String(deviceDoc.data().matric || "")
@@ -107,7 +137,7 @@ module.exports = async (req, res) => {
           .toUpperCase();
         if (boundMatric && boundMatric !== matric) {
           await courseRef.collection("deviceFlags").add({
-            deviceId,
+            deviceId: resolvedDeviceId,
             attemptedMatric: matric,
             boundMatric,
             uid,
@@ -117,6 +147,12 @@ module.exports = async (req, res) => {
             error: `Device Locked: This phone is registered to matric [${boundMatric}]. Proxy attendance is strictly prohibited.`,
           });
         }
+        // Keep the anchor fresh.
+        try {
+          await deviceRef.update({
+            lastSeenAt: FieldValue.serverTimestamp(),
+          });
+        } catch (_) {}
       } else {
         await deviceRef.set({
           matric,
@@ -124,6 +160,13 @@ module.exports = async (req, res) => {
           boundAt: FieldValue.serverTimestamp(),
           userAgent: req.headers["user-agent"] || "",
         });
+      }
+      // Pin the server-minted cookie the first time we see this device.
+      if (!serverDeviceId) {
+        res.setHeader(
+          "Set-Cookie",
+          `att_device=${resolvedDeviceId}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=31536000`,
+        );
       }
     }
 
@@ -323,3 +366,27 @@ module.exports = async (req, res) => {
       .json({ error: "Server error during check-in authorization." });
   }
 };
+
+// G1 helpers — read/flag utilities for the server-minted device anchor.
+function readDeviceCookieValues(header) {
+  const hit = String(header || "")
+    .split(";")
+    .map((s) => s.trim())
+    .find((s) => s.startsWith("att_device="));
+  if (!hit) return null;
+  const raw = hit.split("=", 2)[1] || "";
+  try {
+    return decodeURIComponent(raw);
+  } catch (_) {
+    return raw;
+  }
+}
+
+async function tryAddDeviceFlag(courseRef, data) {
+  try {
+    await courseRef.collection("deviceFlags").add({
+      ...data,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  } catch (_) {}
+}

@@ -281,26 +281,42 @@ service cloud.firestore {
       }
 
       // Holiday/Exemption management (rep-only writes).
-      // Reps can create and delete exemptions for students. Staff can read
-      // everything; a student can list ONLY their own — matched by comparing
-      // the exemption's matric against the member doc of the requester.
+      // 🛡️ PUBLIC by design: every enrolled student can LIST who is excused
+      // on which dates (transparency — no quiet favours), while only the
+      // affected student or staff can GET an individual doc. Private reasons
+      // live in the staff-only exemptionReasons subcollection — never in the
+      // public doc — and the anti-stuffing guards below stop a rep (or
+      // anyone writing as rep) from pushing reason/details back into it.
       match /exemptions/{exemptionId} {
-        allow get, list: if isCourseStaff(courseId) || (
+        allow get: if isCourseStaff(courseId) || (
           isCourseMember(courseId)
           && get(
             /databases/$(database)/documents/courses/$(courseId)/members/$(request.auth.uid)
           ).data.matric == resource.data.matric
         );
+        allow list: if isCourseStaff(courseId) || isCourseMember(courseId);
 
         allow create: if isCourseRep(courseId)
           && request.resource.data.matric is string
           && request.resource.data.matric.size() > 0
           && request.resource.data.date is string
           && request.resource.data.date.size() > 0
-          && request.resource.data.reason is string
-          && request.resource.data.reason.size() > 0;
+          && !('reason' in request.resource.data)
+          && !('details' in request.resource.data);
+
+        allow update: if isCourseRep(courseId)
+          && !('reason' in request.resource.data)
+          && !('details' in request.resource.data);
 
         allow delete: if isCourseRep(courseId);
+      }
+
+      // 🔒 Exemption REASONS — staff-only. Written by the rep alongside the
+      // public exemptions doc; never readable by course members, so private
+      // medical/event details stay between the rep and the student.
+      match /exemptionReasons/{exemptionId} {
+        allow read: if isCourseStaff(courseId);
+        allow create, update, delete: if isCourseStaff(courseId);
       }
 
       // 👁️ Session security events (screenshot attempts, leaving the app

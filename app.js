@@ -1,6 +1,6 @@
 // 🔖 BUILD MARKER — proves which version of app.js the browser is running.
 // If your console does NOT print "build 256052f-drawer", the running JS is stale.
-console.log("%cAttendify build: in-app-qr-scanner (hotspots proof-of-presence, public grants, portrait QR, students scan inside the app)", "color:#6C5DD3;font-weight:bold");
+console.log("%cAttendify build: student-drawer v2 (student side menu, public class exemptions + class reports, jsQR iOS scanner fallback, server-minted device cookie)", "color:#6C5DD3;font-weight:bold");
 
 // --- FIREBASE IMPORTS & CONFIGURATION ---
 // --- FIREBASE IMPORTS & CONFIGURATION ---
@@ -666,6 +666,28 @@ function getOrCreateDeviceId() {
     localStorage.setItem("attendify_device_uuid", deviceId);
   }
   return deviceId;
+}
+
+// G1: seed the server-minted device cookie (fire-and-forget) so check-ins
+// carry an unforgeable identity anchor. Never blocks login.
+async function seedServerDevice() {
+  try {
+    if (!auth.currentUser) return;
+    const idToken = await auth.currentUser.getIdToken();
+    const response = await fetch("/api/registerDevice", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${idToken}` },
+    });
+    const result = await response.json();
+    if (result && result.deviceId && typeof result.deviceId === "string") {
+      const key = "attendify_device_uuid";
+      if (!localStorage.getItem(key)) {
+        localStorage.setItem(key, result.deviceId);
+      }
+    }
+  } catch (_) {
+    /* non-fatal — check-in mints the cookie server-side anyway */
+  }
 }
 
 // ============================================================
@@ -1493,6 +1515,9 @@ if (mobileMenuBtn && navLinks) {
         startCourseListener();
         startNotificationsListener();
         checkAuth();
+        // G1: seed the server-minted device cookie (fire-and-forget) so
+        // check-ins carry an unforgeable identity anchor.
+        seedServerDevice();
       } else {
         console.warn("Ghost user blocked: No Firestore profile found.");
         toast.error(
@@ -3272,14 +3297,6 @@ if (mobileMenuBtn && navLinks) {
     const status = document.getElementById("qrScannerStatus");
     if (!sheet || !video || !currentUser) return;
 
-    if (!("BarcodeDetector" in window)) {
-      toast.info(
-        "This browser can't scan in-app. Point your camera app at the class QR — Attendify opens and checks you in automatically — or type the PIN below.",
-        "Scanner Unavailable",
-      );
-      return;
-    }
-
     sheet.classList.remove("hidden");
     if (status) status.textContent = "Starting camera…";
     try {
@@ -3299,22 +3316,38 @@ if (mobileMenuBtn && navLinks) {
       return;
     }
 
+    // G4 📱 FULL SCANNER COVERAGE: Android Chrome uses the native
+    // BarcodeDetector. Everywhere else (iOS Safari etc.) we lazily load the
+    // tiny jsQR decoder from a CDN and decode canvas frames in-app — so no
+    // student is ever forced out of Attendify to scan. If the CDN is
+    // unreachable, the clear fallback message still appears.
+    const useNative = "BarcodeDetector" in window;
+    if (!useNative) {
+      try {
+        if (status) status.textContent = "Loading scanner engine…";
+        const mod = await import(
+          "https://unpkg.com/jsqr@1.4.0/dist/jsQR.js"
+        );
+        window.__jsQR = (mod && (mod.jsQR || mod.default)) || window.jsQR;
+      } catch (_) {
+        window.__jsQR = null;
+      }
+      if (!window.__jsQR) {
+        stopQrScanner();
+        toast.info(
+          "This browser can't scan in-app right now (scanner engine unreachable). Use your camera app on the class QR — Attendify opens and checks you in automatically — or type the PIN below.",
+          "Scanner Unavailable",
+        );
+        return;
+      }
+    }
+
+    let detector = null;
+    let canvas = null;
     try {
-      const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
-      qrScannerInterval = setInterval(async () => {
-        if (!qrScannerStream || video.readyState < 2) return;
-        try {
-          const codes = await detector.detect(video);
-          if (codes && codes.length > 0 && codes[0].rawValue) {
-            handleScannedQrText(codes[0].rawValue);
-            if (status && !sheet.classList.contains("hidden")) {
-              status.textContent = "✅ QR detected — checking you in…";
-            }
-          }
-        } catch (_) {
-          /* frame not ready — next tick retries */
-        }
-      }, 250);
+      if (useNative) {
+        detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+      }
     } catch (err) {
       console.error("BarcodeDetector setup error:", err);
       stopQrScanner();
@@ -3322,7 +3355,46 @@ if (mobileMenuBtn && navLinks) {
         "Scanning isn't supported here. Use your camera app on the class QR — Attendify opens and checks you in automatically.",
         "Scanner Unavailable",
       );
+      return;
     }
+
+    qrScannerInterval = setInterval(async () => {
+      if (!qrScannerStream || video.readyState < 2) return;
+      try {
+        if (useNative && detector) {
+          const codes = await detector.detect(video);
+          if (codes && codes.length > 0 && codes[0].rawValue) {
+            handleScannedQrText(codes[0].rawValue);
+            if (status && !sheet.classList.contains("hidden")) {
+              status.textContent = "✅ QR detected — checking you in…";
+            }
+          }
+          return;
+        }
+        // jsQR path: snap a canvas frame and decode it.
+        const w = Math.min(video.videoWidth || 640, 960);
+        const h = Math.round(w * ((video.videoHeight || 480) / Math.max(1, video.videoWidth || 640)));
+        if (!canvas) {
+          canvas = document.createElement("canvas");
+        }
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(video, 0, 0, w, h);
+        const img = ctx.getImageData(0, 0, w, h);
+        const result = window.__jsQR(img.data, w, h);
+        if (result && result.data) {
+          handleScannedQrText(result.data);
+          if (status && !sheet.classList.contains("hidden")) {
+            status.textContent = "✅ QR detected — checking you in…";
+          }
+        }
+      } catch (_) {
+        /* frame not ready — next tick retries */
+      }
+    }, 250);
   };
 
   const scanQrBtn = document.getElementById("scanQrBtn");
@@ -3399,22 +3471,19 @@ if (mobileMenuBtn && navLinks) {
       syncHotspotChrome();
     } else {
       if (repControls) repControls.classList.add("hidden");
-      if (studentControls) studentControls.classList.remove("hidden");
       hideAllManagementPanels();
       const mgmtToolbarEl = document.getElementById("managementToolbar");
       if (mgmtToolbarEl) mgmtToolbarEl.classList.add("hidden");
 
-      // Students see analytics + roster stacked (drawer is staff-only chrome).
-      const rosterSectionEl = document.getElementById("rosterSection");
-      if (rosterSectionEl) rosterSectionEl.classList.remove("hidden");
-      const studentAnalyticsEl = document.getElementById(
-        "studentAnalyticsSection",
-      );
-      if (studentAnalyticsEl) studentAnalyticsEl.classList.remove("hidden");
+      // Students get their own Mission-Control drawer too. Default to the
+      // Check-in view (one thing at a time, just like the rep) instead of
+      // stacking everything on the page.
+      showStudentView("checkin");
 
       if (typeof syncDrawerTabVisibility === "function") {
         syncDrawerTabVisibility();
       }
+      syncStudentNav();
     }
 
     renderPortalState();
@@ -3634,6 +3703,8 @@ if (mobileMenuBtn && navLinks) {
 
   // Which rep-view is showing right now. "checkin" = setup+live cards.
   let activeDrawerView = "checkin";
+  // Which STUDENT-drawer view is showing right now (separate from the rep one).
+  let activeStudentView = "checkin";
   let isDrawerOpen = false;
 
   // Unseen counts, keyed by drawer destination. Raising the badge value
@@ -3860,8 +3931,13 @@ if (mobileMenuBtn && navLinks) {
     const staff =
       isRepForActiveCourse() ||
       (isAssistantForActiveCourse() && !isSessionHotspotForActiveCourse());
-    drawerTab.classList.toggle("hidden", !(inPortal && staff));
-    if (!(inPortal && staff)) closePortalDrawer();
+    // Plain students also get the side menu (their own tools) while inside
+    // a portal. Hotspots are excluded — they stay on the focused QR screen.
+    const isPlainStudent = inPortal && !staff && !isSessionHotspotForActiveCourse();
+    const showTab = inPortal && (staff || isPlainStudent);
+    drawerTab.classList.toggle("hidden", !showTab);
+    if (!showTab && isDrawerOpen) closePortalDrawer();
+    syncStudentNav();
   }
 
   // Draggable tab — pointer + touch, moves along the chosen axis, clamps to
@@ -4032,13 +4108,187 @@ if (mobileMenuBtn && navLinks) {
       });
     });
 
-  // Tab click toggles the drawer.
+  // ============================================================
+  // 🎓 STUDENT MISSION-CONTROL DRAWER — students get the same one-view-at-
+  // a-time side menu, but with their OWN tools: Check-in, Class Roster,
+  // My Analytics, Class Exemptions (public board), Class Reports. The rep
+  // drawer (showDrawerView) and its badges are untouched.
+  // ============================================================
+  const STUDENT_VIEWS = {
+    checkin: "studentControls",
+    roster: "rosterSection",
+    analytics: "studentAnalyticsSection",
+    exemptions: "classExemptionsSection",
+    reports: "classReportsSection",
+  };
+
+  function showStudentView(view) {
+    if (!view || !STUDENT_VIEWS[view]) return;
+    activeStudentView = view;
+    // Hide every student-side surface first, then show exactly one.
+    Object.values(STUDENT_VIEWS).forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add("hidden");
+    });
+    const showEl = document.getElementById(STUDENT_VIEWS[view]);
+    if (showEl) showEl.classList.remove("hidden");
+
+    // Active state on the student nav items only.
+    document
+      .querySelectorAll(".drawer-item.student-only")
+      .forEach((b) => b.classList.remove("active"));
+    const item = document.querySelector(`[data-student-view="${view}View"]`);
+    if (item) item.classList.add("active");
+
+    if (view === "exemptions") renderStudentClassExemptions();
+    if (view === "reports") renderClassReports();
+
+    closePortalDrawer();
+    if (showEl) {
+      setTimeout(
+        () => showEl.scrollIntoView({ behavior: "smooth", block: "start" }),
+        60,
+      );
+    }
+  }
+
+  document
+    .querySelectorAll(".drawer-item[data-student-view]")
+    .forEach((b) => {
+      const view = b.dataset.studentView;
+      if (!view) return;
+      b.addEventListener("click", () => {
+        showStudentView(view.replace("View", ""));
+      });
+    });
+
+  function syncStudentNav() {
+    const inPortal = Boolean(
+      activeCourse &&
+        portalSection &&
+        !portalSection.classList.contains("hidden"),
+    );
+    // Plain enrolled students get the student drawer set; staff/hotspots don't.
+    const isPlainStudent =
+      inPortal &&
+      !isRepForActiveCourse() &&
+      !isAssistantForActiveCourse();
+    document.querySelectorAll(".drawer-item.staff-only").forEach((b) =>
+      b.classList.toggle("hidden", isPlainStudent),
+    );
+    document.querySelectorAll(".drawer-item.student-only").forEach((b) => {
+      b.classList.toggle("hidden", !isPlainStudent);
+      if (!isPlainStudent) b.classList.remove("active");
+    });
+  }
+
+  // 🛡️ PUBLIC class exemptions board: who is excused and on which dates.
+  // The stored reason lives in the staff-only exemptionReasons collection,
+  // so this view can never leak a private reason even if rules change.
+  async function renderStudentClassExemptions() {
+    const listEl = document.getElementById("classExemptionsList");
+    if (!listEl || !activeCourse) return;
+    try {
+      const snap = await getDocs(
+        query(
+          collection(db, "courses", activeCourse.id, "exemptions"),
+          orderBy("date", "desc"),
+          limit(50),
+        ),
+      );
+      const exemptions = snap.docs.map((d) => d.data());
+      if (exemptions.length === 0) {
+        listEl.innerHTML =
+          '<p style="font-size:0.85rem; color:var(--muted); text-align:center; padding:10px;">No exemptions recorded yet.</p>';
+        return;
+      }
+      listEl.innerHTML = exemptions
+        .map((x) =>
+          `<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; border:1px solid var(--border); border-radius:8px; margin-bottom:6px; background:var(--card-bg);">
+            <span style="font-size:0.85rem;">🎓 <strong>${x.matric || "?"}</strong></span>
+            <span style="font-size:0.75rem; color:var(--muted);">🛡️ ${x.date || "?"}</span>
+          </div>`,
+        )
+        .join("");
+    } catch (err) {
+      console.error("Class exemptions render error:", err);
+      listEl.innerHTML =
+        '<p style="font-size:0.85rem; color:var(--danger); text-align:center; padding:10px;">Could not load exemptions.</p>';
+    }
+  }
+
+  // 📚 PUBLIC class reports: closed classes with present count, headcount
+  // comparison, flags, auto-marked creator, and the Hotspots used. Same
+  // facts the rep's archive shows — without other students' private details.
+  async function renderClassReports() {
+    const listEl = document.getElementById("classReportsList");
+    if (!listEl || !activeCourse) return;
+    try {
+      const snap = await getDocs(
+        query(
+          collection(db, "courses", activeCourse.id, "attendance"),
+          orderBy("closedAt", "desc"),
+          limit(15),
+        ),
+      );
+      const records = snap.docs.map((d) => d.data());
+      if (records.length === 0) {
+        listEl.innerHTML =
+          '<p style="font-size:0.85rem; color:var(--muted); text-align:center; padding:10px;">No closed classes yet.</p>';
+        return;
+      }
+      listEl.innerHTML = records
+        .map((r) => {
+          const present = (r.attendees || []).length;
+          const pc = r.physicalHeadcount;
+          const headcountLine =
+            Number.isInteger(pc)
+              ? pc === present
+                  ? `<span style="color:#28a745;">✔ Headcount ${pc} matches system ${present}</span>`
+                  : `<span style="color:#fd7e14;">⚠️ Physical headcount ${pc} vs system ${present}</span>`
+              : `<span style="color:var(--muted);">No headcount taken</span>`;
+          const flags = (r.flaggedAbsent || []).length;
+          const auto =
+            (r.autoMarked || []).map((a) => a.matric).join(", ") || "none";
+          const hotspots =
+            (r.hotspots || []).length > 0
+              ? (r.hotspots || [])
+                  .map((h) => `${h.name || h.matric}${h.grantedByMatric ? ` (by ${h.grantedByMatric})` : ""}`)
+                  .join(", ")
+              : "none";
+          return `<div style="background:var(--card-bg); padding:10px 12px; border-radius:8px; margin-bottom:8px; border:1px solid var(--border);">
+            <div style="font-size:0.85rem; font-weight:700; color:var(--navy);">📅 ${r.date || "Unknown date"}</div>
+            <div style="font-size:0.8rem; color:var(--text); margin-top:4px;">👥 <strong>${present}</strong> present · ${headcountLine}</div>
+            <div style="font-size:0.78rem; color:var(--muted); margin-top:3px;">🚩 ${flags} flagged · ✒️ auto-marked: ${auto} · 📡 Hotspots: ${hotspots}</div>
+          </div>`;
+        })
+        .join("");
+    } catch (err) {
+      console.error("Class reports render error:", err);
+      listEl.innerHTML =
+        '<p style="font-size:0.85rem; color:var(--danger); text-align:center; padding:10px;">Could not load class reports.</p>';
+    }
+  }
+
+  const refreshClassReportsBtnEl = document.getElementById(
+    "refreshClassReportsBtn",
+  );
+  if (refreshClassReportsBtnEl)
+    refreshClassReportsBtnEl.addEventListener("click", () =>
+      renderClassReports(),
+    );
+
   if (drawerTab) {
     drawerTab.addEventListener("click", () => {
-      if (
-        !activeCourse ||
-        (!isRepForActiveCourse() && !isAssistantForActiveCourse())
-      ) {
+      if (!activeCourse) {
+        drawerTab.classList.add("hidden");
+        return;
+      }
+      const canOpen =
+        isRepForActiveCourse() ||
+        isAssistantForActiveCourse() ||
+        !isSessionHotspotForActiveCourse();
+      if (!canOpen) {
         drawerTab.classList.add("hidden");
         return;
       }
@@ -4359,16 +4609,27 @@ if (mobileMenuBtn && navLinks) {
       try {
         const exemptionId = `exempt_${studentMatric.replace(/[^a-zA-Z0-9]/g, '')}_${date.replace(/-/g, '')}`;
 
+        // PUBLIC-FACING doc: matric + date only. The reason/details are
+        // written to the staff-only exemptionReasons subcollection so no
+        // classmate can ever read them from the public board.
         await setDoc(
           doc(db, "courses", activeCourse.id, "exemptions", exemptionId),
+          {
+            matric: studentMatric,
+            date: date,
+            approvedBy: auth.currentUser.uid,
+            approvedByName: currentUser.name || "Rep",
+            approvedAt: serverTimestamp(),
+          }
+        );
+        await setDoc(
+          doc(db, "courses", activeCourse.id, "exemptionReasons", exemptionId),
           {
             matric: studentMatric,
             date: date,
             reason: reason,
             details: details,
             approvedBy: auth.currentUser.uid,
-            approvedByName: currentUser.name || "Rep",
-            approvedAt: serverTimestamp(),
           }
         );
 
@@ -4396,6 +4657,12 @@ if (mobileMenuBtn && navLinks) {
     try {
       const exemptionsSnap = await getDocs(collection(db, "courses", activeCourse.id, "exemptions"));
       const exemptions = exemptionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // Join the staff-only reasons so the rep still sees the full picture.
+      let reasonsById = new Map();
+      try {
+        const reasonsSnap = await getDocs(collection(db, "courses", activeCourse.id, "exemptionReasons"));
+        reasonsById = new Map(reasonsSnap.docs.map((d) => [d.id, d.data()]));
+      } catch (_) { /* reasons stay empty — list still shows */ }
 
       if (exemptions.length === 0) {
         exemptionsList.innerHTML = '<p style="font-size: 0.85rem; color: var(--muted); text-align: center; padding: 10px;">No exemptions recorded yet.</p>';
@@ -4406,6 +4673,7 @@ if (mobileMenuBtn && navLinks) {
       exemptions.forEach(exemption => {
         const card = document.createElement("div");
         card.style.cssText = "background: var(--card-bg); padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; border: 1px solid var(--border);";
+        const r = reasonsById.get(exemption.id) || {};
 
         const reasonLabels = {
           medical: "Medical Emergency",
@@ -4420,8 +4688,8 @@ if (mobileMenuBtn && navLinks) {
             <strong style="color: var(--navy);">🎓 ${exemption.matric}</strong>
             <span style="font-size: 0.75rem; color: var(--muted);">${exemption.date}</span>
           </div>
-          <div style="font-size: 0.8rem; color: var(--muted);">🛡️ ${reasonLabels[exemption.reason] || exemption.reason}</div>
-          ${exemption.details ? `<div style="font-size: 0.75rem; color: var(--muted); margin-top: 4px;">"${exemption.details}"</div>` : ''}
+          <div style="font-size: 0.8rem; color: var(--muted);">🛡️ ${reasonLabels[r.reason] || r.reason || "Excused"}</div>
+          ${r.details ? `<div style="font-size: 0.75rem; color: var(--muted); margin-top: 4px;">"${r.details}"</div>` : ''}
           <button data-exemption-id="${exemption.id}" class="remove-exemption-btn" style="background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 0.75rem; padding: 4px 6px; margin-top: 6px;">Remove ❌</button>
         `;
 
@@ -4442,6 +4710,9 @@ if (mobileMenuBtn && navLinks) {
           })) {
             try {
               await deleteDoc(doc(db, "courses", activeCourse.id, "exemptions", exemptionId));
+              try {
+                await deleteDoc(doc(db, "courses", activeCourse.id, "exemptionReasons", exemptionId));
+              } catch (_) { /* reason already gone — fine */ }
               toast.success("Exemption removed.", "Removed 🗑️");
               loadExemptions();
             } catch (error) {
@@ -6752,14 +7023,40 @@ if (mobileMenuBtn && navLinks) {
       studentAnalyticsSection.classList.add("hidden");
     }
 
-    // Students always see the live roster stacked with analytics; staff only
-    // see it when they pick the roster view from the Mission-Control drawer.
+    // Side panels are drawer-driven now — a student sees only the panel their
+    // STUDENT drawer selected; staff only via the rep drawer. Never force-stack.
     const rosterSectionEl = document.getElementById("rosterSection");
     if (rosterSectionEl) {
-      if (!isRep && !isAssistant) {
-        rosterSectionEl.classList.remove("hidden");
-      } else if (activeDrawerView !== "roster") {
-        rosterSectionEl.classList.add("hidden");
-      }
+      const rosterVisible =
+        isRep || isAssistant
+          ? activeDrawerView === "roster"
+          : activeStudentView === "roster";
+      rosterSectionEl.classList.toggle("hidden", !rosterVisible);
     }
+    const studentAnalyticsPanelEl = document.getElementById(
+      "studentAnalyticsSection",
+    );
+    if (studentAnalyticsPanelEl) {
+      const analyticsVisible =
+        isRep || isAssistant
+          ? activeDrawerView === "analytics"
+          : activeStudentView === "analytics";
+      studentAnalyticsPanelEl.classList.toggle("hidden", !analyticsVisible);
+    }
+    const classExemptionsPanelEl = document.getElementById(
+      "classExemptionsSection",
+    );
+    if (classExemptionsPanelEl)
+      classExemptionsPanelEl.classList.toggle(
+        "hidden",
+        activeStudentView !== "exemptions",
+      );
+    const classReportsPanelEl = document.getElementById(
+      "classReportsSection",
+    );
+    if (classReportsPanelEl)
+      classReportsPanelEl.classList.toggle(
+        "hidden",
+        activeStudentView !== "reports",
+      );
   }
