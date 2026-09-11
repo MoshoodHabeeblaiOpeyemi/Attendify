@@ -93,6 +93,34 @@ module.exports = async (req, res) => {
       removedAt: FieldValue.serverTimestamp(),
     });
 
+    // 🔔 TRANSPARENCY: the removed student is TOLD. The course doesn't just
+    // silently vanish from their app — they get the same alert channel the
+    // absent-flag system uses, with the rep's action dated.
+    if (targetMemberDoc) {
+      try {
+        const removedUid = targetMemberDoc.id;
+        await db
+          .collection("users")
+          .doc(removedUid)
+          .collection("notifications")
+          .doc(`removed_${courseId}`)
+          .set({
+            type: "course_removal",
+            courseId,
+            courseName: courseSnap.data().name || "",
+            courseCode: courseSnap.data().code || "",
+            message: `You were removed from "${courseSnap.data().name || courseSnap.data().code}" by the Course Rep on ${new Date().toLocaleDateString("en-GB")}. If you believe this is a mistake, contact your rep — or rejoin with the course code.`,
+            removedAt: FieldValue.serverTimestamp(),
+            read: false,
+          });
+      } catch (notifyErr) {
+        console.warn(
+          "Removal notification failed (removal itself succeeded):",
+          notifyErr && notifyErr.message,
+        );
+      }
+    }
+
     return res.status(200).json({ success: true });
   } catch (error) {
     console.error("Remove student error:", error);

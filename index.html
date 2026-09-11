@@ -200,6 +200,13 @@
               style="font-size: 1.2rem;">5:00</strong></p>
         </div>
 
+        <!-- 📡 PUBLIC REPEATER STRIP — transparency: EVERY enrolled student
+             sees who is broadcasting the rotating QR, granted by whom and
+             when. Written by the backend grant log; hidden when empty. -->
+        <div id="repeaterStrip" class="hidden"
+          style="margin-bottom: 15px; padding: 10px 12px; background: rgba(108, 93, 211, 0.1); border: 1px solid rgba(139, 92, 246, 0.5); border-radius: 10px; font-size: 0.8rem; color: var(--text); line-height: 1.6;">
+        </div>
+
         <!-- REP CONTROLS — flat single-view: no box-in-box-in-box. Phase cards
              (setup vs live) are toggled by syncRepPhaseUI; the Mission-Control
              drawer switches between portal views. -->
@@ -981,9 +988,11 @@
         <i data-lucide="users"></i> Pick Repeater Students
       </h3>
       <p style="font-size: 0.8rem; color: var(--muted); margin-bottom: 12px;">
-        Choose up to <strong>5</strong> trusted students who are <strong>physically in the hall</strong> right now.
-        Each becomes a session repeater: their app shows the same rotating QR for nearby students to scan.
-        Their power ends automatically when this class closes.
+        Choose up to <strong>5</strong> students who have <strong>already checked in to this class</strong> — that's the
+        proof-of-presence rule: you cannot appoint someone who hasn't scanned the code, so the rotating QR can never
+        reach a phone outside the hall. Each becomes a session repeater: their app shows the same rotating QR for
+        nearby students to scan. <strong>Grants are public</strong> — the whole class sees who repeats and who appointed
+        them — and their power ends automatically when this class closes.
       </p>
       <div id="repeaterOptionsList"
         style="max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; padding: 8px; margin-bottom: 12px; background: var(--bg);"></div>

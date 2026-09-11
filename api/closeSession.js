@@ -123,6 +123,41 @@ module.exports = async (req, res) => {
       }
     }
 
+    // 📡 TRANSPARENCY SNAPSHOT — the archive itself records (a) who was
+    // auto-marked without scanning (the session creator) and (b) exactly who
+    // broadcast the QR as a repeater, with grant attribution. Every enrolled
+    // student can read the archive, so rep-side decisions stay public.
+    const secretManagerMatric = secretSnap.exists
+      ? String(secretSnap.data().managerMatric || "").trim().toUpperCase() ||
+        null
+      : null;
+    const autoMarked = secretManagerMatric
+      ? [{ matric: secretManagerMatric, reason: "session_creator" }]
+      : [];
+    let sessionRepeaters = [];
+    if (sessionExpiresAt) {
+      try {
+        const rlSnap = await courseRef
+          .collection("repeaterLog")
+          .where("sessionExpiresAt", "==", sessionExpiresAt)
+          .get();
+        sessionRepeaters = rlSnap.docs.map((d) => {
+          const v = d.data();
+          return {
+            matric: v.matric || "",
+            name: v.name || "",
+            grantedByMatric: v.grantedByMatric || "",
+            grantedAt:
+              v.grantedAt && v.grantedAt.toDate
+                ? v.grantedAt.toDate().toISOString()
+                : null,
+          };
+        });
+      } catch (rlErr) {
+        console.warn("Repeater log lookup skipped:", rlErr && rlErr.message);
+      }
+    }
+
     // Write the session record to the attendance/ subcollection
     // Key by timestamp so records are naturally ordered and never collide
     const sessionKey = `session_${now.getTime()}`;
@@ -135,6 +170,8 @@ module.exports = async (req, res) => {
       systemCount: attendees.length,
       physicalHeadcount,
       flaggedAbsent,
+      autoMarked,
+      repeaters: sessionRepeaters,
     });
 
     // Auto-revoke session_assistant members — restore their role back to "student"

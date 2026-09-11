@@ -132,7 +132,20 @@ service cloud.firestore {
 
         allow update: if isCourseRep(courseId)
           && request.resource.data.uid == resource.data.uid
-          && request.resource.data.role in ['student', 'assistant', 'session_assistant', 'rep'];
+          && request.resource.data.role in ['student', 'assistant', 'session_assistant', 'rep']
+          && (
+            // 🎯 PROOF-OF-PRESENCE: appointing a session repeater is only
+            // legal while a live session exists AND the candidate has ALREADY
+            // scanned in for it. The grantRepeater API enforces the same —
+            // this rule closes the direct client-write path too. You cannot
+            // scan the rep's screen from home, so an absent friend can never
+            // be handed the rotating code.
+            request.resource.data.role != 'session_assistant'
+            || (
+              exists(/databases/$(database)/documents/courses/$(courseId)/session/live)
+              && get(/databases/$(database)/documents/courses/$(courseId)/session/secret).data.attendees.hasAny([resource.data.matric])
+            )
+          );
 
         allow delete: if isCourseRep(courseId)
           || (signedIn() && request.auth.uid == memberUid);
@@ -201,6 +214,15 @@ service cloud.firestore {
       // Audit trail of student removals (backend-only, rep-readable).
       match /removalLog/{logId} {
         allow read: if isCourseStaff(courseId);
+        allow write: if false;
+      }
+
+      // 📡 PUBLIC REPEATER LOG — transparency by design: every enrolled
+      // student can see who was granted repeater power, when, and by whom.
+      // Written ONLY by the trusted backend (the grantRepeater API);
+      // immutable from any client.
+      match /repeaterLog/{logId} {
+        allow read: if isCourseMember(courseId) || isCourseStaff(courseId);
         allow write: if false;
       }
 

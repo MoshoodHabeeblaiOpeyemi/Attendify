@@ -1,6 +1,6 @@
 // 🔖 BUILD MARKER — proves which version of app.js the browser is running.
 // If your console does NOT print "build 256052f-drawer", the running JS is stale.
-console.log("%cAttendify build: attendance-unblocked + repeater-screen (slash-in-matric doc-ID fix, repeaters can check in, repeaters see ONLY the QR — no close power, portrait QR only)", "color:#6C5DD3;font-weight:bold");
+console.log("%cAttendify build: proof-of-presence + public-transparency (repeaters must be checked-in first, grants public to the whole class, archives tag auto-marked + repeaters, reject reasons, removal alerts)", "color:#6C5DD3;font-weight:bold");
 
 // --- FIREBASE IMPORTS & CONFIGURATION ---
 // --- FIREBASE IMPORTS & CONFIGURATION ---
@@ -26,6 +26,7 @@ import {
   query,
   where,
   orderBy,
+  limit,
   updateDoc,
   deleteDoc,
   onSnapshot,
@@ -2342,6 +2343,9 @@ if (mobileMenuBtn && navLinks) {
           ✋ <strong>${request.name || "Student"}</strong> (${request.matric || "?"})
         </div>
         <div style="font-size: 0.8rem; color: var(--muted); margin-top: 3px;">"${request.reason || ""}" — ${whenText}</div>
+        <input data-reject-reason="${request.id}" type="text" maxlength="120"
+          placeholder="Reason (optional — shown to the student)"
+          style="margin-top: 8px; width: 100%; font-size: 0.75rem; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text);">
         <div class="manual-request-actions" style="margin-top: 8px;">
           <button data-approve-uid="${request.id}" class="btn" style="background: #28a745; font-size: 0.78rem; padding: 6px 12px; width: auto;">✅ Approve (I can see them)</button>
           <button data-reject-uid="${request.id}" class="btn" style="background: var(--danger); font-size: 0.78rem; padding: 6px 12px; width: auto;">🚩 Reject</button>
@@ -2474,6 +2478,12 @@ if (mobileMenuBtn && navLinks) {
       icon: "flag",
     });
     if (!ok) return;
+    const reasonInput = document.querySelector(
+      `[data-reject-reason="${targetUid}"]`,
+    );
+    const rejectedReason = reasonInput
+      ? reasonInput.value.trim().slice(0, 120)
+      : "";
     const rejectBtn = document.querySelector(
       `[data-reject-uid="${targetUid}"]`,
     );
@@ -2492,6 +2502,7 @@ if (mobileMenuBtn && navLinks) {
           status: "rejected",
           reviewedAt: serverTimestamp(),
           reviewedByUid: auth.currentUser.uid,
+          ...(rejectedReason ? { rejectedReason } : {}),
         },
       );
       toast.info("Request rejected and permanently logged.", "Rejected");
@@ -2538,8 +2549,9 @@ if (mobileMenuBtn && navLinks) {
         } else if (data.status === "rejected") {
           statusEl.style.background = "rgba(220, 53, 69, 0.1)";
           statusEl.style.color = "#dc3545";
-          statusEl.textContent =
-            "❌ Your Rep could not verify you for this session. The decision is final.";
+          statusEl.textContent = data.rejectedReason
+            ? `❌ Your Rep could not verify you for this session. The decision is final. Reason: "${data.rejectedReason}"`
+            : "❌ Your Rep could not verify you for this session. The decision is final.";
         }
       },
       (err) => console.error("My manual request listener error:", err),
@@ -2653,6 +2665,12 @@ if (mobileMenuBtn && navLinks) {
               data.message ||
                 "You have been flagged absent for this lecture. If you are present, see your Rep immediately.",
               "⚠️ Flagged Absent",
+            );
+          } else if (data.type === "course_removal") {
+            toast.error(
+              data.message ||
+                "You were removed from a course by the Course Rep.",
+              "🗑️ Removed From Course",
             );
           }
         });
@@ -3072,6 +3090,7 @@ if (mobileMenuBtn && navLinks) {
   }
 
   function stopPortalListeners() {
+    stopRepeaterLogListener();
     if (unsubscribeSessionLive) {
       unsubscribeSessionLive();
       unsubscribeSessionLive = null;
@@ -4336,25 +4355,53 @@ if (mobileMenuBtn && navLinks) {
   function renderRepeaterOptions() {
     const list = document.getElementById("repeaterOptionsList");
     if (!list || !activeCourse) return;
-    const currentAssistants = (activeCourse.assistants || [])
-      .map(normalizeMatric);
-    const enrolled = (activeCourse.enrolled || [])
+
+    // 🎯 PROOF-OF-PRESENCE picker: candidates must be regular students who
+    // have ALREADY checked in to the live session. You cannot scan the rep's
+    // screen from home, so an absent friend can never be appointed — the
+    // rotating code can only reach devices of people who were verified in
+    // the hall.
+    const session = activeCourse.activeSession;
+    const isSessionLive =
+      session &&
+      !session.expired &&
+      getAccurateNow() < session.expiresAt &&
+      activeCourse.activeSession.pin;
+    const attendees = ((session && session.attendees) || [])
       .map(normalizeMatric)
-      .filter((m) => m && !currentAssistants.includes(m));
-    if (enrolled.length === 0) {
+      .filter(Boolean);
+
+    if (!isSessionLive) {
       list.innerHTML =
-        '<p style="font-size: 0.8rem; color: var(--muted); text-align: center;">No other enrolled students to appoint.</p>';
+        '<p style="font-size: 0.8rem; color: var(--muted); text-align: center;">No live session. Start the class first — repeaters can only be picked from students who have already checked in (proof-of-presence).</p>';
       return;
     }
-    list.innerHTML = "";
-    enrolled.forEach((matric) => {
-      const member = (activeCourse.members || []).find(
-        (m) => normalizeMatric(m.matric) === matric,
+
+    const currentAssistants = (activeCourse.assistants || [])
+      .map(normalizeMatric);
+    const eligible = (activeCourse.members || []).filter((m) => {
+      if (m.role !== "student") return false;
+      const matric = normalizeMatric(m.matric);
+      return (
+        matric &&
+        !currentAssistants.includes(matric) &&
+        attendees.includes(matric)
       );
+    });
+
+    if (eligible.length === 0) {
+      list.innerHTML =
+        '<p style="font-size: 0.8rem; color: var(--muted); text-align: center;">No eligible repeaters yet — a student must scan the code (or type the PIN) first. Everyone checked in appears here instantly.</p>';
+      return;
+    }
+
+    list.innerHTML = "";
+    eligible.forEach((member) => {
+      const matric = normalizeMatric(member.matric);
       const label = document.createElement("label");
       label.style.cssText =
         "display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; font-size: 0.82rem; color: var(--text); cursor: pointer;";
-      label.innerHTML = `<input type="checkbox" value="${matric}" data-repeater-check style="accent-color: var(--teal); width: 16px; height: 16px;"><span><strong>${matric}</strong>${member && member.name ? ` · ${member.name}` : ""}</span>`;
+      label.innerHTML = `<input type="checkbox" value="${matric}" data-repeater-check style="accent-color: var(--teal); width: 16px; height: 16px;"><span><strong>${matric}</strong>${member.name ? ` · ${member.name}` : ""} <span style="color: #28a745; font-size: 0.7rem;">✅ checked in</span></span>`;
       list.appendChild(label);
     });
   }
@@ -4372,49 +4419,163 @@ if (mobileMenuBtn && navLinks) {
       list.querySelectorAll("input[data-repeater-check]:checked"),
     ).map((el) => normalizeMatric(el.value));
     if (checked.length === 0) {
-      toast.warning("Tick at least one present student first.");
+      toast.warning("Tick at least one checked-in student first.");
       return;
     }
-    const alreadyRepeaterCount = (activeCourse.assistants || []).length;
-    if (alreadyRepeaterCount + checked.length > REPEATERS_MAX) {
+    // Fast client-side feedback; the server enforces the same cap strictly.
+    const currentRepeaterCount = (activeCourse.members || []).filter(
+      (m) => m.role === "session_assistant",
+    ).length;
+    if (currentRepeaterCount + checked.length > REPEATERS_MAX) {
       toast.error(
-        `Repeater cap is ${REPEATERS_MAX} per course (including existing assistants) — a QR shown on too many screens multiplies leak risk.`,
+        `Repeater cap is ${REPEATERS_MAX} per class — a QR shown on too many screens multiplies leak risk.`,
         "Too Many Repeaters",
       );
       return;
     }
 
-    if (!activeCourse.assistants) activeCourse.assistants = [];
+    const grantBtn = document.getElementById("grantRepeatersBtn");
+    if (grantBtn) {
+      grantBtn.disabled = true;
+      grantBtn.textContent = "⏳ Granting…";
+    }
     let granted = 0;
-    for (const matric of checked) {
-      const memberRecord = (activeCourse.members || []).find(
-        (m) => normalizeMatric(m.matric) === matric,
-      );
-      if (memberRecord) {
+    const failures = [];
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      for (const matric of checked) {
         try {
-          await updateDoc(
-            doc(db, "courses", activeCourse.id, "members", memberRecord.uid),
-            { role: "session_assistant" }, // auto-revoked at session close
+          const response = await fetchWithTimeout(
+            "/api/grantRepeater",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${idToken}`,
+              },
+              body: JSON.stringify({
+                courseId: activeCourse.id,
+                targetMatric: matric,
+              }),
+            },
+            20000,
           );
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || "Grant failed.");
+          granted++;
         } catch (err) {
-          console.error("Could not update member role:", err);
-          toast.error(`Failed to assign ${matric}. Skipping.`);
-          continue;
+          console.error("Grant repeater error:", err);
+          failures.push(err.message || "Unknown error");
         }
       }
-      activeCourse.assistants.push(matric);
-      granted++;
+    } finally {
+      if (grantBtn) {
+        grantBtn.disabled = false;
+        grantBtn.innerHTML =
+          '<i data-lucide="broadcast"></i> Grant Repeater Power';
+        refreshIcons();
+      }
     }
 
     if (granted > 0) {
-      await updateCourseInFirestore();
-      renderPortalState();
       toast.success(
-        `${granted} repeater${granted > 1 ? "s" : ""} live — their apps now show the rotating QR. Power ends when class closes.`,
+        `${granted} repeater${granted > 1 ? "s" : ""} on air — the whole class can see who they are, and the grant is permanently logged.`,
         "Repeaters On Air 📡",
+      );
+      renderRepeaterOptions();
+      renderRepeaterStrip();
+    }
+    if (failures.length > 0) {
+      toast.error(
+        failures[0],
+        failures.length > 1
+          ? `${failures.length} grants failed`
+          : "Grant failed",
       );
     }
     modal.classList.remove("show");
+  }
+
+  // 📡 PUBLIC REPEATER STRIP + GRANT LOG — transparency for the whole class.
+  // Everyone enrolled sees who holds the rotating QR right now, granted by
+  // whom and when. The log is backend-written (grantRepeater API) and
+  // immutable from any client.
+  let unsubscribeRepeaterLog = null;
+  let repeaterLogCourseId = null;
+  let repeaterLogCache = [];
+
+  function ensureRepeaterLogListener() {
+    if (!activeCourse || !activeCourse.id || !auth.currentUser) return;
+    if (unsubscribeRepeaterLog && repeaterLogCourseId === activeCourse.id)
+      return;
+    if (unsubscribeRepeaterLog) {
+      unsubscribeRepeaterLog();
+      unsubscribeRepeaterLog = null;
+    }
+    repeaterLogCourseId = activeCourse.id;
+    unsubscribeRepeaterLog = onSnapshot(
+      query(
+        collection(db, "courses", activeCourse.id, "repeaterLog"),
+        orderBy("grantedAt", "desc"),
+        limit(30),
+      ),
+      (snap) => {
+        repeaterLogCache = snap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        }));
+        renderRepeaterStrip();
+      },
+      (err) => console.error("Repeater log listener error:", err),
+    );
+  }
+
+  function stopRepeaterLogListener() {
+    if (unsubscribeRepeaterLog) {
+      unsubscribeRepeaterLog();
+      unsubscribeRepeaterLog = null;
+      repeaterLogCourseId = null;
+      repeaterLogCache = [];
+    }
+  }
+
+  function renderRepeaterStrip() {
+    const strip = document.getElementById("repeaterStrip");
+    if (!strip || !activeCourse) return;
+    const repeaters = (activeCourse.members || []).filter(
+      (m) => m.role === "session_assistant",
+    );
+    if (repeaters.length === 0) {
+      strip.classList.add("hidden");
+      strip.innerHTML = "";
+      return;
+    }
+    strip.classList.remove("hidden");
+    const sessionExpiresAt = activeCourse.activeSession
+      ? activeCourse.activeSession.expiresAt
+      : null;
+    const chips = repeaters
+      .map((m) => {
+        const matric = normalizeMatric(m.matric);
+        const log = repeaterLogCache.find(
+          (l) =>
+            normalizeMatric(l.matric) === matric &&
+            (!sessionExpiresAt || l.sessionExpiresAt === sessionExpiresAt),
+        );
+        const when =
+          log && log.grantedAt && log.grantedAt.toDate
+            ? log.grantedAt
+                .toDate()
+                .toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })
+            : "";
+        const by = log && log.grantedByMatric ? log.grantedByMatric : "rep";
+        return `<span style="display:inline-block; background: var(--bg); border:1px solid var(--border); border-radius:999px; padding:3px 10px; margin:2px 4px 2px 0;">📡 <strong>${m.name || matric}</strong> (${matric}) — granted by <strong>${by}</strong>${when ? ` at ${when}` : ""}</span>`;
+      })
+      .join(" ");
+    strip.innerHTML = `<strong>📡 Repeating this class:</strong> ${chips}<div style="font-size:0.72rem; color:var(--muted); margin-top:4px;">Repeaters can only be picked from students who already checked in (proof-of-presence). Grants are public and end when class closes.</div>`;
   }
 
   const grantRepeatersBtn = document.getElementById("grantRepeatersBtn");
@@ -5111,8 +5272,14 @@ if (mobileMenuBtn && navLinks) {
           mode: "no_gps",
           qrMode: true,
         });
+        // 🎯 Proof-of-presence: nobody has checked in at creation time, so
+        // the repeater picker would be empty. Guide the rep to appoint after
+        // the first check-ins land instead.
         if (getQrDisplayChoice() === "repeaters") {
-          openRepeaterPicker();
+          toast.info(
+            "Once a few students check in, tap 👥 Repeaters to appoint who broadcasts the QR — only checked-in students are eligible.",
+            "Proof-of-Presence Mode",
+          );
         }
         return;
       }
@@ -5264,6 +5431,10 @@ if (mobileMenuBtn && navLinks) {
       lon: typeof locData.lon === "number" ? locData.lon : null,
       radius: locData.radius || 80,
       attendees: [managerMatric],
+      // 📡 Transparency: the archive records WHO was auto-marked as the
+      // session creator, so the "Present" list always shows scanned vs
+      // vouched-for.
+      managerMatric: managerMatric,
     };
 
     activeCourse.activeSession = {
@@ -5883,6 +6054,11 @@ if (mobileMenuBtn && navLinks) {
     // Keep repeater chrome in sync on every course/members snapshot — a
     // mid-session promotion or the auto-revoke at close both land here.
     syncRepeaterChrome();
+
+    // 📡 Public repeater strip: live for EVERYONE in the portal (students
+    // included) — transparency is not a staff privilege.
+    ensureRepeaterLogListener();
+    renderRepeaterStrip();
 
     // ⚠️ ANCHOR HEALTH: clustered GPS rejections mean the rep's captured
     // anchor is probably off (indoor WiFi-positioning lies). Surface it so
