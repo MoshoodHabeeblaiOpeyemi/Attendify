@@ -2684,8 +2684,16 @@ if (mobileMenuBtn && navLinks) {
           id: d.id,
           ...d.data(),
         }));
+        // Drawer badge counts only CURRENT-session flags — stale flags from
+        // past sessions must not inflate the roster badge.
+        const liveExpiresAt =
+          activeCourse && activeCourse.activeSession
+            ? activeCourse.activeSession.expiresAt
+            : null;
         const flagCount = activeCourse.absentFlags.filter(
-          (f) => f.status === "flagged",
+          (f) =>
+            f.status === "flagged" &&
+            (!liveExpiresAt || f.sessionExpiresAt === liveExpiresAt),
         ).length;
         setDrawerBadge("roster", flagCount);
         renderPortalState();
@@ -2708,13 +2716,25 @@ if (mobileMenuBtn && navLinks) {
         const banner = document.getElementById("absentFlagBanner");
         if (!banner) return;
         const msgEl = document.getElementById("absentFlagMessage");
-        if (!snap.exists() || snap.data().status !== "flagged") {
+        // 🛡️ SESSION-SCOPED: the flag doc persists across sessions (uid-keyed),
+        // so only show the emergency alert if it belongs to the LIVE session —
+        // otherwise a week-3 flag would re-appear in every later lecture.
+        const data = snap.exists() ? snap.data() : null;
+        const liveExpiresAt =
+          activeCourse && activeCourse.activeSession
+            ? activeCourse.activeSession.expiresAt
+            : null;
+        if (
+          !data ||
+          data.status !== "flagged" ||
+          !liveExpiresAt ||
+          data.sessionExpiresAt !== liveExpiresAt
+        ) {
           banner.classList.add("hidden");
           return;
         }
         banner.classList.remove("hidden");
         if (msgEl) {
-          const data = snap.data();
           const flaggedWhen =
             data.flaggedAt && data.flaggedAt.toDate
               ? data.flaggedAt.toDate().toLocaleTimeString()
@@ -5808,24 +5828,51 @@ if (mobileMenuBtn && navLinks) {
         });
         if (!proceed) return;
 
-        // Archive the current session to attendanceHistory
+        // Archive the current session into the attendance/ subcollection —
+        // the SAME source of truth handleClose writes to. The previous write
+        // went to the course doc's `attendanceHistory` field, which nothing
+        // reads anymore (loadAttendanceHistory overwrites state from the
+        // subcollection), so archived attendees were silently lost.
         try {
+          const prevExpiresAt = existingSession.expiresAt || null;
+          const attendeeGroups = {};
+          (activeCourse.groups || []).forEach((g) => {
+            (g.members || []).map(normalizeMatric).forEach((m) => {
+              attendeeGroups[m] = g.name;
+            });
+          });
+          const flaggedAbsent = (activeCourse.absentFlags || [])
+            .filter(
+              (f) =>
+                f.status === "flagged" &&
+                (!prevExpiresAt || f.sessionExpiresAt === prevExpiresAt),
+            )
+            .map((f) => normalizeMatric(f.matric));
           const historyEntry = {
-            date: new Date().toLocaleDateString("en-GB", {
-              day: "2-digit",
-              month: "short",
-              year: "numeric",
-            }),
+            date:
+              new Date().toLocaleDateString("en-GB") +
+              " " +
+              new Date().toLocaleTimeString("en-GB", {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            closedAt: serverTimestamp(),
+            closedBy: currentUser.uid,
             attendees: [...(existingSession.attendees || [])],
-            flaggedAbsent: [],
+            attendeeGroups,
             systemCount: existingSession.attendees.length,
             physicalHeadcount: null,
+            flaggedAbsent,
+            autoMarked: [],
+            hotspots: [],
           };
-          await updateDoc(doc(db, "courses", activeCourse.id), {
-            attendanceHistory: arrayUnion(historyEntry),
-          });
-          activeCourse.attendanceHistory = activeCourse.attendanceHistory || [];
-          activeCourse.attendanceHistory.push(historyEntry);
+          await setDoc(
+            doc(collection(db, "courses", activeCourse.id, "attendance")),
+            historyEntry,
+          );
+          // Re-read from the subcollection so local state matches what the
+          // listener/renderer will show (it overwrites attendanceHistory).
+          await loadAttendanceHistory();
         } catch (archiveErr) {
           console.warn("Could not archive session before regenerate:", archiveErr);
           toast.warning("Could not archive the old session — proceeding anyway.");
@@ -6861,9 +6908,18 @@ if (mobileMenuBtn && navLinks) {
           badgeHTML = `<span style="background: #6f42c1; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 6px;">⭐ ASST</span>`;
         }
 
+        // 🛡️ SESSION-SCOPED: only show flags for the CURRENT session. A
+        // week-3 flag must not show 🚩 in week 8 — and because the Flag
+        // button is gated on !flagRecord, an unscoped find also permanently
+        // hid the re-flag button for anyone flagged once before.
+        const currentExpiresAt = activeCourse.activeSession
+          ? activeCourse.activeSession.expiresAt
+          : null;
         const flagRecord = (activeCourse.absentFlags || []).find(
           (f) =>
-            normalizeMatric(f.matric) === normalizedM && f.status === "flagged",
+            normalizeMatric(f.matric) === normalizedM &&
+            f.status === "flagged" &&
+            (!currentExpiresAt || f.sessionExpiresAt === currentExpiresAt),
         );
         const statusHTML = flagRecord
           ? `<span style="color: #dc3545; font-weight: bold;">🚩 Flagged Absent</span>`

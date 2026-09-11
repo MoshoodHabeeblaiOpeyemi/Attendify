@@ -89,6 +89,7 @@ async function handleFlagAbsent(req, res, decoded) {
     const isRep = courseData.repUid === decoded.uid;
     const isAssistant = memberSnap.exists && (memberSnap.data().role === "assistant" || memberSnap.data().role === "session_assistant");
     if (!isRep && !isAssistant) return res.status(403).json({ error: "Only course staff can flag absent." });
+    if (targetUid === decoded.uid) return res.status(400).json({ error: "You cannot flag yourself absent." });
 
     const liveSnap = await courseRef.collection("session").doc("live").get();
     if (!liveSnap.exists) return res.status(403).json({ error: "No live session." });
