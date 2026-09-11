@@ -1,6 +1,6 @@
 // 🔖 BUILD MARKER — proves which version of app.js the browser is running.
 // If your console does NOT print "build 256052f-drawer", the running JS is stale.
-console.log("%cAttendify build: student-drawer v2.1 (student side menu, public class exemptions + class reports, jsQR iOS fallback, server device cookie, CSS grid fix)", "color:#6C5DD3;font-weight:bold");
+console.log("%cAttendify build: menu-tab top-band v2 (drag anchored to grab-time offset + tap-vs-drag dead zone, v5 storage, bottom-edge safe-area)", "color:#6C5DD3;font-weight:bold");
 
 // --- FIREBASE IMPORTS & CONFIGURATION ---
 // --- FIREBASE IMPORTS & CONFIGURATION ---
@@ -3947,8 +3947,28 @@ if (mobileMenuBtn && navLinks) {
   function startTabDrag(e, pointer) {
     if (!drawerTab) return;
     const edge = drawerTab.dataset.edge || "right";
-    const isHorizontal = edge === "right" || edge === "left";
-    tabDragState = { edge, isHorizontal, start: pointer };
+    const horizontalEdge = edge === "top" || edge === "bottom";
+    // Base = where the tab's offset ACTUALLY is right now (inline value, or
+    // the CSS default for this edge). Deltas apply on top of this — the old
+    // code seeded from the raw pointer point, so every grab teleported the
+    // tab and repeated taps walked it down the screen.
+    let base = parseFloat(drawerTab.style.getPropertyValue("--tab-offset"));
+    const hadCustom = !Number.isNaN(base);
+    if (!hadCustom) {
+      base = horizontalEdge
+        ? Math.round(window.innerWidth * 0.4)
+        : window.innerWidth >= 768
+          ? 84
+          : 76;
+    }
+    tabDragState = {
+      edge,
+      horizontalEdge,
+      start: pointer,
+      base,
+      hadCustom,
+      moved: false,
+    };
     drawerTab.classList.add("dragging");
     drawerTab.setPointerCapture?.(e.pointerId);
   }
@@ -3983,20 +4003,20 @@ if (mobileMenuBtn && navLinks) {
 
   function updateTabDrag(pointer) {
     if (!tabDragState || !drawerTab) return;
-    // Use the axis that matches the docked edge: right/left tabs slide
-    // vertically (seeded by start.y, clamped to height); top/bottom tabs
-    // slide horizontally (seeded by start.x, clamped to width).
-    const horizontalEdge = tabDragState.edge === "top" || tabDragState.edge === "bottom";
+    // Move uses the drag delta applied to the grab-time base: the tab follows
+    // the finger 1:1 with no teleport. Track whether it actually moved so a
+    // plain tap can still open the drawer (click fires after pointerup).
+    const horizontalEdge = tabDragState.horizontalEdge;
     const delta = horizontalEdge
       ? pointer.x - tabDragState.start.x
       : pointer.y - tabDragState.start.y;
-    const seed = horizontalEdge ? tabDragState.start.x : tabDragState.start.y;
+    if (Math.abs(delta) > 6) tabDragState.moved = true;
     // Keep the tab in the visible band below the navbar — and never below
     // the top ~55% of the screen, so it can't sink out of sight.
     const max = horizontalEdge
       ? window.innerWidth - 60
       : tabMaxOffset();
-    const pos = Math.max(TAB_MIN, Math.min(max, seed + delta));
+    const pos = Math.max(TAB_MIN, Math.min(max, tabDragState.base + delta));
     drawerTab.style.setProperty("--tab-offset", `${pos}px`);
   }
 
@@ -4004,6 +4024,11 @@ if (mobileMenuBtn && navLinks) {
     if (!tabDragState || !drawerTab) return;
     tabDragState = null;
     drawerTab.classList.remove("dragging");
+    try {
+      drawerTab.releasePointerCapture?.();
+    } catch (e) {
+      /* ignore */
+    }
     persistTabPosition();
   }
 
@@ -4013,7 +4038,7 @@ if (mobileMenuBtn && navLinks) {
     const offsetVal = drawerTab.style.getPropertyValue("--tab-offset");
     try {
       localStorage.setItem(
-        "attendify_drawer_tab_v4",
+        "attendify_drawer_tab_v5",
         JSON.stringify({ edge, offset: offsetVal }),
       );
     } catch (e) {
@@ -4024,7 +4049,9 @@ if (mobileMenuBtn && navLinks) {
   function restoreTabPosition() {
     if (!drawerTab) return;
     try {
-      const raw = localStorage.getItem("attendify_drawer_tab_v4");
+      const raw =
+        localStorage.getItem("attendify_drawer_tab_v5") ||
+        localStorage.getItem("attendify_drawer_tab_v4");
       const saved = raw ? JSON.parse(raw) : null;
       if (saved && saved.edge) {
         drawerTab.dataset.edge = saved.edge;
@@ -4060,7 +4087,25 @@ if (mobileMenuBtn && navLinks) {
       updateTabDrag({ x: e.clientX, y: e.clientY });
       if (e.pointerType === "touch") e.preventDefault();
     });
-    drawerTab.addEventListener("pointerup", endTabDrag);
+    drawerTab.addEventListener("pointerup", () => {
+      // No drag happened → plain tap: leave the offset exactly as it was (a
+      // few px of finger wobble stays inside the 6px dead zone), then let the
+      // normal click handler open the drawer. Only real drags are persisted.
+      const wasTap = tabDragState && !tabDragState.moved;
+      const hadCustom = tabDragState && tabDragState.hadCustom;
+      endTabDrag();
+      // endTabDrag persisted our (unchanged) offset — but a pure tap must not
+      // CREATE a stored position out of nothing: without a custom offset
+      // before, keep the CSS default.
+      if (wasTap && !hadCustom) {
+        drawerTab.style.removeProperty("--tab-offset");
+        try {
+          localStorage.removeItem("attendify_drawer_tab_v5");
+        } catch (e) {
+          /* ignore */
+        }
+      }
+    });
     drawerTab.addEventListener("pointercancel", endTabDrag);
     // Long-press / right-click rotates the docked edge.
     drawerTab.addEventListener("contextmenu", (e) => {

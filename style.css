@@ -1449,7 +1449,7 @@ input:focus::placeholder {
   border-radius: 0 0 10px 10px;
 }
 .drawer-tab[data-edge="bottom"] {
-  bottom: 0;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   left: var(--tab-offset, 40%);
   transform: translateX(-50%);
   border-radius: 10px 10px 0 0;
