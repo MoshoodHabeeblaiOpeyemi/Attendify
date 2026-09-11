@@ -592,7 +592,7 @@ input:focus::placeholder {
 
 .course-grid {
   display: grid;
-  grid-template-columns: hotspot(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 24px;
 }
 
@@ -966,7 +966,7 @@ input:focus::placeholder {
 
 .mode-cards-grid {
   display: grid;
-  grid-template-columns: hotspot(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 10px;
 }
 
@@ -1051,7 +1051,7 @@ input:focus::placeholder {
 
 .manage-tool-grid {
   display: grid;
-  grid-template-columns: hotspot(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
 }
 

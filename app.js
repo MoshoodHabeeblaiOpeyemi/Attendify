@@ -1,6 +1,6 @@
 // 🔖 BUILD MARKER — proves which version of app.js the browser is running.
 // If your console does NOT print "build 256052f-drawer", the running JS is stale.
-console.log("%cAttendify build: student-drawer v2 (student side menu, public class exemptions + class reports, jsQR iOS scanner fallback, server-minted device cookie)", "color:#6C5DD3;font-weight:bold");
+console.log("%cAttendify build: student-drawer v2.1 (student side menu, public class exemptions + class reports, jsQR iOS fallback, server device cookie, CSS grid fix)", "color:#6C5DD3;font-weight:bold");
 
 // --- FIREBASE IMPORTS & CONFIGURATION ---
 // --- FIREBASE IMPORTS & CONFIGURATION ---
