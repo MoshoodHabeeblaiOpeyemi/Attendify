@@ -24,9 +24,25 @@ const norm = (v) => String(v || "").trim().toUpperCase();
 
 async function handleEnroll(req, res, decoded) {
   try {
-    const { courseId } = req.body || {};
-    if (!courseId) return res.status(400).json({ error: "Course ID is required." });
-    const courseRef = db.collection("courses").doc(courseId);
+    const { courseId: bodyCourseId, courseCode } = req.body || {};
+
+    let courseRef;
+    if (bodyCourseId) {
+      // Direct-ID enroll (programmatic callers).
+      courseRef = db.collection("courses").doc(bodyCourseId);
+    } else if (courseCode) {
+      // Join-by-code (the client flow): resolve the code to a course.
+      const codeQuery = await db
+        .collection("courses")
+        .where("code", "==", norm(courseCode))
+        .limit(1)
+        .get();
+      if (codeQuery.empty) return res.status(404).json({ error: "Course not found." });
+      courseRef = codeQuery.docs[0].ref;
+    } else {
+      return res.status(400).json({ error: "courseId or courseCode is required." });
+    }
+
     const courseSnap = await courseRef.get();
     if (!courseSnap.exists) return res.status(404).json({ error: "Course not found." });
     const courseData = courseSnap.data();
@@ -69,7 +85,7 @@ async function handleEnroll(req, res, decoded) {
         return res.status(409).json({ error: "Matric " + matric + " already claimed.", matricClaimed: true });
       throw txErr;
     }
-    return res.status(200).json({ success: true, message: "Enrolled." });
+    return res.status(200).json({ success: true, message: "Enrolled.", courseId: courseRef.id });
   } catch (error) {
     console.error("Enroll error:", error);
     return res.status(500).json({ error: "Enroll failed: " + error.message });
@@ -102,8 +118,9 @@ async function handleLeave(req, res, decoded) {
 
 async function handleRemove(req, res, decoded) {
   try {
-    const { courseId, matric } = req.body || {};
-    if (!courseId || !matric) return res.status(400).json({ error: "Course ID and matric required." });
+    const { courseId, targetMatric } = req.body || {};
+    if (!courseId || !targetMatric) return res.status(400).json({ error: "Course ID and matric required." });
+    const matric = targetMatric;
     const courseRef = db.collection("courses").doc(courseId);
     const courseSnap = await courseRef.get();
     if (!courseSnap.exists) return res.status(404).json({ error: "Course not found." });

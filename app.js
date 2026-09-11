@@ -36,6 +36,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  runTransaction,
   getDocs,
   query,
   where,
@@ -92,13 +93,18 @@ function showToast(message, type = "info", title = "") {
 
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
+  // Icons are trusted constants and may be HTML; the title/message are plain
+  // text set via textContent so caller data (e.g. Firestore matrics) can
+  // never inject markup.
   toast.innerHTML = `
     <span class="toast-icon">${icons[type] || "ℹ️"}</span>
     <div class="toast-body">
-      <div class="toast-title">${title || titles[type] || ""}</div>
-      <div class="toast-message">${message}</div>
+      <div class="toast-title"></div>
+      <div class="toast-message"></div>
     </div>
   `;
+  toast.querySelector(".toast-title").textContent = title || titles[type] || "";
+  toast.querySelector(".toast-message").textContent = message || "";
 
   container.appendChild(toast);
 
@@ -1444,6 +1450,7 @@ if (mobileMenuBtn && navLinks) {
         : "GENERAL";
 
       isCreatingAccount = true; // 🔒 LOCK THE BLOCKER
+      let signupSucceeded = false;
 
       try {
         if (submitBtn) {
@@ -1468,16 +1475,25 @@ if (mobileMenuBtn && navLinks) {
           const cleanLevel = level.replace(/[^a-zA-Z0-9]/g, "_");
           const repSlotId = `rep_${cleanInst}_${cleanDept}_${cleanLevel}`;
           const repSlotRef = doc(db, "departmentReps", repSlotId);
-          const repSlotSnap = await getDoc(repSlotRef);
 
-          if (repSlotSnap.exists()) {
-            await userCredential.user.delete();
-            throw new Error(
-              `A department representative already exists for ${institution} - ${department} (${level}).`,
-            );
+          // Claim the rep slot ATOMICALLY. A plain getDoc→setDoc lets two
+          // simultaneous signups both pass the existence check and both
+          // claim the slot (classic check-then-act race).
+          try {
+            await runTransaction(db, async (tx) => {
+              if ((await tx.get(repSlotRef)).exists())
+                throw new Error("REP_SLOT_TAKEN");
+              tx.set(repSlotRef, { repUid: uid, registeredAt: Date.now() });
+            });
+          } catch (slotErr) {
+            if (slotErr.message === "REP_SLOT_TAKEN") {
+              await userCredential.user.delete();
+              throw new Error(
+                `A department representative already exists for ${institution} - ${department} (${level}).`,
+              );
+            }
+            throw slotErr;
           }
-
-          await setDoc(repSlotRef, { repUid: uid, registeredAt: Date.now() });
         }
 
         await setDoc(doc(db, "users", uid), {
@@ -1491,6 +1507,7 @@ if (mobileMenuBtn && navLinks) {
           level,
         });
 
+        signupSucceeded = true;
         signupForm.reset();
         toast.success(
           "Your account is ready. Welcome to Attendify!",
@@ -1501,6 +1518,13 @@ if (mobileMenuBtn && navLinks) {
         toast.error(error.message, "Something went wrong");
       } finally {
         isCreatingAccount = false; // 🔓 UNLOCK THE BLOCKER NO MATTER WHAT
+        if (signupSucceeded && auth.currentUser) {
+          // Firebase fired the auth-state event while the blocker was still
+          // locked, the listener swallowed it, and it never fires again —
+          // so re-run the bootstrap manually or the fresh user idles on the
+          // auth screen forever (the "post-signup limbo").
+          handleAuthState(auth.currentUser);
+        }
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.innerHTML =
@@ -1556,9 +1580,10 @@ if (mobileMenuBtn && navLinks) {
     });
   }
 
-  onAuthStateChanged(auth, async (user) => {
-    if (isCreatingAccount) return; // 🛑 Ignore during active registration sequence!
-
+  // Auth bootstrap for every state transition. Extracted from the
+  // onAuthStateChanged callback so the signup flow can re-run it manually
+  // (see the signup finally block — the "post-signup limbo" fix).
+  const handleAuthState = async (user) => {
     if (user) {
       const userDoc = await getDoc(doc(db, "users", user.uid));
 
@@ -1597,6 +1622,11 @@ if (mobileMenuBtn && navLinks) {
       stopCourseListener();
       checkAuth();
     }
+  };
+
+  onAuthStateChanged(auth, (user) => {
+    if (isCreatingAccount) return; // 🛑 Ignore during active registration sequence!
+    handleAuthState(user);
   });
 
   if (deleteAccountBtn) {
@@ -1868,11 +1898,11 @@ if (mobileMenuBtn && navLinks) {
 
       card.innerHTML = `
       ${actionIcon}
-      <h3 style="color: var(--navy); margin-bottom: 5px;">${course.name}</h3>
-      <p style="font-size: 0.85rem; margin-bottom: 5px;">Code: <strong>${course.code}</strong> | Rep: ${course.rep}</p>
+      <h3 style="color: var(--navy); margin-bottom: 5px;">${escapeHTML(course.name || "Unnamed Course")}</h3>
+      <p style="font-size: 0.85rem; margin-bottom: 5px;">Code: <strong>${escapeHTML(course.code)}</strong> | Rep: ${escapeHTML(course.rep || "—")}</p>
       <p style="font-size: 0.75rem; color: var(--muted); margin-bottom: 15px;">
-        <i data-lucide="building" style="width:12px; height:12px;"></i> ${course.institution || "GEN"} • 
-        <i data-lucide="book-open" style="width:12px; height:12px;"></i> ${course.department || "GEN"}
+        <i data-lucide="building" style="width:12px; height:12px;"></i> ${escapeHTML(course.institution || "GEN")} • 
+        <i data-lucide="book-open" style="width:12px; height:12px;"></i> ${escapeHTML(course.department || "GEN")}
       </p>
       
       <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center;">
@@ -2018,8 +2048,8 @@ if (mobileMenuBtn && navLinks) {
           .map(
             (m) => `
           <span style="display: inline-flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; font-size: 0.75rem; margin: 3px 4px 3px 0;">
-            ${m}
-            <button data-remove-member="${g.id}" data-matric="${m}" title="Remove from group (stays enrolled in course)" style="background: none; border: none; color: var(--danger); cursor: pointer; font-weight: bold; padding: 0;">&times;</button>
+            ${escapeHTML(m)}
+            <button data-remove-member="${escapeHTML(g.id)}" data-matric="${escapeHTML(m)}" title="Remove from group (stays enrolled in course)" style="background: none; border: none; color: var(--danger); cursor: pointer; font-weight: bold; padding: 0;">&times;</button>
           </span>`,
           )
           .join("") ||
@@ -2028,7 +2058,7 @@ if (mobileMenuBtn && navLinks) {
       const enrolled = (activeCourse.enrolled || []).map(normalizeMatric);
       const available = enrolled.filter((m) => !members.includes(m));
       const options = available
-        .map((m) => `<option value="${m}">${m}</option>`)
+        .map((m) => `<option value="${escapeHTML(m)}">${escapeHTML(m)}</option>`)
         .join("");
 
       const card = document.createElement("div");
@@ -2036,20 +2066,20 @@ if (mobileMenuBtn && navLinks) {
         "background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px;";
       card.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
-          <strong style="color: var(--navy);">🏷️ ${g.name}</strong>
+          <strong style="color: var(--navy);">🏷️ ${escapeHTML(g.name || "Group")}</strong>
           <div style="display: flex; gap: 6px; align-items: center;">
-            ${g.leadMatric ? `<span style="font-size: 0.7rem; background: #6f42c1; color: #fff; padding: 2px 6px; border-radius: 4px;">LEAD ${g.leadMatric}</span>` : ""}
+            ${g.leadMatric ? `<span style="font-size: 0.7rem; background: #6f42c1; color: #fff; padding: 2px 6px; border-radius: 4px;">LEAD ${escapeHTML(g.leadMatric)}</span>` : ""}
             <span style="font-size: 0.7rem; background: var(--teal); color: #fff; padding: 2px 6px; border-radius: 4px;">${members.length} member(s)</span>
-            ${isRepHere ? `<button data-delete-group="${g.id}" style="background: transparent; border: 1px solid var(--danger); color: var(--danger); border-radius: 6px; font-size: 0.7rem; font-weight: bold; padding: 3px 8px; cursor: pointer;">Delete</button>` : ""}
+            ${isRepHere ? `<button data-delete-group="${escapeHTML(g.id)}" style="background: transparent; border: 1px solid var(--danger); color: var(--danger); border-radius: 6px; font-size: 0.7rem; font-weight: bold; padding: 3px 8px; cursor: pointer;">Delete</button>` : ""}
           </div>
         </div>
         <div style="margin-top: 8px;">${memberChips}</div>
         <div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">
-          <select data-member-select="${g.id}" style="flex: 1 1 140px; padding: 7px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); font-size: 0.8rem;">
+          <select data-member-select="${escapeHTML(g.id)}" style="flex: 1 1 140px; padding: 7px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); font-size: 0.8rem;">
             <option value="">-- Add student to group --</option>
             ${options}
           </select>
-          <button data-add-member="${g.id}" class="btn" style="width: auto; font-size: 0.75rem; padding: 7px 12px;">➕ Add</button>
+          <button data-add-member="${escapeHTML(g.id)}" class="btn" style="width: auto; font-size: 0.75rem; padding: 7px 12px;">➕ Add</button>
         </div>
       `;
       container.appendChild(card);
@@ -2397,9 +2427,9 @@ if (mobileMenuBtn && navLinks) {
           : "Just now";
       card.innerHTML = `
         <div style="font-size: 0.85rem;">
-          ✋ <strong>${request.name || "Student"}</strong> (${request.matric || "?"})
+          ✋ <strong>${escapeHTML(request.name || "Student")}</strong> (${escapeHTML(request.matric || "?")})
         </div>
-        <div style="font-size: 0.8rem; color: var(--muted); margin-top: 3px;">"${request.reason || ""}" — ${whenText}</div>
+        <div style="font-size: 0.8rem; color: var(--muted); margin-top: 3px;">"${escapeHTML(request.reason || "")}" — ${whenText}</div>
         <input data-reject-reason="${request.id}" type="text" maxlength="120"
           placeholder="Reason (optional — shown to the student)"
           style="margin-top: 8px; width: 100%; font-size: 0.75rem; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text);">
@@ -3063,7 +3093,7 @@ if (mobileMenuBtn && navLinks) {
           r.removedAt && r.removedAt.toDate
             ? r.removedAt.toDate().toLocaleString()
             : "unknown date";
-        return `<li style="font-size: 0.85rem; padding: 4px 0;">🚪 <strong>${r.matric}</strong> was removed on ${when}</li>`;
+        return `<li style="font-size: 0.85rem; padding: 4px 0;">🚪 <strong>${escapeHTML(r.matric)}</strong> was removed on ${when}</li>`;
       })
       .join("");
     const flagRows = flags
@@ -3072,7 +3102,7 @@ if (mobileMenuBtn && navLinks) {
           f.flaggedAt && f.flaggedAt.toDate
             ? f.flaggedAt.toDate().toLocaleString()
             : "just now";
-        return `<li style="font-size: 0.85rem; padding: 4px 0;">🚩 <strong>${f.matric}</strong> flagged absent on ${when} (by ${f.flaggedByRole || "rep"}, flagged ${f.flagCount || 1}× total)</li>`;
+        return `<li style="font-size: 0.85rem; padding: 4px 0;">🚩 <strong>${escapeHTML(f.matric)}</strong> flagged absent on ${when} (by ${escapeHTML(f.flaggedByRole || "rep")}, flagged ${f.flagCount || 1}× total)</li>`;
       })
       .join("");
 
@@ -3141,7 +3171,7 @@ if (mobileMenuBtn && navLinks) {
       card.style.cssText =
         "background: var(--card-bg); padding: 8px 12px; border-radius: 8px; margin-bottom: 6px; border: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 8px;";
       card.innerHTML = `
-        <span style="font-size: 0.85rem;">${icon} <strong>${ev.matric || "Unknown"}</strong> — ${label}</span>
+        <span style="font-size: 0.85rem;">${icon} <strong>${escapeHTML(ev.matric || "Unknown")}</strong> — ${escapeHTML(label)}</span>
         <span style="font-size: 0.72rem; color: var(--muted); white-space: nowrap;">${when}</span>
       `;
       container.appendChild(card);
@@ -4284,8 +4314,8 @@ if (mobileMenuBtn && navLinks) {
       listEl.innerHTML = exemptions
         .map((x) =>
           `<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; border:1px solid var(--border); border-radius:8px; margin-bottom:6px; background:var(--card-bg);">
-            <span style="font-size:0.85rem;">🎓 <strong>${x.matric || "?"}</strong></span>
-            <span style="font-size:0.75rem; color:var(--muted);">🛡️ ${x.date || "?"}</span>
+            <span style="font-size:0.85rem;">🎓 <strong>${escapeHTML(x.matric || "?")}</strong></span>
+            <span style="font-size:0.75rem; color:var(--muted);">🛡️ ${escapeHTML(x.date || "?")}</span>
           </div>`,
         )
         .join("");
@@ -4336,9 +4366,9 @@ if (mobileMenuBtn && navLinks) {
                   .join(", ")
               : "none";
           return `<div style="background:var(--card-bg); padding:10px 12px; border-radius:8px; margin-bottom:8px; border:1px solid var(--border);">
-            <div style="font-size:0.85rem; font-weight:700; color:var(--navy);">📅 ${r.date || "Unknown date"}</div>
+            <div style="font-size:0.85rem; font-weight:700; color:var(--navy);">📅 ${escapeHTML(r.date || "Unknown date")}</div>
             <div style="font-size:0.8rem; color:var(--text); margin-top:4px;">👥 <strong>${present}</strong> present · ${headcountLine}</div>
-            <div style="font-size:0.78rem; color:var(--muted); margin-top:3px;">🚩 ${flags} flagged · ✒️ auto-marked: ${auto} · 📡 Hotspots: ${hotspots}</div>
+            <div style="font-size:0.78rem; color:var(--muted); margin-top:3px;">🚩 ${flags} flagged · ✒️ auto-marked: ${escapeHTML(auto)} · 📡 Hotspots: ${escapeHTML(hotspots)}</div>
           </div>`;
         })
         .join("");

@@ -87,10 +87,15 @@ async function handleGrantHotspot(req, res, decoded) {
     const targetUid = targetMemberSnap.docs[0].id;
     const rlRef = courseRef.collection("hotspotLog").doc(`${normalizedTarget}_${live.expiresAt}`);
 
+    // Granter identity is read OUTSIDE the transaction — plain reads inside a
+    // tx block give no consistency guarantee across transaction retries.
+    const granterSnap = await db.collection("users").doc(decoded.uid).get();
+    const granterMatric = granterSnap.exists ? norm(granterSnap.data().matric) || "rep" : "rep";
+
     await db.runTransaction(async (tx) => {
       tx.update(courseRef.collection("members").doc(targetUid), { role: "session_assistant" });
       tx.update(courseRef, { assistants: FieldValue.arrayUnion(normalizedTarget) });
-      tx.set(rlRef, { matric: normalizedTarget, grantedByMatric: norm(decoded.token?.matric || ""), sessionExpiresAt: live.expiresAt, grantedAt: FieldValue.serverTimestamp() });
+      tx.set(rlRef, { matric: normalizedTarget, grantedByMatric: granterMatric, sessionExpiresAt: live.expiresAt, grantedAt: FieldValue.serverTimestamp() });
     });
 
     return res.status(200).json({ success: true, message: `${normalizedTarget} granted hotspot access.` });

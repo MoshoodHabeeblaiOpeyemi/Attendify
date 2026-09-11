@@ -34,16 +34,18 @@ async function handleSubmitAttendance(req, res, decoded) {
     const now = Date.now();
     if (live.expiresAt && now > live.expiresAt) return res.status(403).json({ error: "Session expired." });
 
-    const pinAge = now - (live.pinRotationTime || live.createdAt || 0);
+    const secretSnap = await courseRef.collection("session").doc("secret").get();
+    const secret = secretSnap.exists ? secretSnap.data() : {};
+    const pinAge = Date.now() - (secret.pinRotationTime || 0);
     const pinRotationIntervalMs = (live.pinRotationInterval || 10) * 1000;
     const isCurrentPinFresh = pinAge < pinRotationIntervalMs * 2;
 
     const submittedPin = String(pin).trim();
-    const isCurrentPinValid = submittedPin === live.pin && isCurrentPinFresh;
-    const isPreviousPinValid = submittedPin === live.previousPin && pinAge < pinRotationIntervalMs * 3;
+    const isCurrentPinValid = submittedPin === secret.pin && isCurrentPinFresh;
+    const isPreviousPinValid = submittedPin === secret.previousPin && pinAge < pinRotationIntervalMs * 3;
 
     if (!isCurrentPinValid && !isPreviousPinValid) {
-      if (!isCurrentPinFresh && submittedPin === live.pin) {
+      if (!isCurrentPinFresh && submittedPin === secret.pin) {
         return res.status(401).json({ error: "PIN has expired. Use the latest PIN displayed on the projector/hotspot.", pinExpired: true });
       }
       return res.status(401).json({ error: "Invalid PIN." });
@@ -75,8 +77,8 @@ async function handleSubmitAttendance(req, res, decoded) {
 
 async function handleFlagAbsent(req, res, decoded) {
   try {
-    const { courseId, matric: targetMatric, reason } = req.body || {};
-    if (!courseId || !targetMatric) return res.status(400).json({ error: "Course ID and target matric are required." });
+    const { courseId, targetUid, reason } = req.body || {};
+    if (!courseId || !targetUid) return res.status(400).json({ error: "Course ID and target UID are required." });
 
     const courseRef = db.collection("courses").doc(courseId);
     const courseSnap = await courseRef.get();
@@ -93,15 +95,24 @@ async function handleFlagAbsent(req, res, decoded) {
 
     const live = liveSnap.data();
     const sessionExpiresAt = live.expiresAt;
-    const normalizedTarget = norm(targetMatric);
+    const targetMemberSnap = await courseRef.collection("members").doc(targetUid).get();
+    if (!targetMemberSnap.exists) return res.status(404).json({ error: "Student not found in this course." });
+    const normalizedTarget = norm(targetMemberSnap.data().matric);
 
-    const targetMemberSnap = await courseRef.collection("members").where("matric", "==", normalizedTarget).limit(1).get();
-    if (targetMemberSnap.empty) return res.status(404).json({ error: "Student not found in this course." });
 
-    const flagRef = courseRef.collection("absentFlags").doc(`${normalizedTarget}_${sessionExpiresAt}`);
+
+    const flagRef = courseRef.collection("absentFlags").doc(targetUid);
     await db.runTransaction(async (tx) => {
       const existing = await tx.get(flagRef);
-      if (existing.exists && existing.data().status === "flagged") throw new Error("ALREADY_FLAGGED");
+      // Only block if the existing flag is for THIS session (same expiresAt).
+      // A new session gets a fresh flag — week 3 must not poison week 4.
+      if (
+        existing.exists &&
+        existing.data().status === "flagged" &&
+        existing.data().sessionExpiresAt === sessionExpiresAt
+      ) {
+        throw new Error("ALREADY_FLAGGED");
+      }
       tx.set(flagRef, { matric: normalizedTarget, status: "flagged", flaggedBy: decoded.uid, flaggedAt: FieldValue.serverTimestamp(), reason: reason || "", sessionExpiresAt });
     });
 
