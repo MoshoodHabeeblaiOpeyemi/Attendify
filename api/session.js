@@ -84,8 +84,8 @@ async function handleClose(req, res, decoded) {
       flaggedAbsent, autoMarked, hotspots: sessionhotspots,
     });
 
-    const allMembersSnap = await courseRef.collection("members").get();
-    const sessionAssistants = allMembersSnap.docs.filter((d) => d.data().role === "session_assistant");
+    const sessionAssistantsSnap = await courseRef.collection("members").where("role", "==", "session_assistant").get();
+    const sessionAssistants = sessionAssistantsSnap.docs;
 
     const batch = db.batch();
     batch.delete(courseRef.collection("session").doc("live"));

@@ -60,27 +60,24 @@ async function handleSubmitAttendance(req, res, decoded) {
         if (secretSnap.exists && (secretSnap.data().attendees || []).includes(matric)) {
           throw new Error("ALREADY_CHECKED_IN");
         }
+        // 📡 LIVE ATTENDEE PUBLISH — mirror the growing roster into the course
+        // doc's activeSession too. Students cannot read the PIN-bearing
+        // `session/secret` doc (staff-only), so without this their Live
+        // Attendance roster stays frozen. Dotted-path updates fail on a null
+        // `activeSession` (the <1s window between session creation and the
+        // rep's publish) — so guard on a read INSIDE the same transaction;
+        // if there's no map yet, the next check-in publishes everyone.
+        const courseSnap = await tx.get(courseRef);
+        const liveSession = courseSnap.exists ? courseSnap.data().activeSession : null;
+        if (liveSession && typeof liveSession === "object") {
+          tx.update(courseRef, { "activeSession.attendees": FieldValue.arrayUnion(matric) });
+        }
         tx.set(checkinRef, { uid: decoded.uid, matric, checkedInAt: FieldValue.serverTimestamp(), lat: lat || null, lon: lon || null, accuracy: accuracy || null });
         tx.update(secretRef, { attendees: FieldValue.arrayUnion(matric) });
       });
     } catch (txError) {
       if (txError.message === "ALREADY_CHECKED_IN") return res.status(409).json({ error: "You have already checked in for this session." });
       throw txError;
-    }
-
-    // 📡 LIVE ATTENDEE PUBLISH — mirror the growing roster into the course
-    // doc's activeSession too. Students cannot read the PIN-bearing
-    // `session/secret` doc (staff-only), so without this their Live
-    // Attendance roster would stay frozen at [rep] until the rep closes.
-    // Best-effort on purpose: if the rep hasn't published activeSession yet
-    // (a <1s window at session start) we simply skip, and the next check-in
-    // publish will carry everyone.
-    try {
-      await courseRef.update({
-        "activeSession.attendees": FieldValue.arrayUnion(matric),
-      });
-    } catch (pubErr) {
-      console.warn("Live attendee publish skipped:", pubErr.message);
     }
 
     return res.status(200).json({ success: true, message: "Checked in successfully!" });

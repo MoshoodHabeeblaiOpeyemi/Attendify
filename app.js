@@ -2430,7 +2430,7 @@ if (mobileMenuBtn && navLinks) {
     const setupCard = document.getElementById("sessionSetupCard");
     const liveCard = document.getElementById("liveSessionCard");
     if (!setupCard || !liveCard) return;
-    const showLive = !!session || pendingManualCount > 0;
+    const showLive = !!session;
     liveCard.classList.toggle("hidden", !showLive);
     setupCard.classList.toggle("hidden", !!session);
   }
@@ -3190,7 +3190,13 @@ if (mobileMenuBtn && navLinks) {
           f.flaggedAt && f.flaggedAt.toDate
             ? f.flaggedAt.toDate().toLocaleString()
             : "just now";
-        return `<li style="font-size: 0.85rem; padding: 4px 0;">🚩 <strong>${escapeHTML(f.matric)}</strong> flagged absent on ${when} (by ${escapeHTML(f.flaggedByRole || "rep")}, flagged ${f.flagCount || 1}× total)</li>`;
+        // An audit log is intentionally cumulative across sessions — label
+        // each flag so a rep never mistakes a week-1 flag for current.
+        const sessionLabel =
+          f.sessionExpiresAt
+            ? new Date(f.sessionExpiresAt).toLocaleString()
+            : "unknown session";
+        return `<li style="font-size: 0.85rem; padding: 4px 0;">🚩 <strong>${escapeHTML(f.matric)}</strong> flagged absent on ${when} (by ${escapeHTML(f.flaggedByRole || "rep")}, flagged ${f.flagCount || 1}× total) <span style="color: var(--muted); font-size: 0.72rem;">— session ${escapeHTML(sessionLabel)}</span></li>`;
       })
       .join("");
 
@@ -6816,7 +6822,7 @@ if (mobileMenuBtn && navLinks) {
           const msRemaining = deadline - Date.now();
           const initialSeconds = Math.max(
             0,
-            Math.min(60, Math.ceil(msRemaining / 1000)),
+            Math.ceil(msRemaining / 1000),
           );
           bannerText.innerHTML = `Check-in closes in <strong id="countdownTimer" style="font-size: 1.2rem;">${formatCountdown(initialSeconds)}</strong>`;
         }
@@ -6989,10 +6995,7 @@ if (mobileMenuBtn && navLinks) {
       // Check if the attendees are actually the same
       const currentAttendees = Array.from(rosterList.children)
         .slice(1)
-        .map((li) => {
-          const match = li.textContent.match(/\(([^)]+)\)/);
-          return match ? match[1] : null;
-        })
+        .map((li) => li.dataset.matric)
         .filter(Boolean);
 
       if (
@@ -7051,11 +7054,12 @@ if (mobileMenuBtn && navLinks) {
           ? `<span style="background: var(--bg); border: 1px solid var(--border); color: var(--text-muted); padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 4px;">🏷️ ${escapeHTML(groupInfo.name)}</span>`
           : "";
         const flagBtnHTML =
-          (isRep || isAssistant) && !flagRecord
+          (isRep || isAssistant) && !flagRecord && !(memberRecord && memberRecord.pendingRegistration)
             ? `<button data-matric="${escapeHTML(matric)}" class="flag-absent-btn" title="Empty seat linked to this check-in? Flag it — the student gets an emergency alert and cannot be quietly deleted" style="background: transparent; border: 1px solid #dc3545; color: #dc3545; border-radius: 6px; cursor: pointer; font-size: 0.72rem; font-weight: bold; padding: 3px 8px; margin-left: 8px;">🚩 Flag Absent</button>`
             : "";
 
         const li = document.createElement("li");
+        li.dataset.matric = normalizedM;
         li.style.cssText =
           "display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem;";
         li.innerHTML = `<span>🎓 <strong>${attendeeRole === "rep" || isRepAttendee ? "Rep" : "Student"}</strong> · ${escapeHTML(nameForMatric(matric))} ${badgeHTML}${groupBadgeHTML}</span> <span style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">${statusHTML}${flagBtnHTML}</span>`;

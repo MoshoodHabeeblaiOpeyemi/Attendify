@@ -56,6 +56,15 @@ async function handleApproveManual(req, res, decoded) {
     const targetMatric = norm(targetUserSnap.data().matric);
 
     await db.runTransaction(async (tx) => {
+      // Mirror into the course doc's activeSession too, so the newly approved
+      // student shows up on everyone's Live Attendance roster instantly.
+      // Null-guarded like the check-in publish: if no activeSession map has
+      // been published yet, skip — the roster catches up on the next event.
+      const courseTxnSnap = await tx.get(courseRef);
+      const liveSession = courseTxnSnap.exists ? courseTxnSnap.data().activeSession : null;
+      if (liveSession && typeof liveSession === "object") {
+        tx.update(courseRef, { "activeSession.attendees": FieldValue.arrayUnion(targetMatric) });
+      }
       tx.update(secretRef, { attendees: FieldValue.arrayUnion(targetMatric) });
       tx.update(requestRef, { status: "approved", approvedBy: decoded.uid, approvedAt: FieldValue.serverTimestamp() });
     });
