@@ -628,10 +628,24 @@ function applyPortalCourseUpdate(updated) {
               prevSession.pinRotationTime ||
               updated.activeSession.pinRotationTime ||
               Date.now(),
-            attendees:
-              prevSession.attendees && prevSession.attendees.length
-                ? prevSession.attendees
-                : updated.activeSession.attendees || [],
+            // Union, never replace: a fresh snapshot (course doc published
+            // by the rep, or the live-publish from the check-in API) must not
+            // shrink a fuller list we already hold. The roster can only grow
+            // during a session, so a union is both safe and converges.
+            attendees: (() => {
+              const upd =
+                (updated.activeSession.attendees || [])
+                  .map(normalizeMatric)
+                  .filter(Boolean) || [];
+              const prev =
+                (prevSession.attendees || [])
+                  .map(normalizeMatric)
+                  .filter(Boolean) || [];
+              return Array.from(new Set([...prev, ...upd]));
+            })(),
+            qrMode:
+              updated.activeSession.qrMode === true ||
+              prevSession.qrMode === true,
             rejectedFixes: prevSession.rejectedFixes || [],
           }
         : {}),
@@ -6627,6 +6641,10 @@ if (mobileMenuBtn && navLinks) {
       expiresAt: session.expiresAt || null,
       expired: !!session.expired,
       locationMode: session.locationMode || "no_gps",
+      // Keep the QR mode on the public course doc too — losing it on every
+      // course snapshot is what made the "Show QR" / "Hotspots" buttons
+      // flicker until the secret listener re-set it.
+      qrMode: !!session.qrMode,
       hallName: session.hallName || null,
       attendees: session.attendees || [],
       radius: session.radius || 80,
@@ -6809,8 +6827,25 @@ if (mobileMenuBtn && navLinks) {
           !session.expired &&
           getAccurateNow() < session.expiresAt;
         const hotspotsBtnEl = document.getElementById("hotspotsBtn");
-        if (showQrBtnEl) showQrBtnEl.classList.toggle("hidden", !isQrLive);
-        if (hotspotsBtnEl) hotspotsBtnEl.classList.toggle("hidden", !isQrLive);
+        // Only touch the DOM when the visible state actually changed — many
+        // listeners (secret, course doc, checks-in) call renderPortalState
+        // every few seconds during a live session, and blind classList
+        // toggling is what made these buttons appear/disappear in bursts.
+        const qrLiveSig = isQrLive ? "1" : "0";
+        if (
+          showQrBtnEl &&
+          showQrBtnEl.dataset.qrLive !== qrLiveSig
+        ) {
+          showQrBtnEl.dataset.qrLive = qrLiveSig;
+          showQrBtnEl.classList.toggle("hidden", !isQrLive);
+        }
+        if (
+          hotspotsBtnEl &&
+          hotspotsBtnEl.dataset.qrLive !== qrLiveSig
+        ) {
+          hotspotsBtnEl.dataset.qrLive = qrLiveSig;
+          hotspotsBtnEl.classList.toggle("hidden", !isQrLive);
+        }
         // Session live — mode/hall selection is locked in; hide the pickers.
         const modeSectionLive = document.getElementById("attendanceModeSection");
         if (modeSectionLive) modeSectionLive.classList.add("hidden");
@@ -6858,9 +6893,18 @@ if (mobileMenuBtn && navLinks) {
         }
 
         const showQrBtnEl = document.getElementById("showQrBtn");
-        if (showQrBtnEl) showQrBtnEl.classList.add("hidden");
+        // Reset the change-guard signature so the next live session can show
+        // the buttons again (otherwise the "unchanged" shortcut would keep
+        // them permanently hidden after a session closed).
+        if (showQrBtnEl) {
+          showQrBtnEl.dataset.qrLive = "0";
+          showQrBtnEl.classList.add("hidden");
+        }
         const hotspotsBtnEl = document.getElementById("hotspotsBtn");
-        if (hotspotsBtnEl) hotspotsBtnEl.classList.add("hidden");
+        if (hotspotsBtnEl) {
+          hotspotsBtnEl.dataset.qrLive = "0";
+          hotspotsBtnEl.classList.add("hidden");
+        }
         // No live session → bring the setup pickers back.
         const modeSectionIdle = document.getElementById("attendanceModeSection");
         if (modeSectionIdle) modeSectionIdle.classList.remove("hidden");

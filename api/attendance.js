@@ -68,6 +68,21 @@ async function handleSubmitAttendance(req, res, decoded) {
       throw txError;
     }
 
+    // 📡 LIVE ATTENDEE PUBLISH — mirror the growing roster into the course
+    // doc's activeSession too. Students cannot read the PIN-bearing
+    // `session/secret` doc (staff-only), so without this their Live
+    // Attendance roster would stay frozen at [rep] until the rep closes.
+    // Best-effort on purpose: if the rep hasn't published activeSession yet
+    // (a <1s window at session start) we simply skip, and the next check-in
+    // publish will carry everyone.
+    try {
+      await courseRef.update({
+        "activeSession.attendees": FieldValue.arrayUnion(matric),
+      });
+    } catch (pubErr) {
+      console.warn("Live attendee publish skipped:", pubErr.message);
+    }
+
     return res.status(200).json({ success: true, message: "Checked in successfully!" });
   } catch (error) {
     console.error("Submit attendance error:", error);

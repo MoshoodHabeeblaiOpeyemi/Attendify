@@ -10,6 +10,19 @@ try {
 const db = getFirestore();
 const norm = (v) => String(v || "").trim().toUpperCase();
 
+// Firestore document IDs cannot contain "/", but matric numbers often do
+// (e.g. 24/56SV002) — that used to crash the hotspot grant with "Document
+// IDs must not contain '/'". Percent-encode the illegal characters the same
+// way course.js encodes matricRegistry keys, so the mapping is reversible
+// and no two matrics can ever collapse into the same hotspotLog doc.
+const escKeyPart = (v) =>
+  String(v || "")
+    .trim()
+    .toUpperCase()
+    .replace(/%/g, "%25")
+    .replace(/\//g, "%2F")
+    .replace(/\|/g, "%7C");
+
 async function handleApproveManual(req, res, decoded) {
   try {
     const { courseId, targetUid } = req.body || {};
@@ -85,7 +98,9 @@ async function handleGrantHotspot(req, res, decoded) {
     if (targetMemberSnap.empty) return res.status(404).json({ error: "Student not found in this course." });
 
     const targetUid = targetMemberSnap.docs[0].id;
-    const rlRef = courseRef.collection("hotspotLog").doc(`${normalizedTarget}_${live.expiresAt}`);
+    const rlRef = courseRef
+      .collection("hotspotLog")
+      .doc(`${escKeyPart(normalizedTarget)}_${live.expiresAt}`);
 
     // Granter identity is read OUTSIDE the transaction — plain reads inside a
     // tx block give no consistency guarantee across transaction retries.
