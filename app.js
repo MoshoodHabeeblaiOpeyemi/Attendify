@@ -5001,6 +5001,26 @@ if (mobileMenuBtn && navLinks) {
     });
   }
 
+  // 🔄 LIVE REFRESH — keep the (rep-only) picker current while it's open:
+  // a student who checks in mid-selection appears instantly. Checkbox
+  // selections are preserved across the rebuild so the rep never loses a tick.
+  function renderHotspotPickerIfOpen() {
+    const modal = document.getElementById("hotspotPickerModal");
+    const list = document.getElementById("hotspotOptionsList");
+    if (!modal || !list || !modal.classList.contains("show")) return;
+    if (!activeCourse || !auth.currentUser) return;
+    if (activeCourse.repUid !== auth.currentUser.uid) return;
+    const kept = Array.from(
+      list.querySelectorAll("input[data-hotspot-check]:checked"),
+    ).map((el) => normalizeMatric(el.value));
+    renderHotspotOptions();
+    if (kept.length > 0) {
+      list.querySelectorAll("input[data-hotspot-check]").forEach((el) => {
+        if (kept.includes(normalizeMatric(el.value))) el.checked = true;
+      });
+    }
+  }
+
   async function granthotspots() {
     const modal = document.getElementById("hotspotPickerModal");
     const list = document.getElementById("hotspotOptionsList");
@@ -6753,6 +6773,8 @@ if (mobileMenuBtn && navLinks) {
     // included) — transparency is not a staff privilege.
     ensureHotspotLogListener();
     renderHotspotStrip();
+    // Keep the open hotspot picker in sync as more students check in.
+    renderHotspotPickerIfOpen();
 
     // ⚠️ ANCHOR HEALTH: clustered GPS rejections mean the rep's captured
     // anchor is probably off (indoor WiFi-positioning lies). Surface it so
