@@ -442,6 +442,7 @@ let securityOverlayActive = false; // Track if security overlay is showing
 let securityHiddenAt = 0;
 let securityLastEventAt = {};
 let securityEventCount = 0;
+let securityEventCountSession = null;
 
 function isLiveSessionNow() {
   return Boolean(
@@ -457,6 +458,13 @@ function isLiveSessionNow() {
 async function logSecurityEvent(type, extra = {}) {
   try {
     if (!isLiveSessionNow() || !auth.currentUser) return;
+    // Give every session its own 20-event budget — otherwise a student who
+    // screenshot-heavy first session empties the cap for all later ones.
+    const sessionExp = activeCourse.activeSession.expiresAt || 0;
+    if (securityEventCountSession !== sessionExp) {
+      securityEventCountSession = sessionExp;
+      securityEventCount = 0;
+    }
     if (securityEventCount >= 20) return;
     const now = Date.now();
     const last = securityLastEventAt[type] || 0;
@@ -633,14 +641,12 @@ function applyPortalCourseUpdate(updated) {
             // shrink a fuller list we already hold. The roster can only grow
             // during a session, so a union is both safe and converges.
             attendees: (() => {
-              const upd =
-                (updated.activeSession.attendees || [])
-                  .map(normalizeMatric)
-                  .filter(Boolean) || [];
-              const prev =
-                (prevSession.attendees || [])
-                  .map(normalizeMatric)
-                  .filter(Boolean) || [];
+              const upd = (updated.activeSession.attendees || [])
+                .map(normalizeMatric)
+                .filter(Boolean);
+              const prev = (prevSession.attendees || [])
+                .map(normalizeMatric)
+                .filter(Boolean);
               return Array.from(new Set([...prev, ...upd]));
             })(),
             qrMode:
@@ -6978,34 +6984,20 @@ if (mobileMenuBtn && navLinks) {
     );
     const flagsChanged = rosterList.dataset.flagsSignature !== flagsSignature;
 
-    // Optimize: Only rebuild roster if attendees count changed
-    const currentCount = rosterList.children.length;
-    const hasEmptyMessage =
-      currentCount === 1 &&
-      rosterList.children[0].textContent.includes("No check-ins");
+    // ⚡ Change-detection: rebuild the roster ONLY when the attendee list or
+    // the flag set actually changed. Every child of the list is one attendee
+    // row (no header), so compare matric signatures directly — the old
+    // count-based math (+1 / slice(1)) assumed a header row that doesn't
+    // exist and silently never fired, rebuilding on every snapshot.
+    const attendeesSig = JSON.stringify({
+      cid: activeCourse ? activeCourse.id : null,
+      m: attendees.map(normalizeMatric),
+    });
+    const attendeesChanged =
+      rosterList.dataset.attendeesSig !== attendeesSig;
+    if (!flagsChanged && !attendeesChanged) return;
 
-    if (!flagsChanged && attendees.length === 0 && hasEmptyMessage) {
-      return; // Skip rebuild if already showing empty message
-    }
-    if (
-      !flagsChanged &&
-      attendees.length > 0 &&
-      currentCount === attendees.length + 1
-    ) {
-      // Check if the attendees are actually the same
-      const currentAttendees = Array.from(rosterList.children)
-        .slice(1)
-        .map((li) => li.dataset.matric)
-        .filter(Boolean);
-
-      if (
-        JSON.stringify(attendees.map(normalizeMatric)) ===
-        JSON.stringify(currentAttendees.map(normalizeMatric))
-      ) {
-        return; // Skip rebuild if attendees haven't changed
-      }
-    }
-
+    rosterList.dataset.attendeesSig = attendeesSig;
     rosterList.innerHTML = "";
 
     if (attendees.length === 0) {
