@@ -6971,7 +6971,41 @@ if (mobileMenuBtn && navLinks) {
     if (!rosterList) return;
 
     const attendees = session && session.attendees ? session.attendees : [];
-    if (rosterCount) rosterCount.textContent = attendees.length;
+
+    // 👑 THE REP IS ALWAYS PRESENT — the course rep runs the session from the
+    // hall, so they are definitionally inside it. The check-in feed (course doc
+    // `activeSession.attendees`) can lose the rep's own seeded entry through
+    // publish/merge races (students can only read the course doc, never the
+    // PIN-bearing session/secret doc), so the DISPLAY list re-seeds them first
+    // and dedupes. Everyone — rep, assistant, student — sees the rep exactly
+    // once, ahead of the arrival order, and counts agree everywhere.
+    const repMatric = (() => {
+      if (!session || !activeCourse) return null;
+      if (activeCourse.repUid) {
+        const repMember = (activeCourse.members || []).find(
+          (m) => String(m.uid) === String(activeCourse.repUid) && m.matric,
+        );
+        if (repMember) return normalizeMatric(repMember.matric);
+      }
+      // Fallback: in single-device test runs the rep's own account is the
+      // creator — use their matric directly.
+      return currentUser && activeCourse.repUid === currentUser.uid
+        ? normalizeMatric(currentUser.matric)
+        : null;
+    })();
+    const displayAttendees = (() => {
+      const out = [];
+      const seenUnique = new Set();
+      [repMatric, ...attendees.map(normalizeMatric)].forEach((m) => {
+        if (m && !seenUnique.has(m)) {
+          seenUnique.add(m);
+          out.push(m);
+        }
+      });
+      return out;
+    })();
+
+    if (rosterCount) rosterCount.textContent = displayAttendees.length;
     syncHeadcountUI();
 
     // Anti-beef flags change the roster rows too — rebuild whenever the set
@@ -6991,7 +7025,7 @@ if (mobileMenuBtn && navLinks) {
     // exist and silently never fired, rebuilding on every snapshot.
     const attendeesSig = JSON.stringify({
       cid: activeCourse ? activeCourse.id : null,
-      m: attendees.map(normalizeMatric),
+      m: displayAttendees,
     });
     const attendeesChanged =
       rosterList.dataset.attendeesSig !== attendeesSig;
@@ -7000,10 +7034,10 @@ if (mobileMenuBtn && navLinks) {
     rosterList.dataset.attendeesSig = attendeesSig;
     rosterList.innerHTML = "";
 
-    if (attendees.length === 0) {
+    if (displayAttendees.length === 0) {
       rosterList.innerHTML = `<li style="color: var(--muted); font-size: 0.9rem; text-align: center; padding: 10px;">No check-ins recorded yet. ⏳</li>`;
     } else {
-      attendees.forEach((matric) => {
+      displayAttendees.forEach((matric) => {
         const normalizedM = normalizeMatric(matric);
         // Find this attendee's member record to get their actual role
         const memberRecord = (activeCourse.members || []).find(
@@ -7046,7 +7080,10 @@ if (mobileMenuBtn && navLinks) {
           ? `<span style="background: var(--bg); border: 1px solid var(--border); color: var(--text-muted); padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 4px;">🏷️ ${escapeHTML(groupInfo.name)}</span>`
           : "";
         const flagBtnHTML =
-          (isRep || isAssistant) && !flagRecord && !(memberRecord && memberRecord.pendingRegistration)
+          (isRep || isAssistant) &&
+          !flagRecord &&
+          !(isRepAttendee || attendeeRole === "rep") &&
+          !(memberRecord && memberRecord.pendingRegistration)
             ? `<button data-matric="${escapeHTML(matric)}" class="flag-absent-btn" title="Empty seat linked to this check-in? Flag it — the student gets an emergency alert and cannot be quietly deleted" style="background: transparent; border: 1px solid #dc3545; color: #dc3545; border-radius: 6px; cursor: pointer; font-size: 0.72rem; font-weight: bold; padding: 3px 8px; margin-left: 8px;">🚩 Flag Absent</button>`
             : "";
 

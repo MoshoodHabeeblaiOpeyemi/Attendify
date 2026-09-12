@@ -55,6 +55,13 @@ async function handleApproveManual(req, res, decoded) {
     if (!targetUserSnap.exists) return res.status(404).json({ error: "Target user not found." });
     const targetMatric = norm(targetUserSnap.data().matric);
 
+    // Re-seed the rep into the course-doc union too (same convergence as the
+    // scan path — the course doc can lose the rep through publish/merge races).
+    const secretSnap = await secretRef.get();
+    const managerMatric = secretSnap.exists
+      ? secretSnap.data().managerMatric || ""
+      : "";
+
     await db.runTransaction(async (tx) => {
       // Mirror into the course doc's activeSession too, so the newly approved
       // student shows up on everyone's Live Attendance roster instantly.
@@ -63,7 +70,13 @@ async function handleApproveManual(req, res, decoded) {
       const courseTxnSnap = await tx.get(courseRef);
       const liveSession = courseTxnSnap.exists ? courseTxnSnap.data().activeSession : null;
       if (liveSession && typeof liveSession === "object") {
-        tx.update(courseRef, { "activeSession.attendees": FieldValue.arrayUnion(targetMatric) });
+        // Union the approved student AND re-seed the rep so the newly approved
+        // student appears (and the rep stays) on everyone's Live roster.
+        tx.update(courseRef, {
+          "activeSession.attendees": managerMatric
+            ? FieldValue.arrayUnion(targetMatric, managerMatric)
+            : FieldValue.arrayUnion(targetMatric),
+        });
       }
       tx.update(secretRef, { attendees: FieldValue.arrayUnion(targetMatric) });
       tx.update(requestRef, { status: "approved", approvedBy: decoded.uid, approvedAt: FieldValue.serverTimestamp() });

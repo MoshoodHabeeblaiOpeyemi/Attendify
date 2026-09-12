@@ -57,9 +57,14 @@ async function handleSubmitAttendance(req, res, decoded) {
     try {
       await db.runTransaction(async (tx) => {
         const secretSnap = await tx.get(secretRef);
-        if (secretSnap.exists && (secretSnap.data().attendees || []).includes(matric)) {
+        const secretData = secretSnap.exists ? secretSnap.data() : {};
+        if ((secretData.attendees || []).includes(matric)) {
           throw new Error("ALREADY_CHECKED_IN");
         }
+        // The rep is seeded into the secret doc at session creation — carry
+        // them into the course-doc union so the student-facing feed converges
+        // even if a publish/merge race dropped the rep's own entry.
+        const managerMatric = secretData.managerMatric || "";
         // 📡 LIVE ATTENDEE PUBLISH — mirror the growing roster into the course
         // doc's activeSession too. Students cannot read the PIN-bearing
         // `session/secret` doc (staff-only), so without this their Live
@@ -70,7 +75,15 @@ async function handleSubmitAttendance(req, res, decoded) {
         const courseSnap = await tx.get(courseRef);
         const liveSession = courseSnap.exists ? courseSnap.data().activeSession : null;
         if (liveSession && typeof liveSession === "object") {
-          tx.update(courseRef, { "activeSession.attendees": FieldValue.arrayUnion(matric) });
+          // Union the checking-in student AND re-seed the rep (the course doc's
+          // attendees can lose the rep through publish/merge races; students
+          // can only see the course doc). arrayUnion dedupes, so this converges
+          // even if the rep is already present.
+          tx.update(courseRef, {
+            "activeSession.attendees": managerMatric
+              ? FieldValue.arrayUnion(matric, managerMatric)
+              : FieldValue.arrayUnion(matric),
+          });
         }
         tx.set(checkinRef, { uid: decoded.uid, matric, checkedInAt: FieldValue.serverTimestamp(), lat: lat || null, lon: lon || null, accuracy: accuracy || null });
         tx.update(secretRef, { attendees: FieldValue.arrayUnion(matric) });
